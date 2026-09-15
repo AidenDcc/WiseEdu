@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "AI教学云平台（SaaS多租户）前端 Monorepo：超级管理端 + 机构端",
+  "packageManager": "pnpm@11.13.0",
   "scripts": {
     "dev": "pnpm --parallel --filter @aiteach/portal --filter @aiteach/admin --filter @aiteach/tenant dev",
     "dev:portal": "pnpm --filter @aiteach/portal dev",
