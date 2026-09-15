@@ -1,0 +1,15 @@
+{
+  "name": "@aiteach/portal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AI教学云平台演示总入口（静态页，独立部署）",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^6.0.5"
+  }
+}

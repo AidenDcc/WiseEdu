@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI教学云平台 · 演示入口</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --admin: linear-gradient(135deg, #4f6ef7 0%, #7b5cf0 100%);
+      --tenant: linear-gradient(135deg, #00b4a6 0%, #0d9488 100%);
+      --ink: #1a2333;
+      --sub: #6b7688;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+      background: #f4f6fb;
+      color: var(--ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+      background-image:
+        radial-gradient(1200px 500px at 15% -10%, rgba(79, 110, 247, 0.08), transparent 60%),
+        radial-gradient(1000px 500px at 95% 110%, rgba(0, 180, 166, 0.08), transparent 60%);
+    }
+    .wrap { width: 100%; max-width: 920px; }
+    header { text-align: center; margin-bottom: 44px; }
+    .logo {
+      width: 64px; height: 64px; border-radius: 18px; margin: 0 auto 18px;
+      background: linear-gradient(135deg, #4f6ef7, #00b4a6);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 30px; color: #fff;
+      box-shadow: 0 12px 30px rgba(79, 110, 247, 0.28);
+    }
+    h1 { font-size: 30px; font-weight: 700; letter-spacing: 1px; }
+    header p { color: var(--sub); margin-top: 10px; font-size: 15px; }
+    header .tag {
+      display: inline-block; margin-top: 14px; padding: 4px 14px; border-radius: 999px;
+      background: #fff; border: 1px solid #e3e8f2; color: #4f6ef7; font-size: 12.5px; font-weight: 600;
+    }
+    .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    @media (max-width: 720px) { .cards { grid-template-columns: 1fr; } }
+    .card {
+      background: #fff; border-radius: 20px; padding: 34px 32px;
+      border: 1px solid #e9edf5;
+      box-shadow: 0 6px 24px rgba(26, 35, 51, 0.05);
+      text-decoration: none; color: inherit;
+      transition: transform .25s ease, box-shadow .25s ease;
+      display: block;
+    }
+    .card:hover { transform: translateY(-6px); box-shadow: 0 18px 44px rgba(26, 35, 51, 0.12); }
+    .card .icon {
+      width: 52px; height: 52px; border-radius: 14px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 24px; color: #fff; margin-bottom: 18px;
+    }
+    .card.admin .icon { background: var(--admin); box-shadow: 0 8px 20px rgba(79, 110, 247, 0.3); }
+    .card.tenant .icon { background: var(--tenant); box-shadow: 0 8px 20px rgba(0, 180, 166, 0.3); }
+    .card h2 { font-size: 20px; margin-bottom: 8px; }
+    .card .desc { color: var(--sub); font-size: 13.5px; line-height: 1.8; min-height: 66px; }
+    .card .meta {
+      margin-top: 18px; padding-top: 16px; border-top: 1px dashed #e9edf5;
+      display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; color: #93a0b5;
+    }
+    .card .go { font-weight: 700; }
+    .card.admin .go { color: #4f6ef7; }
+    .card.tenant .go { color: #0d9488; }
+    footer { text-align: center; margin-top: 40px; color: #a4aec0; font-size: 12px; line-height: 2; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="logo">☁️</div>
+      <h1>AI 教学云平台</h1>
+      <p>面向学校与培训机构的 SaaS 多租户 AI 教学平台 · 前端演示环境</p>
+      <span class="tag">Vue 3 · TypeScript · Vite · Mock 数据</span>
+    </header>
+
+    <div class="cards">
+      <a class="card admin" href="http://localhost:5173/login" target="_blank" rel="noopener">
+        <div class="icon">🛡️</div>
+        <h2>超级管理端</h2>
+        <div class="desc">
+          平台运营后台：租户入驻审核与套餐管理、全局基础字典、AI 模型与智能体编排、平台资源只读总库、日志审计。<br />
+          <b>平台零业务操作权限，仅配置与只读审计。</b>
+        </div>
+        <div class="meta">
+          <span>演示账号：admin / admin123</span>
+          <span class="go">进入 →</span>
+        </div>
+      </a>
+
+      <a class="card tenant" href="http://localhost:5174/login" target="_blank" rel="noopener">
+        <div class="icon">🏫</div>
+        <h2>机构端</h2>
+        <div class="desc">
+          机构业务后台：题库 / 试卷 / 教辅 AI 全流程管理、AI 出题与拍照识题、双向细目表组卷、知识广场、机构系统管理。
+        </div>
+        <div class="meta">
+          <span>演示账号：orgadmin / org123456</span>
+          <span class="go">进入 →</span>
+        </div>
+      </a>
+    </div>
+
+    <footer>
+      启动方式：项目根目录执行 <b>pnpm dev</b>，默认入口即本页（http://localhost:5172）<br />
+      超级管理端 http://localhost:5173 · 机构端 http://localhost:5174
+    </footer>
+  </div>
+</body>
+</html>

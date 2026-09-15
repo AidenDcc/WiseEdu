@@ -1,0 +1,103 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+
+/** 内联线性图标集（24x24，stroke 描边，风格统一、零依赖） */
+const ICON_PATHS: Record<string, string[]> = {
+  dashboard: ['M3 11 12 3l9 8', 'M5 9.8V21h14V9.8'],
+  grid: ['M3 3h8v8H3z', 'M13 3h8v8h-8z', 'M3 13h8v8H3z', 'M13 13h8v8h-8z'],
+  building: [
+    'M4 21V5a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v16',
+    'M15 9h4a1 1 0 0 1 1 1v11',
+    'M3 21h18',
+    'M8 8h3',
+    'M8 12h3',
+    'M8 16h3',
+  ],
+  book: [
+    'M12 5c-2-1.5-5-2-8-2v15c3 0 6 .5 8 2 2-1.5 5-2 8-2V3c-3 0-6 .5-8 2z',
+    'M12 5v17',
+  ],
+  cpu: [
+    'M6 6h12v12H6z',
+    'M9.5 9.5h5v5h-5z',
+    'M9 3v3',
+    'M15 3v3',
+    'M9 18v3',
+    'M15 18v3',
+    'M3 9h3',
+    'M3 15h3',
+    'M18 9h3',
+    'M18 15h3',
+  ],
+  shield: ['M12 3l8 3v6c0 4.5-3.2 7.4-8 9-4.8-1.6-8-4.5-8-9V6z'],
+  sliders: ['M4 7h9', 'M17 7h3', 'M4 17h4', 'M12 17h8', 'M15 4.6a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8z', 'M10 14.6a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8z'],
+  chart: ['M4 20h16', 'M7 16v-5', 'M12 16V7', 'M17 16v-8'],
+  users: [
+    'M12.5 4.6a3.5 3.5 0 1 0 0 6.8 3.5 3.5 0 0 0 0-6.8z',
+    'M5 12a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
+    'M8 19c-3.3 0-5.5 1.9-5.5 4.5',
+    'M8 19c3.3 0 5.5 1.9 5.5 4.5',
+    'M15.5 14c3 0 5 1.8 5 4.3',
+  ],
+  file: ['M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z', 'M14 3v5h5'],
+  upload: ['M12 16V4', 'M7 9l5-5 5 5', 'M4 20h16'],
+  download: ['M12 4v12', 'M7 11l5 5 5-5', 'M4 20h16'],
+  edit: ['M4 20h4L20 8l-4-4L4 16z', 'M13 7l4 4'],
+  sparkles: [
+    'M12 3l1.8 4.7 4.7 1.8-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z',
+    'M19 15l.7 1.8 1.8.7-1.8.7L19 20l-.7-1.8-1.8-.7 1.8-.7z',
+  ],
+  branch: [
+    'M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+    'M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+    'M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+    'M6 9v6',
+    'M18 9v1c0 3.5-3 5-6.5 5',
+  ],
+  bell: ['M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6', 'M10.5 20a2 2 0 0 0 3 0'],
+  search: ['M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z', 'M21 21l-4.3-4.3'],
+  logout: ['M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4', 'M16 17l5-5-5-5', 'M21 12H9'],
+  'chevron-down': ['M6 9l6 6 6-6'],
+  'chevron-right': ['M9 6l6 6-6 6'],
+  clock: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z', 'M12 7v5l3.5 2'],
+  warning: ['M12 3 2 21h20z', 'M12 10v4', 'M12 17.3h.01'],
+  check: ['M4 12.5l5 5L20 6.5'],
+  close: ['M6 6l12 12', 'M18 6 6 18'],
+  'arrow-right': ['M4 12h16', 'M13 5l7 7-7 7'],
+  'trend-up': ['M3 17l6-6 4 4 8-8', 'M15 7h6v6'],
+  message: ['M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-5 4V6a1 1 0 0 1 1-1z'],
+  star: ['M12 3l2.7 5.8 6.3.7-4.7 4.3 1.3 6.2-5.6-3.2-5.6 3.2 1.3-6.2L3 9.5l6.3-.7z'],
+  folder: ['M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z'],
+  formula: ['M18 5H8l5 7-5 7h10', 'M18 5h2'],
+  image: ['M3 5h18v14H3z', 'M8.5 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4z', 'M4 17l5-5 4 4 3-3 4 4'],
+  smartphone: ['M7 2h10a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z', 'M11 18h2'],
+  menu: ['M4 6h16', 'M4 12h16', 'M4 18h16'],
+  plus: ['M12 5v14', 'M5 12h14'],
+  'chevron-left': ['M15 6l-6 6 6 6'],
+  phone: ['M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z'],
+  mail: ['M3 6h18v12H3z', 'M3 7l9 6 9-6'],
+}
+
+const props = withDefaults(
+  defineProps<{ name: string; size?: number }>(),
+  { size: 18 },
+)
+
+const paths = computed(() => ICON_PATHS[props.name] ?? ICON_PATHS.grid)
+</script>
+
+<template>
+  <svg
+    :width="size"
+    :height="size"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.7"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  >
+    <path v-for="(d, index) in paths" :key="index" :d="d" />
+  </svg>
+</template>

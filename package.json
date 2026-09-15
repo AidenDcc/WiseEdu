@@ -1,0 +1,22 @@
+{
+  "name": "ai-teaching-cloud",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI教学云平台（SaaS多租户）前端 Monorepo：超级管理端 + 机构端",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @aiteach/portal --filter @aiteach/admin --filter @aiteach/tenant dev",
+    "dev:portal": "pnpm --filter @aiteach/portal dev",
+    "dev:admin": "pnpm --filter @aiteach/admin dev",
+    "dev:tenant": "pnpm --filter @aiteach/tenant dev",
+    "build": "pnpm -r build",
+    "build:portal": "pnpm --filter @aiteach/portal build",
+    "build:admin": "pnpm --filter @aiteach/admin build",
+    "build:tenant": "pnpm --filter @aiteach/tenant build",
+    "typecheck": "pnpm -r typecheck",
+    "preview:admin": "pnpm --filter @aiteach/admin preview",
+    "preview:tenant": "pnpm --filter @aiteach/tenant preview"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
