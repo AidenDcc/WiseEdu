@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppIcon, PAPER_STATUS_TEXT, showToast } from '@aiteach/shared'
+import { AppIcon, PAPER_STATUS_TEXT, RichTextViewer, showToast } from '@aiteach/shared'
 import type { OrgPaper, OrgQuestion } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppDrawer from '@/components/ui/AppDrawer.vue'
@@ -281,9 +281,15 @@ onMounted(load)
       <div v-for="section in preview.sections" :key="section.id" class="pv-section">
         <h4>{{ section.title }}（{{ section.questions.reduce((s, q) => s + q.score, 0) }} 分）</h4>
         <div v-for="(q, qi) in section.questions" :key="qi" class="pv-q">
-          <p class="pv-q-stem">{{ qi + 1 }}.（{{ q.score }} 分）{{ questionOf(q.questionId)?.stem ?? `题目 #${q.questionId}` }}</p>
+          <p class="pv-q-stem">
+            {{ qi + 1 }}.（{{ q.score }} 分）
+            <RichTextViewer v-if="questionOf(q.questionId)" :content="questionOf(q.questionId)!.stem" tag="span" />
+            <template v-else>题目 #{{ q.questionId }}</template>
+          </p>
           <ul v-if="questionOf(q.questionId)?.options.length" class="pv-q-opts">
-            <li v-for="(opt, oi) in questionOf(q.questionId)!.options" :key="oi">{{ 'ABCDEF'[oi] }}. {{ opt }}</li>
+            <li v-for="(opt, oi) in questionOf(q.questionId)!.options" :key="oi">
+              {{ 'ABCDEF'[oi] }}. <RichTextViewer :content="opt" tag="span" />
+            </li>
           </ul>
         </div>
       </div>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, PAPER_STATUS_TEXT, showToast } from '@aiteach/shared'
+import { AppIcon, PAPER_STATUS_TEXT, RichTextViewer, showToast } from '@aiteach/shared'
 import type { OrgPaper, OrgQuestion } from '@aiteach/shared'
 import { fetchPapers, fetchQuestions, reviewPaper } from '@/api/org'
 
@@ -98,14 +98,18 @@ onMounted(load)
         <div v-for="section in active.sections" :key="section.id" class="pv-section">
           <h4>{{ section.title }}（{{ section.questions.reduce((s, q) => s + q.score, 0) }} 分）</h4>
           <div v-for="(entry, qi) in section.questions" :key="qi" class="pv-q">
-            <p class="pv-q-stem">{{ qi + 1 }}.（{{ entry.score }} 分）{{ questionOf(entry.questionId)?.stem ?? `题目 #${entry.questionId}` }}</p>
+            <p class="pv-q-stem">
+              {{ qi + 1 }}.（{{ entry.score }} 分）
+              <RichTextViewer v-if="questionOf(entry.questionId)" :content="questionOf(entry.questionId)!.stem" tag="span" />
+              <template v-else>题目 #{{ entry.questionId }}</template>
+            </p>
             <ul v-if="questionOf(entry.questionId)?.options.length" class="pv-q-opts">
               <li
                 v-for="(opt, oi) in questionOf(entry.questionId)!.options"
                 :key="oi"
                 :class="{ right: questionOf(entry.questionId)!.answer.includes('ABCDEF'[oi]) }"
               >
-                {{ 'ABCDEF'[oi] }}. {{ opt }}
+                {{ 'ABCDEF'[oi] }}. <RichTextViewer :content="opt" tag="span" />
               </li>
             </ul>
             <p v-if="questionOf(entry.questionId)" class="pv-q-ans">

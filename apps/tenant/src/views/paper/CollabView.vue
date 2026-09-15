@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppIcon, showToast } from '@aiteach/shared'
+import { AppIcon, RichTextViewer, showToast, toPlainText, truncateRich } from '@aiteach/shared'
 import type { OrgQuestion } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppDrawer from '@/components/ui/AppDrawer.vue'
@@ -82,7 +82,7 @@ const pool = computed(() =>
       row.status === 'approved' &&
       (!poolFilter.type || row.type === poolFilter.type) &&
       (!poolFilter.difficulty || row.difficulty === poolFilter.difficulty) &&
-      (!poolFilter.keyword || row.stem.includes(poolFilter.keyword)),
+      (!poolFilter.keyword || toPlainText(row.stem).includes(poolFilter.keyword)),
   ),
 )
 /** 已在卷中的题目不可重复加入 */
@@ -95,7 +95,7 @@ function addQuestion(row: OrgQuestion) {
   }
   const target = draft.sections[draft.sections.length - 1]
   target.questions.push({ questionId: row.id, score: row.type === '解答题' ? 12 : 5 })
-  logAction(`将「${row.stem.slice(0, 14)}…」加入${target.title}`)
+  logAction(`将「${truncateRich(row.stem, 14)}…」加入${target.title}`)
 }
 
 function removeQuestion(si: number, qi: number) {
@@ -261,7 +261,7 @@ onMounted(load)
             <span class="tag tag-gray">{{ row.difficulty }}</span>
             <span class="tag tag-blue">{{ row.useCount }} 次组卷</span>
           </div>
-          <p class="pc-stem">{{ row.stem.slice(0, 64) }}</p>
+          <p class="pc-stem">{{ truncateRich(row.stem, 64) }}</p>
           <div class="pc-foot">
             <span class="f-hint">{{ row.knowledge[0] ?? '' }}</span>
             <button class="mini-btn" :disabled="inPaperIds.has(row.id)" @click="addQuestion(row)">
@@ -324,7 +324,14 @@ onMounted(load)
         <p v-if="section.questions.length === 0" class="f-hint" style="padding: 8px 0">从左侧选题池加入题目</p>
         <div v-for="(entry, qi) in section.questions" :key="`${entry.questionId}-${qi}`" class="q-row">
           <span class="q-no">{{ qi + 1 }}</span>
-          <p class="q-stem">{{ questionOf(entry.questionId)?.stem.slice(0, 70) ?? `题目 #${entry.questionId}` }}</p>
+          <p class="q-stem">
+            <RichTextViewer
+              v-if="questionOf(entry.questionId)"
+              :content="questionOf(entry.questionId)!.stem"
+              tag="span"
+            />
+            <template v-else>题目 #{{ entry.questionId }}</template>
+          </p>
           <div class="q-ops">
             <input v-model.number="entry.score" type="number" min="0.5" max="100" step="0.5" class="f-input score-input" />
             <span class="f-hint">分</span>

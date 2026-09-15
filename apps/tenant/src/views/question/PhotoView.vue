@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { AppIcon, showToast } from '@aiteach/shared'
 import type { PhotoTask } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
+import RichTextEditor from '@/components/ui/RichTextEditor.vue'
 import { decidePhoto, fetchPhotoTasks, recognizePhoto, uploadPhotos } from '@/api/org'
 
 const tasks = ref<PhotoTask[]>([])
@@ -83,7 +84,8 @@ function selectResult(id: string) {
 
 async function decide(decision: 'import' | 'draft' | 'drop') {
   if (!activeTask.value || !activeResult.value) return
-  const updated = await decidePhoto(activeTask.value.id, activeResult.value.id, decision)
+  /* 三处「可修正」输入框的改动必须随决策一起提交，否则会被静默丢弃 */
+  const updated = await decidePhoto(activeTask.value.id, activeResult.value.id, decision, { ...editDraft.value })
   const pos = tasks.value.findIndex((task) => task.id === updated.id)
   if (pos >= 0) tasks.value[pos] = updated
   showToast(decision === 'import' ? '已入题库（待人工终审）' : decision === 'draft' ? '已存入题库草稿' : '已丢弃', 'success')
@@ -101,7 +103,9 @@ async function confirmAll() {
   if (!activeTask.value) return
   if (!window.confirm('未确认的结果将按「存草稿」处理，确认全部完成？')) return
   for (const row of activeTask.value.results.filter((item) => !item.decided)) {
-    const updated = await decidePhoto(activeTask.value.id, row.id, 'draft')
+    /* 当前正在校对的那条带上改动，其余未确认项本就没人改过 */
+    const edit = row.id === activeResultId.value ? { ...editDraft.value } : undefined
+    const updated = await decidePhoto(activeTask.value.id, row.id, 'draft', edit)
     const pos = tasks.value.findIndex((task) => task.id === updated.id)
     if (pos >= 0) tasks.value[pos] = updated
   }
@@ -233,11 +237,11 @@ onMounted(load)
           </div>
           <template v-if="!activeResult.decided">
             <label class="f-label">题干（可修正）</label>
-            <textarea v-model="editDraft.stem" class="f-textarea" rows="3" />
+            <RichTextEditor v-model="editDraft.stem" :min-height="90" placeholder="OCR 识别结果，可直接修正" />
             <label class="f-label" style="margin-top: 10px">答案（可修正）</label>
             <input v-model="editDraft.answer" class="f-input" />
             <label class="f-label" style="margin-top: 10px">解析</label>
-            <textarea v-model="editDraft.analysis" class="f-textarea" rows="2" />
+            <RichTextEditor v-model="editDraft.analysis" :min-height="80" placeholder="解析（选填）" />
           </template>
           <template v-else>
             <p class="f-hint" style="margin: 20px 0">该结果已处理，点击上方其他编号继续</p>

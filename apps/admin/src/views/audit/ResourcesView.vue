@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { AppIcon, showToast } from '@aiteach/shared'
+import { AppIcon, RichTextViewer, showToast, toPlainText } from '@aiteach/shared'
 import type { AuditRecord, PublicPaper, PublicQuestion } from '@aiteach/shared'
 import AppDrawer from '@/components/ui/AppDrawer.vue'
 import { fetchAuditRecords, fetchPublicPapers, fetchPublicQuestions } from '@/api/platform'
@@ -38,7 +38,7 @@ function filteredQuestions() {
   return questions.value.filter(
     (q) =>
       (!qSubject.value || q.subject === qSubject.value) &&
-      (!qKeyword.value.trim() || q.stem.includes(qKeyword.value.trim())),
+      (!qKeyword.value.trim() || toPlainText(q.stem).includes(qKeyword.value.trim())),
   )
 }
 
@@ -118,7 +118,7 @@ onMounted(load)
             </tr>
             <template v-else>
               <tr v-for="q in filteredQuestions()" :key="q.id">
-                <td class="stem-cell cell-strong">{{ q.stem }}</td>
+                <td class="stem-cell cell-strong"><RichTextViewer :content="q.stem" tag="span" /></td>
                 <td>{{ q.subject }}</td>
                 <td>{{ q.type }}</td>
                 <td>{{ q.difficulty }}</td>
@@ -247,7 +247,7 @@ onMounted(load)
     <!-- 题目详情 -->
     <AppDrawer
       v-if="questionOpen"
-      :title="questionOpen.stem"
+      :title="toPlainText(questionOpen.stem)"
       subtitle="公开题库 · 只读详情（含答案与解析，仅平台审计用途）"
       @close="questionOpen = null"
     >
@@ -261,19 +261,19 @@ onMounted(load)
       </div>
 
       <h4 class="section-title">题干</h4>
-      <p class="q-text">{{ questionOpen.stem }}</p>
+      <RichTextViewer class="q-text" :content="questionOpen.stem" />
 
       <template v-if="questionOpen.options.length > 0">
         <h4 class="section-title">选项</h4>
         <ul class="option-list">
-          <li v-for="(opt, i) in questionOpen.options" :key="i">{{ 'ABCD'[i] }}. {{ opt }}</li>
+          <li v-for="(opt, i) in questionOpen.options" :key="i">{{ 'ABCD'[i] }}. <RichTextViewer :content="opt" tag="span" /></li>
         </ul>
       </template>
 
       <h4 class="section-title">答案</h4>
       <p class="q-text answer">{{ questionOpen.answer }}</p>
       <h4 class="section-title">解析</h4>
-      <p class="q-text">{{ questionOpen.analysis }}</p>
+      <RichTextViewer class="q-text" :content="questionOpen.analysis" />
 
       <template v-if="questionOpen.report">
         <h4 class="section-title">AI 校验报告</h4>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppIcon, showToast } from '@aiteach/shared'
+import { AppIcon, RichTextViewer, showToast, truncateRich } from '@aiteach/shared'
 import type { GeneratedQuestion, OrgQuestion } from '@aiteach/shared'
 import { adoptGenerated, fetchQuestions, fetchQuota, generateQuestions, variantOf } from '@/api/org'
 import { useBaseData } from '@/composables/useBaseData'
@@ -171,7 +171,7 @@ onMounted(load)
     <div v-if="variantSource" class="panel variant-bar">
       <span class="tag tag-blue">AI 变式</span>
       <span class="vs-label">母题 #{{ variantSource.id }}</span>
-      <span class="vs-stem">{{ variantSource.stem.slice(0, 60) }}…</span>
+      <span class="vs-stem">{{ truncateRich(variantSource.stem, 60) }}…</span>
       <span class="f-hint" style="margin-left: auto">变式题自动挂接「变式关联」，策略可多选</span>
     </div>
 
@@ -293,14 +293,14 @@ onMounted(load)
             <span v-for="k in item.knowledge" :key="k" class="tag tag-gray">{{ k }}</span>
             <span v-if="adoptedIds.has(i)" class="tag tag-green">已采纳</span>
           </div>
-          <p class="rc-stem">{{ item.stem }}</p>
+          <RichTextViewer class="rc-stem" :content="item.stem" />
           <ul v-if="item.options.length" class="rc-options">
             <li v-for="(opt, oi) in item.options" :key="oi" :class="{ right: item.answer.includes('ABCDEF'[oi]) }">
-              {{ 'ABCDEF'[oi] }}. {{ opt }}
+              {{ 'ABCDEF'[oi] }}. <RichTextViewer :content="opt" tag="span" />
             </li>
           </ul>
           <div class="rc-answer"><span class="tag tag-green">答案</span>{{ item.answer }}</div>
-          <p class="rc-analysis"><b>解析：</b>{{ item.analysis }}</p>
+          <p class="rc-analysis"><b>解析：</b><RichTextViewer :content="item.analysis" tag="span" /></p>
           <div class="rc-ops">
             <template v-if="!adoptedIds.has(i)">
               <button class="mini-btn success" @click="adopt(item, i)">采纳</button>

@@ -110,8 +110,14 @@ export function uploadPhotos(names: string[]) {
 export function recognizePhoto(id: string) {
   return request<PhotoTask>('/tenant/photo/recognize', { method: 'POST', data: { id } })
 }
-export function decidePhoto(taskId: string, resultId: string, decision: 'import' | 'draft' | 'drop') {
-  return request<PhotoTask>('/tenant/photo/decide', { method: 'POST', data: { taskId, resultId, decision } })
+export function decidePhoto(
+  taskId: string,
+  resultId: string,
+  decision: 'import' | 'draft' | 'drop',
+  /** 校对区改过的文本，随决策一并提交（此前未回传，改动被静默丢弃） */
+  edit?: { stem?: string; answer?: string; analysis?: string },
+) {
+  return request<PhotoTask>('/tenant/photo/decide', { method: 'POST', data: { taskId, resultId, decision, edit } })
 }
 
 /* ===== 试卷 ===== */
@@ -161,7 +167,16 @@ export function deleteMaterial(id: number) {
 export function fetchMedia() {
   return request<OrgMedia[]>('/tenant/media')
 }
-export function uploadMedia(data: { name: string; kind: OrgMedia['kind']; subject: string; knowledge: string[] }) {
+export function uploadMedia(data: {
+  name: string
+  kind: OrgMedia['kind']
+  subject: string
+  knowledge: string[]
+  /** 题目正文插图走这里：携带字节，由 mock 媒体库留存并返回可引用 URL */
+  dataUrl?: string
+  mime?: string
+  sizeMb?: number
+}) {
   return request<OrgMedia>('/tenant/media/upload', { method: 'POST', data })
 }
 export function linkMedia(id: number, targets: string[]) {

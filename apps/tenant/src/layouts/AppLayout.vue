@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppIcon, showToast, hueColor, resolveApiMode, getAppConfig } from '@aiteach/shared'
+import { AppIcon, showToast, hueColor, resolveApiMode, getAppConfig, toPlainText, truncateRich } from '@aiteach/shared'
 import type { OrgPaper, OrgQuestion } from '@aiteach/shared'
 import type { MenuItem } from '@/menu'
 import { flattenMenus, footerMenus, menus } from '@/menu'
@@ -137,7 +137,7 @@ const menuHits = computed(() => {
 const questionHits = computed(() => {
   const kw = keyword.value.trim()
   if (!kw) return [] as OrgQuestion[]
-  return questionPool.value.filter((row) => row.stem.includes(kw)).slice(0, 4)
+  return questionPool.value.filter((row) => toPlainText(row.stem).includes(kw)).slice(0, 4)
 })
 const paperHits = computed(() => {
   const kw = keyword.value.trim()
@@ -329,7 +329,7 @@ onMounted(refreshUnread)
                     <p class="search-group">题目</p>
                     <button v-for="row in questionHits" :key="row.id" class="search-item" type="button" @click="goQuestion(row)">
                       <AppIcon name="edit" :size="14" />
-                      {{ row.stem.slice(0, 40) }}…
+                      {{ truncateRich(row.stem, 40) }}…
                       <span class="search-path">#{{ row.id }} · {{ row.subject }}</span>
                     </button>
                   </template>

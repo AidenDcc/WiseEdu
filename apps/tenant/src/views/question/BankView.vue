@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppIcon, showToast, ApiError, QUESTION_STATUS_TEXT } from '@aiteach/shared'
+import { AppIcon, RichTextViewer, showToast, ApiError, QUESTION_STATUS_TEXT, hasImage, toPlainText, truncateRich } from '@aiteach/shared'
 import type { OrgKnowledgeNode, OrgQuestion, TextbookOption } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppDrawer from '@/components/ui/AppDrawer.vue'
@@ -287,7 +287,7 @@ const filtered = computed(() => {
       const selected = filterSel[def.key]
       if (selected.length > 0 && !selected.includes(FIELD_OF[def.key](row))) return false
     }
-    if (kw && !row.stem.includes(kw) && !String(row.id).includes(kw)) return false
+    if (kw && !toPlainText(row.stem).includes(kw) && !String(row.id).includes(kw)) return false
     return true
   })
 })
@@ -298,6 +298,13 @@ const paged = computed(() => filtered.value.slice((page.value - 1) * pageSize.va
 watch([activeTags, () => JSON.stringify(filterSel), keyword, viewMode], () => {
   page.value = 1
 })
+
+/** 图形占位框：题干提到配图、且题内确实没有嵌入图片时才显示 */
+function needsFigure(row: OrgQuestion): boolean {
+  if (hasImage(row.stem)) return false
+  const text = toPlainText(row.stem)
+  return text.includes('如图') || text.includes('图）')
+}
 
 /** 选项答案字母（选择题高亮正确项） */
 function answerLetters(row: OrgQuestion): string[] {
@@ -623,7 +630,7 @@ onBeforeUnmount(() => {
                 <tr v-for="(row, i) in paged" :key="row.id">
                   <td>{{ (page - 1) * pageSize + i + 1 }}</td>
                   <td class="cell-strong">#{{ row.id }}</td>
-                  <td class="stem-cell" @click="preview = row">{{ row.stem }}</td>
+                  <td class="stem-cell" @click="preview = row"><RichTextViewer :content="row.stem" tag="span" /></td>
                   <td>{{ row.type }}</td>
                   <td>{{ row.difficulty }}</td>
                   <td class="knowledge-cell" :title="row.knowledge.join('、')">{{ row.knowledge.join('、') }}</td>
@@ -662,9 +669,9 @@ onBeforeUnmount(() => {
               <span class="qc-kp">{{ row.knowledge.join('、') }}</span>
               <span class="qc-right">考试 {{ row.useCount }} 次 · {{ row.updatedAt.slice(5, 16) }}</span>
             </div>
-            <p class="qc-stem" @click="preview = row">{{ row.stem }}</p>
-            <!-- 配图（含图形描述的题展示图位） -->
-            <div v-if="row.stem.includes('如图') || row.stem.includes('图）')" class="qc-figure">
+            <RichTextViewer class="qc-stem" :content="row.stem" @click="preview = row" />
+            <!-- 配图（含图形描述的题展示图位；题内已嵌图的不再占位） -->
+            <div v-if="needsFigure(row)" class="qc-figure">
               <AppIcon name="image" :size="26" />
               <span>题目配图（演示占位）</span>
             </div>
@@ -675,12 +682,12 @@ onBeforeUnmount(() => {
                 :class="{ right: answerLetters(row).includes('ABCDEF'[i]) }"
               >
                 <span class="opt-letter">{{ 'ABCDEF'[i] }}</span>
-                <span>{{ opt }}</span>
+                <RichTextViewer :content="opt" tag="span" />
               </li>
             </ul>
             <div v-if="analysisOpen.includes(row.id)" class="qc-answer">
               <p><b>答案：</b><span class="qc-answer-text">{{ row.answer || '—' }}</span></p>
-              <p><b>解析：</b>{{ row.analysis || '—' }}</p>
+              <p><b>解析：</b><RichTextViewer :content="row.analysis" tag="span" empty="—" /></p>
             </div>
             <div v-if="basket.includes(row.id) || row.status === 'rejected'" class="qc-flags">
               <span v-if="basket.includes(row.id)" class="tag tag-green">已加入组卷库</span>
@@ -721,19 +728,19 @@ onBeforeUnmount(() => {
         <div class="detail-item"><div class="d-label">考试次数</div><div class="d-value">{{ preview.useCount }} 次</div></div>
       </div>
       <h4 class="section-title">题干</h4>
-      <p class="q-text">{{ preview.stem }}</p>
+      <RichTextViewer class="q-text" :content="preview.stem" empty="—" />
       <template v-if="preview.options.length > 0">
         <h4 class="section-title">选项</h4>
         <ul class="option-list">
           <li v-for="(opt, i) in preview.options" :key="i" :class="{ right: answerLetters(preview).includes('ABCDEF'[i]) }">
-            {{ 'ABCDEF'[i] }}. {{ opt }}
+            {{ 'ABCDEF'[i] }}. <RichTextViewer :content="opt" tag="span" />
           </li>
         </ul>
       </template>
       <h4 class="section-title">答案</h4>
       <p class="q-text answer">{{ preview.answer || '—' }}</p>
       <h4 class="section-title">解析</h4>
-      <p class="q-text">{{ preview.analysis || '—' }}</p>
+      <RichTextViewer class="q-text" :content="preview.analysis" empty="—" />
       <template v-if="preview.variantOf != null">
         <h4 class="section-title">变式关联</h4>
         <p class="q-text">本题为题目 #{{ preview.variantOf }} 的变式，原题-变式关联永久存档，可互跳。</p>
@@ -746,7 +753,7 @@ onBeforeUnmount(() => {
 
     <!-- 变式入口 -->
     <AppModal v-if="variantOpen" :title="`变式 · 题目 #${variantOpen.id}`" @close="variantOpen = null">
-      <p class="f-hint" style="margin-bottom: 12px">{{ variantOpen.stem.slice(0, 60) }}…</p>
+      <p class="f-hint" style="margin-bottom: 12px">{{ truncateRich(variantOpen.stem, 60) }}…</p>
       <button class="variant-entry" type="button" @click="onManualVariant">
         <span class="ve-title">手动变式</span>
         <span class="ve-desc">复制原题全部内容进入录题页，人工修改后保存，系统永久建立原题-变式关联</span>

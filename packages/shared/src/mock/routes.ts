@@ -66,7 +66,19 @@ const orgRoutes: MockRoute[] = [
   { method: 'GET', path: '/tenant/photo/tasks', handler: () => guard(() => org.photoTasks) },
   { method: 'POST', path: '/tenant/photo/upload', handler: ({ body }) => guard(() => org.uploadPhotos(body.names as string[])) },
   { method: 'POST', path: '/tenant/photo/recognize', handler: ({ body }) => guard(() => org.recognizePhoto(String(body.id))) },
-  { method: 'POST', path: '/tenant/photo/decide', handler: ({ body }) => guard(() => org.decidePhotoResult(String(body.taskId), String(body.resultId), body.decision as 'import' | 'draft' | 'drop')) },
+  {
+    method: 'POST',
+    path: '/tenant/photo/decide',
+    handler: ({ body }) =>
+      guard(() =>
+        org.decidePhotoResult(
+          String(body.taskId),
+          String(body.resultId),
+          body.decision as 'import' | 'draft' | 'drop',
+          body.edit as { stem?: string; answer?: string; analysis?: string } | undefined,
+        ),
+      ),
+  },
 
   // 试卷
   { method: 'GET', path: '/tenant/papers', handler: () => guard(() => org.papers) },

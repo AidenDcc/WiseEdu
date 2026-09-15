@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, QUESTION_STATUS_TEXT, showToast } from '@aiteach/shared'
+import { AppIcon, QUESTION_STATUS_TEXT, RichTextViewer, showToast, truncateRich } from '@aiteach/shared'
 import type { OrgQuestion } from '@aiteach/shared'
 import { fetchQuestions, reviewQuestion } from '@/api/org'
 
@@ -79,7 +79,7 @@ onMounted(load)
             <span class="tag tag-gray">{{ row.type }}</span>
             <span class="tag" :class="row.source === '拍照识别' ? 'tag-orange' : 'tag-gray'">{{ row.source }}</span>
           </span>
-          <span class="qi-stem">{{ row.stem.slice(0, 46) }}…</span>
+          <span class="qi-stem">{{ truncateRich(row.stem, 46) }}…</span>
           <span class="qi-meta">{{ row.owner }} · {{ row.subject }} {{ row.grade }}</span>
         </button>
       </div>
@@ -100,14 +100,14 @@ onMounted(load)
           <span class="tag tag-gray">{{ active.difficulty }}</span>
           <span v-for="k in active.knowledge" :key="k" class="tag tag-gray">{{ k }}</span>
         </div>
-        <p class="pv-stem">{{ active.stem }}</p>
+        <RichTextViewer class="pv-stem" :content="active.stem" />
         <ul v-if="active.options.length" class="pv-options">
           <li v-for="(opt, i) in active.options" :key="i" :class="{ right: active.answer.includes('ABCDEF'[i]) }">
-            {{ 'ABCDEF'[i] }}. {{ opt }}
+            {{ 'ABCDEF'[i] }}. <RichTextViewer :content="opt" tag="span" />
           </li>
         </ul>
         <div class="pv-answer"><span class="tag tag-green">答案</span>{{ active.answer }}</div>
-        <p class="pv-analysis"><b>解析：</b>{{ active.analysis }}</p>
+        <p class="pv-analysis"><b>解析：</b><RichTextViewer :content="active.analysis" tag="span" /></p>
         <div v-if="active.variantOf" class="pv-variant">
           <AppIcon name="branch" :size="13" /> 变式自母题 #{{ active.variantOf }}
         </div>

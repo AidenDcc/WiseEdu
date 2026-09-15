@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { AppIcon, MATERIAL_STATUS_TEXT, showToast } from '@aiteach/shared'
+import { AppIcon, MATERIAL_STATUS_TEXT, RichTextViewer, showToast } from '@aiteach/shared'
 import type { OrgMaterial } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import { decideExample, deleteMaterial, fetchMaterials, finishMaterial, reRecognizeMaterial, uploadMaterial } from '@/api/org'
@@ -214,9 +214,9 @@ onMounted(load)
           </div>
           <p v-if="!chapter || chapter.examples.length === 0" class="f-hint">本章无识别出的例题</p>
           <div v-for="ex in chapter?.examples ?? []" :key="ex.id" class="example-card" :class="ex.status">
-            <p class="ex-stem">{{ ex.stem }}</p>
+            <RichTextViewer :content="ex.stem" class="ex-stem" />
             <div class="ex-ans"><span class="tag tag-green">答案</span>{{ ex.answer }}</div>
-            <p class="ex-analysis"><b>解析：</b>{{ ex.analysis }}</p>
+            <p class="ex-analysis"><b>解析：</b><RichTextViewer :content="ex.analysis" tag="span" /></p>
             <div class="ex-ops">
               <template v-if="ex.status === 'pending'">
                 <button class="mini-btn success" @click="onDecide(ex.id, 'import')"><AppIcon name="check" :size="13" /> 入题库</button>

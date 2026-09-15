@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppIcon, showToast, ApiError } from '@aiteach/shared'
+import { AppIcon, RichTextViewer, showToast, ApiError, hasImage, toPlainText } from '@aiteach/shared'
 import type { OrgCategory } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
+import RichTextEditor from '@/components/ui/RichTextEditor.vue'
 import { fetchCategories, fetchQuestions, saveQuestion } from '@/api/org'
 import { useBaseData } from '@/composables/useBaseData'
 import { useKnowledgePool } from '@/composables/useKnowledgePool'
@@ -133,9 +134,14 @@ async function load() {
   }
 }
 
+/** 富文本下 `<p></p>` 的 trim() 非空，判空必须看纯文本；只含图片的内容也算有值 */
+function hasContent(value: string): boolean {
+  return Boolean(toPlainText(value).trim()) || hasImage(value)
+}
+
 let lastType = '单选题'
 function onTypeChange() {
-  if (form.stem.trim() || form.options.some((opt) => opt.trim())) {
+  if (hasContent(form.stem) || form.options.some((opt) => hasContent(opt))) {
     if (!window.confirm('切换题型将清空选项结构，确认切换？')) {
       form.type = lastType
       return
@@ -145,6 +151,14 @@ function onTypeChange() {
   form.answers = []
   form.options = form.type === '判断题' ? ['正确', '错误'] : ['', '', '', '']
   form.fillAnswers = [{ value: '', equivalents: '' }]
+}
+
+/** chip 版题型切换：先落值再走上面那套确认逻辑。
+    点当前已选中的题型直接返回 —— 下拉的 change 只在真的换值时触发，而 chip 的 click 每次都会触发。 */
+function pickType(type: string) {
+  if (type === form.type) return
+  form.type = type
+  onTypeChange()
 }
 
 function addOption() {
@@ -200,16 +214,16 @@ function validate(full: boolean): boolean {
   Object.keys(errors).forEach((key) => delete errors[key])
   if (!form.knowledge.length) errors.knowledge = '请选择知识点（最多 5 个）'
   if (full) {
-    if (!form.stem.trim()) errors.stem = '题干不能为空'
+    if (!hasContent(form.stem)) errors.stem = '题干不能为空'
     if (isChoice.value) {
-      if (form.options.some((opt) => !opt.trim())) errors.options = '每项选项必填'
+      if (form.options.some((opt) => !hasContent(opt))) errors.options = '每项选项必填'
       if (form.answers.length === 0 || (form.type === '多选题' && form.answers.length < 2)) {
         errors.options = errors.options || (form.type === '多选题' ? '多选题须标记 ≥2 个正确答案' : '请设置正确答案')
       }
     }
     if (form.type === '填空题' && form.fillAnswers.some((row) => !row.value.trim())) errors.answer = '每空答案必填'
-    if (form.type === '解答题' && !form.essayAnswer.trim()) errors.answer = '解答题答案必填'
-    if (!form.analysis.trim() && !window.confirm('解析为空（选填），提交审核时建议补充解析，确认继续提交？')) return false
+    if (form.type === '解答题' && !hasContent(form.essayAnswer)) errors.answer = '解答题答案必填'
+    if (!hasContent(form.analysis) && !window.confirm('解析为空（选填），提交审核时建议补充解析，确认继续提交？')) return false
   }
   if (form.sourceRemark.length > 100) errors.sourceRemark = '来源备注 ≤100 字'
   return Object.keys(errors).length === 0
@@ -234,7 +248,7 @@ async function save(submit: boolean) {
       term: form.term,
       examType: form.examType || undefined,
       sourceRemark: form.sourceRemark || undefined,
-      options: isChoice.value ? form.options.filter((opt) => opt.trim()) : [],
+      options: isChoice.value ? form.options.filter((opt) => hasContent(opt)) : [],
       answer: answerText.value,
       analysis: form.analysis,
       library: form.library,
@@ -268,80 +282,157 @@ onMounted(load)
   <div class="edit-layout">
     <!-- 属性条（FR-TM-008） -->
     <div class="panel prop-bar">
-      <div class="prop-grid">
-        <div class="f-field compact">
-          <label class="f-label">学科<span class="req">*</span></label>
-          <select v-model="form.subject" class="f-select">
-            <option v-for="s in withCurrent(subjects, form.subject)" :key="s" :value="s">{{ optionLabel(subjects, s) }}</option>
-          </select>
-        </div>
-        <div class="f-field compact">
-          <label class="f-label">年级<span class="req">*</span></label>
-          <select v-model="form.grade" class="f-select">
-            <option v-for="g in withCurrent(grades, form.grade)" :key="g" :value="g">{{ optionLabel(grades, g) }}</option>
-          </select>
-        </div>
-        <div class="f-field compact">
-          <label class="f-label">题型<span class="req">*</span></label>
-          <select v-model="form.type" class="f-select" @change="onTypeChange">
-            <option v-for="t in withCurrent(questionTypes, form.type)" :key="t" :value="t">{{ optionLabel(questionTypes, t) }}</option>
-          </select>
-        </div>
-        <div class="f-field compact">
-          <label class="f-label">难度<span class="req">*</span></label>
-          <select v-model="form.difficulty" class="f-select">
-            <option v-for="d in withCurrent(difficulties, form.difficulty)" :key="d" :value="d">{{ optionLabel(difficulties, d) }}</option>
-          </select>
-        </div>
-        <div class="f-field compact">
-          <label class="f-label">学期</label>
-          <select v-model="form.term" class="f-select">
-            <option v-for="t in TERMS" :key="t" :value="t">{{ t }}</option>
-          </select>
-        </div>
-        <div class="f-field compact">
-          <label class="f-label">考试类型</label>
-          <select v-model="form.examType" class="f-select">
-            <option value="">不指定</option>
-            <option v-for="e in examTypes" :key="e" :value="e">{{ e }}</option>
-          </select>
-        </div>
-        <div class="f-field compact">
-          <label class="f-label">教材版本</label>
-          <select v-model="form.textbook" class="f-select">
-            <option value="">不绑定</option>
-            <option v-for="v in versionOptions" :key="v" :value="v">{{ v }}</option>
-          </select>
-        </div>
-        <div class="f-field compact">
-          <label class="f-label">所属库 / 分类</label>
-          <div class="lib-row">
-            <select v-model="form.library" class="f-select" style="width: 110px">
-              <option value="personal">个人题库</option>
-              <option value="org">机构公共</option>
-            </select>
-            <select v-model="form.categoryId" class="f-select" style="flex: 1">
-              <option :value="null">默认分类</option>
-              <option v-for="c in categories.filter((row) => row.parentId !== null)" :key="c.id" :value="c.id">
-                {{ c.name }}
-              </option>
-            </select>
-          </div>
+      <!-- 每个属性一行：标签左、选项右平铺。候选项都不多（最多 12 个），下拉是多余的一次点击，
+           且看不到还有什么可选。顺序一律取数据源现成顺序（字典 sort / 教材矩阵 / TERMS），不重排。 -->
+      <div class="prop-row">
+        <span class="prop-label">学科<span class="req">*</span></span>
+        <div class="prop-opts">
+          <button
+            v-for="s in withCurrent(subjects, form.subject)"
+            :key="s"
+            class="p-chip"
+            :class="{ on: form.subject === s }"
+            type="button"
+            @click="form.subject = s"
+          >
+            {{ optionLabel(subjects, s) }}
+          </button>
         </div>
       </div>
-      <div class="f-field" style="margin-bottom: 0">
-        <label class="f-label">知识点（随学科加载，最多 5 个）<span class="req">*</span></label>
-        <div class="knowledge-chips">
+
+      <div class="prop-row">
+        <span class="prop-label">年级<span class="req">*</span></span>
+        <div class="prop-opts">
+          <button
+            v-for="g in withCurrent(grades, form.grade)"
+            :key="g"
+            class="p-chip"
+            :class="{ on: form.grade === g }"
+            type="button"
+            @click="form.grade = g"
+          >
+            {{ optionLabel(grades, g) }}
+          </button>
+        </div>
+      </div>
+
+      <div class="prop-row">
+        <span class="prop-label">题型<span class="req">*</span></span>
+        <div class="prop-opts">
+          <button
+            v-for="t in withCurrent(questionTypes, form.type)"
+            :key="t"
+            class="p-chip"
+            :class="{ on: form.type === t }"
+            type="button"
+            @click="pickType(t)"
+          >
+            {{ optionLabel(questionTypes, t) }}
+          </button>
+        </div>
+      </div>
+
+      <div class="prop-row">
+        <span class="prop-label">难度<span class="req">*</span></span>
+        <div class="prop-opts">
+          <button
+            v-for="d in withCurrent(difficulties, form.difficulty)"
+            :key="d"
+            class="p-chip"
+            :class="{ on: form.difficulty === d }"
+            type="button"
+            @click="form.difficulty = d"
+          >
+            {{ optionLabel(difficulties, d) }}
+          </button>
+        </div>
+      </div>
+
+      <div class="prop-row">
+        <span class="prop-label">学期</span>
+        <div class="prop-opts">
+          <button
+            v-for="t in TERMS"
+            :key="t"
+            class="p-chip"
+            :class="{ on: form.term === t }"
+            type="button"
+            @click="form.term = t"
+          >
+            {{ t }}
+          </button>
+        </div>
+      </div>
+
+      <div class="prop-row">
+        <span class="prop-label">考试类型</span>
+        <div class="prop-opts">
+          <button class="p-chip" :class="{ on: form.examType === '' }" type="button" @click="form.examType = ''">
+            不指定
+          </button>
+          <button
+            v-for="e in examTypes"
+            :key="e"
+            class="p-chip"
+            :class="{ on: form.examType === e }"
+            type="button"
+            @click="form.examType = e"
+          >
+            {{ e }}
+          </button>
+        </div>
+      </div>
+
+      <div class="prop-row">
+        <span class="prop-label">教材版本</span>
+        <div class="prop-opts">
+          <button class="p-chip" :class="{ on: form.textbook === '' }" type="button" @click="form.textbook = ''">
+            不绑定
+          </button>
+          <button
+            v-for="v in versionOptions"
+            :key="v"
+            class="p-chip"
+            :class="{ on: form.textbook === v }"
+            type="button"
+            @click="form.textbook = v"
+          >
+            {{ v }}
+          </button>
+        </div>
+      </div>
+
+      <!-- 这一行留着下拉：它是「库 → 分类」的两级结构选择，不是一列可平铺的枚举值 -->
+      <div class="prop-row">
+        <span class="prop-label">所属库</span>
+        <div class="prop-opts">
+          <select v-model="form.library" class="f-select" style="width: 130px">
+            <option value="personal">个人题库</option>
+            <option value="org">机构公共</option>
+          </select>
+          <select v-model="form.categoryId" class="f-select" style="width: 220px">
+            <option :value="null">默认分类</option>
+            <option v-for="c in categories.filter((row) => row.parentId !== null)" :key="c.id" :value="c.id">
+              {{ c.name }}
+            </option>
+          </select>
+        </div>
+      </div>
+
+      <div class="prop-row">
+        <span class="prop-label">知识点<span class="req">*</span></span>
+        <div class="prop-opts">
           <button
             v-for="k in knowledgeOptions"
             :key="k"
-            class="k-chip"
+            class="p-chip"
             :class="{ on: form.knowledge.includes(k), off: orphanKnowledge.includes(k) }"
             type="button"
             @click="toggleKnowledge(k)"
           >
             {{ k }}
           </button>
+          <span class="prop-hint">随学科 / 年级 / 教材版本加载，最多 5 个</span>
         </div>
         <p v-if="errors.knowledge" class="f-err">{{ errors.knowledge }}</p>
       </div>
@@ -351,12 +442,12 @@ onMounted(load)
     <div class="panel editor-panel">
       <div class="f-field">
         <label class="f-label">题干<span class="req">*</span>（富文本 + 公式，支持 LaTeX 源码双向）</label>
-        <textarea
+        <RichTextEditor
           v-model="form.stem"
-          class="f-textarea"
-          rows="4"
-          placeholder="如：已知二次函数 f(x)=x²-2x-3…（支持插入公式 / 图片 / SVG）"
-          @input="dirty = true"
+          :subject="form.subject"
+          :min-height="150"
+          placeholder="如：已知二次函数 f(x)=x²-2x-3…（工具栏可插入公式、图片，也支持粘贴 / 拖入图片）"
+          @change="dirty = true"
         />
         <p v-if="errors.stem" class="f-err">{{ errors.stem }}</p>
       </div>
@@ -378,7 +469,15 @@ onMounted(load)
             >
               {{ 'ABCDEF'[i] }}
             </button>
-            <input v-model="form.options[i]" class="f-input" :placeholder="`选项 ${'ABCDEF'[i]} 内容`" @input="dirty = true" />
+            <RichTextEditor
+              v-model="form.options[i]"
+              class="opt-editor"
+              compact
+              :subject="form.subject"
+              :min-height="40"
+              :placeholder="`选项 ${'ABCDEF'[i]} 内容`"
+              @change="dirty = true"
+            />
             <button
               v-if="form.type !== '判断题'"
               class="mini-btn danger"
@@ -423,14 +522,26 @@ onMounted(load)
       <template v-else>
         <div class="f-field">
           <label class="f-label">参考答案（富文本 + 公式）<span class="req">*</span></label>
-          <textarea v-model="form.essayAnswer" class="f-textarea" rows="3" placeholder="输入解答过程…" />
+          <RichTextEditor
+            v-model="form.essayAnswer"
+            :subject="form.subject"
+            :min-height="110"
+            placeholder="输入解答过程…（可插入公式与图片）"
+            @change="dirty = true"
+          />
           <p v-if="errors.answer" class="f-err">{{ errors.answer }}</p>
         </div>
       </template>
 
       <div class="f-field">
         <label class="f-label">解析（选填，提交审核时为空将给出警告）</label>
-        <textarea v-model="form.analysis" class="f-textarea" rows="3" placeholder="输入解析…" />
+        <RichTextEditor
+          v-model="form.analysis"
+          :subject="form.subject"
+          :min-height="110"
+          placeholder="输入解析…（可插入公式与图片）"
+          @change="dirty = true"
+        />
       </div>
 
       <div class="f-field">
@@ -464,16 +575,16 @@ onMounted(load)
           <span class="tag tag-gray">{{ form.type }}</span>
           <span class="tag tag-gray">{{ form.difficulty }}</span>
         </div>
-        <p class="pv-stem">{{ form.stem || '（题干预览）' }}</p>
+        <RichTextViewer class="pv-stem" :content="form.stem" empty="（题干预览）" />
         <ul v-if="isChoice" class="option-list">
           <li v-for="(opt, i) in form.options" :key="i" :class="{ right: form.answers.includes(i) }">
-            {{ 'ABCDEF'[i] }}. {{ opt }}
+            {{ 'ABCDEF'[i] }}. <RichTextViewer :content="opt" tag="span" />
           </li>
         </ul>
         <div v-if="answerText" class="pv-answer">
           <span class="tag tag-green">答案</span>{{ answerText }}
         </div>
-        <p v-if="form.analysis" class="pv-analysis"><b>解析：</b>{{ form.analysis }}</p>
+        <p v-if="hasContent(form.analysis)" class="pv-analysis"><b>解析：</b><RichTextViewer :content="form.analysis" tag="span" /></p>
       </div>
     </AppModal>
   </div>
@@ -482,12 +593,26 @@ onMounted(load)
 <style scoped>
 .edit-layout { display: flex; flex-direction: column; gap: 14px; }
 
-.prop-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0 14px; }
-.f-field.compact { margin-bottom: 14px; }
-.lib-row { display: flex; gap: 8px; }
+/* 全局 .panel 只给了底色 / 边框 / 圆角，没有 padding；属性条此前因此贴着边框。
+   补在这一处而不是改 .panel，免得波及全站其它面板。下留 4px：每个 .prop-row 自带 12px 下边距。 */
+.prop-bar { padding: 16px 20px 4px; }
+.prop-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+/* 校验红字占满一行，落到 chip 下方而不是被挤在行内 */
+.prop-row > .f-err { flex-basis: 100%; margin: 0; }
+.prop-label {
+  width: 82px;
+  flex-shrink: 0;
+  padding-top: 5px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.prop-opts { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
+.prop-hint { align-self: center; font-size: 12px; color: var(--sub); }
 
-.knowledge-chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.k-chip {
+/* 取值枚举统一用 chip：点一下就选中，且不必先展开才知道有什么可选。
+   与其它页的 .k-chip 同造型（那是各页各自 scoped 复制的）。 */
+.p-chip {
   border: 1.5px solid var(--border);
   border-radius: 999px;
   background: #fff;
@@ -496,13 +621,16 @@ onMounted(load)
   padding: 4px 12px;
   transition: all 0.15s;
 }
-.k-chip.on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-deep); font-weight: 600; }
-/* 已选但已不属于当前学科知识点池的项：虚线提示，仍可点击取消 */
-.k-chip.off { border-style: dashed; opacity: 0.7; }
+.p-chip:hover { border-color: var(--brand); color: var(--brand-deep); }
+.p-chip.on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-deep); font-weight: 600; }
+/* 已选但已不属于当前知识点池的项：虚线提示，仍可点击取消 */
+.p-chip.off { border-style: dashed; opacity: 0.7; }
 
 .editor-panel { padding: 18px 20px; }
 
 .opt-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+/* 选项编辑器占满剩余宽度（删除按钮与答案圆点保持原尺寸） */
+.opt-editor { flex: 1; min-width: 0; }
 .answer-dot {
   width: 30px;
   height: 34px;

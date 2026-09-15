@@ -515,6 +515,9 @@ export interface OrgMedia {
   linkedCount: number
   owner: string
   createdAt: string
+  /** 可引用地址（题目正文里的图片即引用此地址）；无字节的存量记录不带该字段 */
+  url?: string
+  mime?: string
 }
 
 export interface FileFolder {

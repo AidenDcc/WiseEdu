@@ -31,6 +31,9 @@ import type {
   StaffMember,
   StandardFormula,
 } from '../api/models'
+import { registerMediaSrc, unregisterMediaSrc } from '../utils/media-ref'
+/* 相对导入而非 '@aiteach/shared'：从 shared 内部引自己的桶文件会形成循环依赖 */
+import { hasImage, sanitizeRichHtml, toPlainText, truncateRich } from '../utils/richtext'
 
 function nowStr(offsetHours = 0): string {
   return new Date(Date.now() + offsetHours * 3600_000).toISOString().slice(0, 19).replace('T', ' ')
@@ -127,7 +130,7 @@ function aiChecksFor(stem: string, suspects: string[] = []): AiCheckResult[] {
       name: '知识点匹配',
       pass: true,
       note: '知识点与题干一致',
-      fixed: stem.includes('抛物线') ? '「抛物线」→「二次函数图像」' : undefined,
+      fixed: toPlainText(stem).includes('抛物线') ? '「抛物线」→「二次函数图像」' : undefined,
     },
     { name: '难度匹配', pass: true, note: '难度系数与题干复杂度相符' },
     { name: '查重', pass: suspects.length === 0, note: suspects.length ? `与题库 1 题相似度 87%` : '未发现相似题' },
@@ -2720,21 +2723,28 @@ export const QUESTION_STATUS_TEXT: Record<QuestionStatus, string> = {
 }
 
 export function saveQuestion(input: Partial<OrgQuestion> & { stem: string; submit: boolean }): OrgQuestion {
-  if (!input.stem.trim()) throw new Error('题干不能为空')
+  /* 写入侧净化：题干/解析/选项可能来自 AI 生成或 OCR 粘贴，mock 层是唯一能兜底的地方。
+     answer 保持原样 —— 它存的是 A/B/C 选项字母，多处按字符解析。 */
+  const stem = sanitizeRichHtml(input.stem)
+  const analysis = input.analysis ? sanitizeRichHtml(input.analysis) : input.analysis
+  const options = (input.options ?? []).map((opt) => sanitizeRichHtml(opt))
+
+  /* 富文本下 `<p></p>` 的 trim() 非空，故按纯文本判空；仅含图片的题干也算有内容 */
+  if (!toPlainText(stem).trim() && !hasImage(stem)) throw new Error('题干不能为空')
   if ((input.type === '单选题' || input.type === '多选题' || input.type === '判断题') && !input.answer) {
     throw new Error('请设置正确答案')
   }
   const isEdit = input.id != null
   const item = isEdit
     ? questions.find((row) => row.id === input.id)
-    : seedQuestion({ stem: input.stem, id: ++questionSeq })
+    : seedQuestion({ stem, id: ++questionSeq })
 
   if (isEdit && !item) throw new Error('题目不存在')
   const target = item as OrgQuestion
   /* seedQuestion 是纯工厂，不会入池；新建题目须显式入池，否则保存后被静默丢弃 */
   if (!isEdit) questions.unshift(target)
   Object.assign(target, {
-    stem: input.stem,
+    stem,
     subject: input.subject ?? target.subject,
     grade: input.grade ?? target.grade,
     type: input.type ?? target.type,
@@ -2744,9 +2754,9 @@ export function saveQuestion(input: Partial<OrgQuestion> & { stem: string; submi
     term: input.term ?? target.term,
     examType: input.examType ?? target.examType,
     sourceRemark: input.sourceRemark,
-    options: input.options ?? [],
+    options,
     answer: input.answer ?? '',
-    analysis: input.analysis ?? '',
+    analysis: analysis ?? '',
     library: input.library ?? target.library,
     categoryId: input.categoryId ?? target.categoryId,
     owner: isEdit ? target.owner : CURRENT.name,
@@ -2758,7 +2768,7 @@ export function saveQuestion(input: Partial<OrgQuestion> & { stem: string; submi
     target.status = 'checking'
     pushMessage({
       tab: 'review',
-      title: `题目《${target.stem.slice(0, 18)}…》已提交 AI 校验`,
+      title: `题目《${truncateRich(target.stem, 18)}…》已提交 AI 校验`,
       summary: '多智能体并行检测完成后将推送终审待办',
       module: '题目管理',
       link: '/question/review',
@@ -2797,7 +2807,7 @@ export function submitQuestions(ids: number[]): number {
 export function deleteQuestions(ids: number[]): number {
   const rows = questions.filter((row) => ids.includes(row.id))
   rows.forEach((row) => {
-    toRecycle('题目', row.stem.slice(0, 24) + '…')
+    toRecycle('题目', truncateRich(row.stem, 24) + '…')
     questions.splice(questions.indexOf(row), 1)
   })
   return rows.length
@@ -2824,7 +2834,7 @@ export function reviewQuestion(id: number, pass: boolean, opinion: string): OrgQ
   if (pass && item.library === 'personal') item.library = 'org'
   pushMessage({
     tab: 'todo',
-    title: `题目审核${pass ? '通过' : '驳回'}：《${item.stem.slice(0, 16)}…》`,
+    title: `题目审核${pass ? '通过' : '驳回'}：《${truncateRich(item.stem, 16)}…》`,
     summary: pass ? '已入机构正式题库' : `驳回意见：${opinion}`,
     module: '题目审核',
     link: '/question/bank',
@@ -2880,16 +2890,18 @@ export function generateQuestions(count: number): GeneratedQuestion[] {
 }
 
 export function adoptGenerated(item: GeneratedQuestion, subject: string, grade: string, type: string): OrgQuestion {
+  /* AI 生成内容同样是不可信输入，入库前净化 */
   const q = seedQuestion({
     id: ++questionSeq,
-    stem: item.stem,
+    stem: sanitizeRichHtml(item.stem),
     subject,
     grade,
     type,
     difficulty: item.difficulty,
     knowledge: item.knowledge,
     answer: item.answer,
-    analysis: item.analysis,
+    analysis: sanitizeRichHtml(item.analysis),
+    options: (item.options ?? []).map((opt) => sanitizeRichHtml(opt)),
     source: 'AI 出题',
     status: 'checking',
     library: 'personal',
@@ -2966,17 +2978,32 @@ export function recognizePhoto(id: string): PhotoTask {
   return task
 }
 
-export function decidePhotoResult(taskId: string, resultId: string, decision: 'import' | 'draft' | 'drop'): PhotoTask {
+export function decidePhotoResult(
+  taskId: string,
+  resultId: string,
+  decision: 'import' | 'draft' | 'drop',
+  /** 教师在校对区改过的文本；此前前端根本没有回传，改动被静默丢弃 */
+  edit?: { stem?: string; answer?: string; analysis?: string },
+): PhotoTask {
   const task = photoTasks.find((row) => row.id === taskId)
   if (!task) throw new Error('任务不存在')
   const result = task.results.find((row) => row.id === resultId)
   if (!result) throw new Error('识别结果不存在')
   result.decided = decision
+
+  /* 先落回结果本身，再据此入库，保证「入库的」与「看到的」一致 */
+  if (edit) {
+    if (edit.stem !== undefined) result.stem = sanitizeRichHtml(edit.stem)
+    if (edit.analysis !== undefined) result.analysis = sanitizeRichHtml(edit.analysis)
+    /* answer 是 A/B/C 选项字母或短答案，保持纯文本 */
+    if (edit.answer !== undefined) result.answer = edit.answer
+  }
+
   if (decision === 'import') {
     const q = seedQuestion({
       id: ++questionSeq,
       stem: result.stem,
-      options: result.options,
+      options: result.options.map((opt) => sanitizeRichHtml(opt)),
       answer: result.answer,
       analysis: result.analysis,
       knowledge: result.knowledge,
@@ -3422,23 +3449,95 @@ export const mediaResources: OrgMedia[] = [
   { id: 601, name: '函数图像动态演示', kind: 'animation', subject: '数学', knowledge: ['函数图像'], sizeMb: 18.4, linkedCount: 2, owner: '李文博', createdAt: nowStr(-100) },
   { id: 602, name: '立体几何截面微课', kind: 'video', subject: '数学', knowledge: ['立体几何'], sizeMb: 156.0, durationSec: 642, linkedCount: 1, owner: '陈明远', createdAt: nowStr(-260) },
   { id: 603, name: '抛物线标准图（矢量）', kind: 'image', subject: '数学', knowledge: ['抛物线'], sizeMb: 0.8, linkedCount: 0, owner: '沈丽华', createdAt: nowStr(-50) },
+  { id: 604, name: '单位圆与三角函数线', kind: 'image', subject: '数学', knowledge: ['三角函数'], sizeMb: 0.6, linkedCount: 1, owner: '陈明远', createdAt: nowStr(-180) },
+  { id: 605, name: '立体几何三视图', kind: 'image', subject: '数学', knowledge: ['立体几何'], sizeMb: 0.7, linkedCount: 3, owner: '沈丽华', createdAt: nowStr(-30) },
 ]
 
-export function uploadMedia(input: { name: string; kind: OrgMedia['kind']; subject: string; knowledge: string[] }): OrgMedia {
+/**
+ * 上传字节的会话级存放处：id → data URL。
+ *
+ * 与题库同为内存态（刷新即还原），因此不落 localStorage。题目正文里只引用 `/api/tenant/media/{id}/raw`
+ * 这样的 URL，渲染时经 resolveMediaSrc 换回可显示地址 —— 真实后端接入后由服务端直接提供字节，
+ * 这张表自然为空。
+ */
+const mediaBlobs = new Map<number, string>()
+
+function mediaUrlOf(id: number): string {
+  return `/api/tenant/media/${id}/raw`
+}
+
+/**
+ * 种子图片的内联字节（演示用）。
+ *
+ * 演示数据只有元信息、没有文件，mock 里也没有 `/media/:id/raw` 路由（routes.ts 的媒体只有
+ * list / upload / link / delete 四条），所以这些记录一旦进了正文就是破图 —— 编辑器里选不出东西。
+ * 这里给每张种子图生成一张 SVG 存进 mediaBlobs 并注册，让「系统图片库」真的可选、可显示。
+ * 真实后端接入后由服务端托管字节，本段可整段删除。
+ */
+function figureSvg(label: string, figure: string): string {
+  const svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160">' +
+    '<rect width="240" height="160" fill="#f7fafa"/>' +
+    `<g fill="none" stroke="#00b4a6" stroke-width="2" stroke-linecap="round">${figure}</g>` +
+    `<text x="120" y="148" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#5b6b7f">${label}</text>` +
+    '</svg>'
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
+}
+
+const SEED_FIGURES: Record<number, { label: string; figure: string }> = {
+  603: { label: '抛物线', figure: '<path d="M20 20 Q120 210 220 20"/>' },
+  604: { label: '单位圆与三角函数线', figure: '<circle cx="120" cy="72" r="50"/><path d="M62 72h116M120 14v116"/>' },
+  605: { label: '立体几何三视图', figure: '<path d="M88 34h58v58H88zM88 34l20-16h58v58l-20 16M146 34l20-16M146 92l20-16"/>' },
+}
+
+for (const row of mediaResources) {
+  const figure = SEED_FIGURES[row.id]
+  if (!figure || row.url) continue
+  const dataUrl = figureSvg(figure.label, figure.figure)
+  row.url = mediaUrlOf(row.id)
+  row.mime = 'image/svg+xml'
+  mediaBlobs.set(row.id, dataUrl)
+  registerMediaSrc(row.url, dataUrl)
+}
+
+export function uploadMedia(input: {
+  name: string
+  kind: OrgMedia['kind']
+  subject: string
+  knowledge: string[]
+  /** 走真实上传通道时携带；存量演示数据不带 */
+  dataUrl?: string
+  mime?: string
+  sizeMb?: number
+}): OrgMedia {
+  const id = ++mediaSeq
+  /* 有字节就据实计算体积，没有则沿用演示用的随机值 */
+  const sizeMb = input.sizeMb ?? Math.round((1 + Math.random() * 80) * 10) / 10
   const item: OrgMedia = {
-    id: ++mediaSeq,
+    id,
     name: input.name,
     kind: input.kind,
     subject: input.subject,
     knowledge: input.knowledge,
-    sizeMb: Math.round((1 + Math.random() * 80) * 10) / 10,
+    sizeMb,
     durationSec: input.kind === 'image' ? undefined : 300 + Math.floor(Math.random() * 600),
     linkedCount: 0,
     owner: CURRENT.name,
     createdAt: nowStr(),
+    mime: input.mime,
+  }
+  if (input.dataUrl) {
+    mediaBlobs.set(id, input.dataUrl)
+    item.url = mediaUrlOf(id)
+    registerMediaSrc(item.url, input.dataUrl)
   }
   mediaResources.unshift(item)
   return item
+}
+
+/** 取回上传字节（题目正文图片渲染用） */
+export function resolveMediaBlob(id: number): string | undefined {
+  return mediaBlobs.get(id)
 }
 
 export function linkMedia(id: number, targets: string[]): number {
@@ -3452,6 +3551,8 @@ export function deleteMedia(id: number): number {
   const item = mediaResources.find((row) => row.id === id)
   if (!item) throw new Error('资源不存在')
   toRecycle('文件', item.name)
+  if (item.url) unregisterMediaSrc(item.url)
+  mediaBlobs.delete(id)
   mediaResources.splice(mediaResources.indexOf(item), 1)
   return item.linkedCount
 }

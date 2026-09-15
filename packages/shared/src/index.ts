@@ -62,6 +62,19 @@ export type ChartSeries = {
 }
 export { default as BarChart } from './components/BarChart.vue'
 
+/* 富文本：正文改存 HTML 后的公共能力（渲染器 + 纯文本/净化工具） */
+export { default as RichTextViewer } from './components/RichTextViewer.vue'
+export {
+  isRichContent,
+  toPlainText,
+  truncateRich,
+  sanitizeRichHtml,
+  renderMathIn,
+  normalizeRichHtml,
+  hasImage,
+} from './utils/richtext'
+export { registerMediaSrc, resolveMediaIn, resolveMediaSrc, unregisterMediaSrc } from './utils/media-ref'
+
 /* 字典 / AI 配置元数据（页面下拉与说明用） */
 export {
   DICT_TYPES,
