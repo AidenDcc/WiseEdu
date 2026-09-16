@@ -3,8 +3,10 @@
  *
  * - Key 只从 VITE_DEEPSEEK_API_KEY 读取（放在 .env.local，已被根目录 .gitignore 的
  *   `*.local` 规则排除，不会提交到 gitee）；代码库中不硬编码任何密钥。
- * - 浏览器直连 api.deepseek.com 会被 CORS 拦截，故默认走 vite dev proxy `/deepseek`
- *   （见 vite.config.ts）；生产环境可通过 VITE_DEEPSEEK_BASE_URL 指向自建网关。
+ * - 浏览器直连 api.deepseek.com 会被 CORS 拦截，故默认走同源相对路径 `/deepseek`：
+ *   本地由 vite dev proxy 转发（vite.config.ts）；Cloudflare Pages 线上由
+ *   functions/deepseek/[[path]].ts 边缘代理转发（Pages Functions，随部署自动生效）。
+ *   生产也可通过 VITE_DEEPSEEK_BASE_URL 指向自建网关。
  */
 const BASE_URL = import.meta.env.VITE_DEEPSEEK_BASE_URL || '/deepseek'
 const API_KEY = import.meta.env.VITE_DEEPSEEK_API_KEY || ''
