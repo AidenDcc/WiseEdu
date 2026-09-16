@@ -160,6 +160,9 @@ pnpm dev:tenant   # 仅启动机构端
 | `VITE_API_BASE_URL` | 真实后端 API 网关前缀，默认可使用 `/api` |
 | `VITE_REMOTE_SERVICES` | 逗号分隔的服务前缀；用于在 Mock 模式下按服务灰度接入真实后端 |
 | `VITE_PORTAL_URL` | 业务端返回演示入口时使用的地址，默认 `http://localhost:5172` |
+| `VITE_DEEPSEEK_API_KEY` | Deepseek Key，写入 `.env.local`（已被 `.gitignore` 排除）启用真实 AI 出题；未配置时回退本地演示数据 |
+| `VITE_DEEPSEEK_BASE_URL` | Deepseek 网关地址，默认 `/deepseek`（开发环境经 `apps/tenant/vite.config.ts` 代理转发，规避 CORS）；生产环境指向自建网关 |
+| `VITE_DEEPSEEK_MODEL` | 模型名，默认 `deepseek-chat` |
 
 接入后端时：
 

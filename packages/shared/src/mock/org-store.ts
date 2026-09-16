@@ -2934,6 +2934,9 @@ export interface PhotoTask {
     analysis: string
     knowledge: string[]
     difficulty: string
+    /** 真实 AI 识别时模型判定的学科 / 年级（mock 识别不填，入库走默认） */
+    subject?: string
+    grade?: string
     decided: null | 'import' | 'draft' | 'drop'
   }>
 }
@@ -2953,6 +2956,16 @@ export function uploadPhotos(names: string[]): PhotoTask[] {
     photoTasks.unshift(task)
     return task
   })
+}
+
+/**
+ * 真实 AI 识别结果的回注册：前端本地完成多模态识别后，把任务整体写入 store，
+ * 使「确认 / 存草稿 / 丢弃」决策与入库流程（decidePhotoResult）对真实识别与
+ * mock 识别走同一条路径，无需在视图层分叉。
+ */
+export function registerPhotoTask(task: PhotoTask): PhotoTask {
+  photoTasks.unshift(task)
+  return task
 }
 
 /** 模拟识别完成：90% 成功拆题，10% 失败 */
@@ -2982,8 +2995,8 @@ export function decidePhotoResult(
   taskId: string,
   resultId: string,
   decision: 'import' | 'draft' | 'drop',
-  /** 教师在校对区改过的文本；此前前端根本没有回传，改动被静默丢弃 */
-  edit?: { stem?: string; answer?: string; analysis?: string },
+  /** 教师在校对区改过的内容；此前前端根本没有回传，改动被静默丢弃 */
+  edit?: { stem?: string; options?: string[]; answer?: string; analysis?: string; subject?: string; grade?: string },
 ): PhotoTask {
   const task = photoTasks.find((row) => row.id === taskId)
   if (!task) throw new Error('任务不存在')
@@ -2994,9 +3007,12 @@ export function decidePhotoResult(
   /* 先落回结果本身，再据此入库，保证「入库的」与「看到的」一致 */
   if (edit) {
     if (edit.stem !== undefined) result.stem = sanitizeRichHtml(edit.stem)
+    if (edit.options !== undefined) result.options = edit.options.map((opt) => sanitizeRichHtml(opt))
     if (edit.analysis !== undefined) result.analysis = sanitizeRichHtml(edit.analysis)
     /* answer 是 A/B/C 选项字母或短答案，保持纯文本 */
     if (edit.answer !== undefined) result.answer = edit.answer
+    if (edit.subject !== undefined) result.subject = edit.subject
+    if (edit.grade !== undefined) result.grade = edit.grade
   }
 
   if (decision === 'import') {
@@ -3008,6 +3024,8 @@ export function decidePhotoResult(
       analysis: result.analysis,
       knowledge: result.knowledge,
       difficulty: result.difficulty,
+      subject: result.subject ?? '数学',
+      grade: result.grade ?? '高一',
       source: '拍照识别',
       status: 'checking',
       library: 'personal',

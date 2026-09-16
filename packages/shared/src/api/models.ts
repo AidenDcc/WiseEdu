@@ -671,4 +671,7 @@ export interface GeneratedQuestion {
   analysis: string
   knowledge: string[]
   difficulty: string
+  /** 拍照识别场景由模型判定的学科 / 年级（AI 出题场景由表单传入，不填） */
+  subject?: string
+  grade?: string
 }

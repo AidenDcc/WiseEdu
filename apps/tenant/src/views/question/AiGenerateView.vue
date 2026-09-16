@@ -3,7 +3,8 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AppIcon, RichTextViewer, showToast, truncateRich } from '@aiteach/shared'
 import type { GeneratedQuestion, OrgQuestion } from '@aiteach/shared'
-import { adoptGenerated, fetchQuestions, fetchQuota, generateQuestions, variantOf } from '@/api/org'
+import { adoptGenerated, fetchQuestions, fetchQuota, variantOf } from '@/api/org'
+import { aiEngine, generateByAi } from '@/api/ai-generate'
 import { useBaseData } from '@/composables/useBaseData'
 import { useKnowledgePool } from '@/composables/useKnowledgePool'
 
@@ -38,6 +39,11 @@ const quota = ref({ used: 0, quota: 1000 })
 const estimate = computed(() => form.count)
 const remain = computed(() => quota.value.quota - quota.value.used)
 const insufficient = computed(() => estimate.value > remain.value)
+
+/** 生成引擎：已配置 Deepseek Key 走真实模型，否则本地演示数据 */
+const engine = ref<'deepseek' | 'mock'>(aiEngine())
+/** 最近一次真实生成的 token 消耗（结果阶段展示） */
+const lastTokens = ref(0)
 
 const phase = ref<'form' | 'running' | 'result'>('form')
 const progress = ref(0)
@@ -105,8 +111,22 @@ async function run() {
   }, 260)
   try {
     if (variantOfId.value) await variantOf(variantOfId.value)
-    const list = await generateQuestions(form.count)
-    results.value = list
+    /* 真实 AI：固定提示词 + 变量渲染 → Deepseek；未配置 Key 时自动回退 mock */
+    const result = await generateByAi({
+      subject: form.subject,
+      grade: form.grade,
+      type: form.type,
+      difficulty: form.difficulty,
+      knowledge: [...form.knowledge],
+      count: form.count,
+      variant:
+        variantOfId.value && variantSource.value
+          ? { stem: variantSource.value.stem, strategies: [...form.variantStrategies] }
+          : undefined,
+    })
+    results.value = result.list
+    engine.value = result.engine
+    lastTokens.value = result.tokens
     adoptedIds.value = new Set()
     progress.value = 100
     quota.value.used += estimate.value
@@ -180,6 +200,9 @@ onMounted(load)
       <div class="page-head" style="margin-bottom: 16px">
         <h2>AI 智能出题</h2>
         <span class="f-hint">多智能体协作：出题 → 查重 → 纠错 → 校标，产出即达「待人工终审」</span>
+        <span class="tag" :class="engine === 'deepseek' ? 'tag-green' : 'tag-gray'" style="margin-left: auto">
+          {{ engine === 'deepseek' ? 'Deepseek 真实生成' : '本地演示数据（未配置 Key）' }}
+        </span>
       </div>
 
       <div class="prop-grid">
@@ -279,7 +302,12 @@ onMounted(load)
     <!-- 结果阶段 -->
     <template v-else>
       <div class="result-head">
-        <h3>生成完成（{{ results.length }} 题）· 已采纳 {{ adoptedIds.size }} 题</h3>
+        <h3>
+          生成完成（{{ results.length }} 题）· 已采纳 {{ adoptedIds.size }} 题
+          <span v-if="engine === 'deepseek' && lastTokens" class="f-hint" style="font-weight: 400">
+            · Deepseek 消耗 {{ lastTokens }} tokens
+          </span>
+        </h3>
         <div class="op-group">
           <button class="btn btn-ghost btn-sm" @click="onRerun">重新生成</button>
           <button class="btn btn-primary btn-sm" :disabled="pendingCount === 0" @click="adoptAll">全部采纳</button>

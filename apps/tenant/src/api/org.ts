@@ -110,12 +110,16 @@ export function uploadPhotos(names: string[]) {
 export function recognizePhoto(id: string) {
   return request<PhotoTask>('/tenant/photo/recognize', { method: 'POST', data: { id } })
 }
+/** 真实 AI 识别完成后，把任务整体回注册（结果确认/入库与 mock 识别同一条链路） */
+export function registerPhotoTask(task: PhotoTask) {
+  return request<PhotoTask>('/tenant/photo/register', { method: 'POST', data: { task } })
+}
 export function decidePhoto(
   taskId: string,
   resultId: string,
   decision: 'import' | 'draft' | 'drop',
-  /** 校对区改过的文本，随决策一并提交（此前未回传，改动被静默丢弃） */
-  edit?: { stem?: string; answer?: string; analysis?: string },
+  /** 校对区改过的内容，随决策一并提交（此前未回传，改动被静默丢弃） */
+  edit?: { stem?: string; options?: string[]; answer?: string; analysis?: string; subject?: string; grade?: string },
 ) {
   return request<PhotoTask>('/tenant/photo/decide', { method: 'POST', data: { taskId, resultId, decision, edit } })
 }

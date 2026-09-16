@@ -66,6 +66,7 @@ const orgRoutes: MockRoute[] = [
   { method: 'GET', path: '/tenant/photo/tasks', handler: () => guard(() => org.photoTasks) },
   { method: 'POST', path: '/tenant/photo/upload', handler: ({ body }) => guard(() => org.uploadPhotos(body.names as string[])) },
   { method: 'POST', path: '/tenant/photo/recognize', handler: ({ body }) => guard(() => org.recognizePhoto(String(body.id))) },
+  { method: 'POST', path: '/tenant/photo/register', handler: ({ body }) => guard(() => org.registerPhotoTask(body.task as never)) },
   {
     method: 'POST',
     path: '/tenant/photo/decide',
@@ -75,7 +76,7 @@ const orgRoutes: MockRoute[] = [
           String(body.taskId),
           String(body.resultId),
           body.decision as 'import' | 'draft' | 'drop',
-          body.edit as { stem?: string; answer?: string; analysis?: string } | undefined,
+          body.edit as { stem?: string; options?: string[]; answer?: string; analysis?: string; subject?: string; grade?: string } | undefined,
         ),
       ),
   },
