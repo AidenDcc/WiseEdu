@@ -483,7 +483,16 @@ onMounted(load)
               </div>
             </template>
             <label class="f-label" style="margin-top: 10px">答案（可修正）</label>
-            <input v-model="editDraft.answer" class="f-input" />
+            <!-- 客观题答案是选项字母，纯文本输入即可；问答题/解答题答案用富文本编辑器，
+                 承载公式（LaTeX）与插图，与手动录题的解答题答案同一套存储约定 -->
+            <RichTextEditor
+              v-if="!editDraft.options.length"
+              v-model="editDraft.answer"
+              :min-height="80"
+              :subject="editDraft.subject"
+              placeholder="答案（可用公式按钮插入 LaTeX 公式）"
+            />
+            <input v-else v-model="editDraft.answer" class="f-input" />
             <label class="f-label" style="margin-top: 10px">解析</label>
             <RichTextEditor v-model="editDraft.analysis" :min-height="80" placeholder="解析（选填）" />
           </template>

@@ -2899,7 +2899,7 @@ export function adoptGenerated(item: GeneratedQuestion, subject: string, grade: 
     type,
     difficulty: item.difficulty,
     knowledge: item.knowledge,
-    answer: item.answer,
+    answer: sanitizeRichHtml(item.answer),
     analysis: sanitizeRichHtml(item.analysis),
     options: (item.options ?? []).map((opt) => sanitizeRichHtml(opt)),
     source: 'AI 出题',
@@ -3009,15 +3009,20 @@ export function decidePhotoResult(
     if (edit.stem !== undefined) result.stem = sanitizeRichHtml(edit.stem)
     if (edit.options !== undefined) result.options = edit.options.map((opt) => sanitizeRichHtml(opt))
     if (edit.analysis !== undefined) result.analysis = sanitizeRichHtml(edit.analysis)
-    /* answer 是 A/B/C 选项字母或短答案，保持纯文本 */
-    if (edit.answer !== undefined) result.answer = edit.answer
+    /* 客观题答案是 A/B/C 选项字母保持纯文本；问答题答案是富文本（公式/插图），同解析口径净化 */
+    if (edit.answer !== undefined) {
+      result.answer = result.options.length ? edit.answer : sanitizeRichHtml(edit.answer)
+    }
     if (edit.subject !== undefined) result.subject = edit.subject
     if (edit.grade !== undefined) result.grade = edit.grade
   }
 
   if (decision === 'import') {
+    /* 题型按选项结构推导：无选项 → 解答题（问答题），有选项 → 单选/多选按答案字母数 */
+    const letters = result.answer.toUpperCase().replace(/[^A-F]/g, '')
     const q = seedQuestion({
       id: ++questionSeq,
+      type: result.options.length ? (letters.length > 1 ? '多选题' : '单选题') : '解答题',
       stem: result.stem,
       options: result.options.map((opt) => sanitizeRichHtml(opt)),
       answer: result.answer,

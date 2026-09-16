@@ -122,10 +122,13 @@ const SVG_ATTRS = new Set([
 ])
 
 /**
- * SVG 白名单净化。剥离一切脚本能力与事件属性；尺寸统一交给 viewBox + CSS
- * （RichTextViewer 的 img 样式 max-width:100%），防止模型输出超大画布撑破版面。
+ * SVG 白名单净化。剥离一切脚本能力与事件属性；根节点 width/height 一律剥掉，
+ * 显示尺寸由 <img> 标签上的 width/height 属性承担（见 diagramImg 的默认尺寸）。
+ *
+ * 返回净化后的字符串与 viewBox 宽高 —— 默认尺寸要按 viewBox 的原始纵横比换算，
+ * 否则高瘦的几何图（如 200×400）会被压成扁条。
  */
-function sanitizeSvg(svg: string): string {
+function sanitizeSvg(svg: string): { svg: string; vbWidth: number; vbHeight: number } {
   const doc = new DOMParser().parseFromString(svg, 'image/svg+xml')
   if (doc.querySelector('parsererror')) throw new Error('AI 生成的图形不是合法 SVG')
   const root = doc.documentElement
@@ -154,16 +157,30 @@ function sanitizeSvg(svg: string): string {
     bg.setAttribute('fill', '#ffffff')
     root.insertBefore(bg, root.firstChild)
   }
+  /* viewBox 是默认尺寸的唯一纵横比来源，先读出再剥属性 */
+  const vb = (root.getAttribute('viewBox') ?? '').split(/[\s,]+/).map(Number)
+  const vbWidth = vb.length === 4 && vb[2] > 0 ? vb[2] : 0
+  const vbHeight = vb.length === 4 && vb[3] > 0 ? vb[3] : 0
   root.removeAttribute('width')
   root.removeAttribute('height')
-  return new XMLSerializer().serializeToString(root)
+  return { svg: new XMLSerializer().serializeToString(root), vbWidth, vbHeight }
 }
 
-/** 净化后的 SVG → data URL <img>，替换题干中的 【图】占位符 */
+/** 识别配图默认显示尺寸：宽 400（试卷图的标准阅读宽度，矢量图放大不失真），
+    超高图按高 360 反推宽，避免几何图占满半屏 */
+function diagramSize(vbWidth: number, vbHeight: number): { width: number; height: number } {
+  if (!vbWidth || !vbHeight) return { width: 400, height: 240 }
+  const height = Math.round((400 * vbHeight) / vbWidth)
+  if (height <= 360) return { width: 400, height }
+  return { width: Math.round((360 * vbWidth) / vbHeight), height: 360 }
+}
+
+/** 净化后的 SVG → data URL <img>（带默认宽高，替换题干中的 【图】占位符） */
 function diagramImg(svg: string): string {
   const clean = sanitizeSvg(svg)
-  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(clean)}`
-  return `<img src="${url}" alt="题目配图" />`
+  const size = diagramSize(clean.vbWidth, clean.vbHeight)
+  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(clean.svg)}`
+  return `<img src="${url}" alt="题目配图" width="${size.width}" height="${size.height}" />`
 }
 
 /* ==================== 汇总入口 ==================== */
@@ -173,6 +190,12 @@ interface NormalizeOptions {
   maxCount: number
   /** 知识点白名单（出题必填）；识别场景传 undefined，保留模型自判知识点 */
   allowedKnowledge?: string[]
+  /**
+   * 主观题（无选项）的 answer 是否转富文本：出题仅在题型为「解答题」时开启
+   * （填空题答案保持纯文本，手动编辑页按纯文本回填）；拍照识别恒为 true，
+   * 校对区用编辑器承载答案，$...$ LaTeX 还原为标准公式节点。
+   */
+  richAnswer?: boolean
 }
 
 /** 模型回复 → 归一化后的题目数组（出题与拍照识别共用的核心管线） */
@@ -206,7 +229,8 @@ export function normalizeQuestionList(content: string, options: NormalizeOptions
       id: `ai_${Date.now()}_${i}`,
       stem: stemHtml,
       options: raw.options.map((opt) => richField(opt)),
-      answer: raw.answer,
+      /* 客观题答案是选项字母保持纯文本；主观题答案转富文本，LaTeX 公式还原为公式节点 */
+      answer: raw.options.length || !options.richAnswer ? raw.answer : richField(raw.answer),
       analysis: richField(raw.analysis),
       knowledge,
       difficulty: raw.difficulty,
@@ -222,5 +246,10 @@ export function normalizeQuestionList(content: string, options: NormalizeOptions
  * 这里的产出只需保证结构合法 + 公式节点约定正确。
  */
 export function parseQuestionResponse(content: string, params: UserPromptParams): GeneratedQuestion[] {
-  return normalizeQuestionList(content, { maxCount: params.count, allowedKnowledge: params.knowledge })
+  return normalizeQuestionList(content, {
+    maxCount: params.count,
+    allowedKnowledge: params.knowledge,
+    /* 只有解答题用富文本编辑器承载答案；填空题答案走纯文本空值回填 */
+    richAnswer: params.type === '解答题',
+  })
 }

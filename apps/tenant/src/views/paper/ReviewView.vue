@@ -113,7 +113,10 @@ onMounted(load)
               </li>
             </ul>
             <p v-if="questionOf(entry.questionId)" class="pv-q-ans">
-              <span class="tag tag-green">答案</span>{{ questionOf(entry.questionId)!.answer }}
+              <span class="tag tag-green">答案</span>
+              <!-- 客观题答案是字母；问答题答案是富文本（公式/插图） -->
+              <template v-if="questionOf(entry.questionId)!.options.length">{{ questionOf(entry.questionId)!.answer }}</template>
+              <RichTextViewer v-else :content="questionOf(entry.questionId)!.answer" tag="span" />
             </p>
           </div>
         </div>

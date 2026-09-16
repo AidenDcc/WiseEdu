@@ -11,7 +11,7 @@ import FormulaPickerModal from './FormulaPickerModal.vue'
 import MediaPickerModal from './MediaPickerModal.vue'
 import { uploadMedia } from '@/api/org'
 
-/** 拖拽的最小边长：再小四角控制点就糊成一个点，也失去了「缩回去」的手感 */
+/** 拖拽的最小边长：再小控制点就糊成一个点，也失去了「缩回去」的手感 */
 const MIN_IMAGE_PX = 40
 
 /**
@@ -21,10 +21,14 @@ const MIN_IMAGE_PX = 40
  * 用 NodeView 做显示层的地址还原，而不是改 renderHTML —— `getHTML()` 走的就是 renderHTML，
  * 在那里换地址会把 data URL 写进存储，正文就不再是「只存 URL」了。
  *
- * 缩放也挂在这个 NodeView 上：四角可拖拽，松手写回节点的 width / height 属性，存下来是
- * `<img src="…" width="320" height="180">` —— 只读渲染端（RichTextViewer）靠属性就能还原尺寸，
- * 不需要知道编辑器里发生过什么。缩放本身复用 @tiptap/core 的 ResizableNodeView，
+ * 缩放也挂在这个 NodeView 上：四角 + 四边共八个控制点，松手写回节点的 width / height 属性，
+ * 存下来是 `<img src="…" width="320" height="180">` —— 只读渲染端（RichTextViewer）靠属性就能
+ * 还原尺寸，不需要知道编辑器里发生过什么。缩放本身复用 @tiptap/core 的 ResizableNodeView，
  * 不自己写拖拽数学；这里只负责给它一个「地址已还原、尺寸已回填」的 img。
+ *
+ * 方向语义：四角拖 = 等比缩放（几何图、照片不被拉变形）；四边中点拖 = 单向拉伸 —
+ * 水平边只改宽、垂直边只改高（裁掉 AI 配图多余的留白）。等比锁不是全局开关，
+ * 而是每次拖拽开始时按把手方向切换（见下方对 handleResizeStart 的实例级遮蔽）。
  */
 const ResizableImage = Image.extend({
   addNodeView() {
@@ -43,7 +47,7 @@ const ResizableImage = Image.extend({
       }
       paint(node.attrs)
 
-      return new ResizableNodeView({
+      const view = new ResizableNodeView({
         element: el,
         editor,
         node,
@@ -65,12 +69,37 @@ const ResizableImage = Image.extend({
           return true
         },
         options: {
-          directions: ['top-left', 'top-right', 'bottom-left', 'bottom-right'],
+          directions: [
+            'top-left', 'top', 'top-right',
+            'left', 'right',
+            'bottom-left', 'bottom', 'bottom-right',
+          ],
           min: { width: MIN_IMAGE_PX, height: MIN_IMAGE_PX },
-          /* 图片拉变形没有意义：始终锁等比，不跟 Shift 走 */
-          preserveAspectRatio: true,
+          /* 全局等比锁关闭（否则边中点也变成等比，单向拉伸就失效了）；按下面对
+             handleResizeStart 的遮蔽，在每次拖拽开始时按把手方向重新设定 */
+          preserveAspectRatio: false,
         },
       })
+
+      /* preserveAspectRatio 是拖拽期间实时读取的实例属性，而方向只有拖拽开始那一刻可知，
+         库又没有提供按方向配置的口子 —— 实例级遮蔽私有方法（运行时即普通原型方法，
+         赋值成自有属性后库的监听闭包读到的就是这里设定的值）。d.ts 标了 private，
+         故做一次类型断言。 */
+      const protoStart = (
+        view as unknown as {
+          handleResizeStart: (event: MouseEvent | TouchEvent, direction: string) => void
+        }
+      ).handleResizeStart
+      ;(
+        view as unknown as {
+          handleResizeStart: (event: MouseEvent | TouchEvent, direction: string) => void
+        }
+      ).handleResizeStart = (event, direction) => {
+        view.preserveAspectRatio = direction.includes('-')
+        protoStart.call(view, event, direction)
+      }
+
+      return view
     }
   },
 })
@@ -544,6 +573,12 @@ defineExpose({ isEmpty })
 .rte-body :deep([data-resize-handle='bottom-right']) { cursor: nwse-resize; }
 .rte-body :deep([data-resize-handle='top-right']),
 .rte-body :deep([data-resize-handle='bottom-left']) { cursor: nesw-resize; }
+/* 边中点：水平边只改宽、垂直边只改高。库会把边把手内联成贯穿整条边的定位
+   （left:0;right:0），用 auto margin 把 12px 圆点收回边的中点，而不是拉成一条药丸 */
+.rte-body :deep([data-resize-handle='top']),
+.rte-body :deep([data-resize-handle='bottom']) { margin: -6px auto; cursor: ns-resize; }
+.rte-body :deep([data-resize-handle='left']),
+.rte-body :deep([data-resize-handle='right']) { margin: auto -6px; cursor: ew-resize; }
 
 /* 拖拽中锁住文本选择，否则快速划动会顺手把正文刷蓝 */
 .rte-body :deep([data-resize-container][data-resize-state='true']) { user-select: none; }

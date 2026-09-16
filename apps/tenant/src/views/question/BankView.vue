@@ -387,7 +387,12 @@ onMounted(() => {
               </li>
             </ul>
             <div v-if="analysisOpen.includes(row.id)" class="qc-answer">
-              <p><b>答案：</b><span class="qc-answer-text">{{ row.answer || '—' }}</span></p>
+              <p>
+                <b>答案：</b>
+                <!-- 客观题答案是字母用强调色纯文本；问答题答案是富文本（公式/插图） -->
+                <span v-if="row.options.length" class="qc-answer-text">{{ row.answer || '—' }}</span>
+                <RichTextViewer v-else :content="row.answer" tag="span" empty="—" />
+              </p>
               <p><b>解析：</b><RichTextViewer :content="row.analysis" tag="span" empty="—" /></p>
             </div>
             <div v-if="basket.includes(row.id) || row.status === 'rejected'" class="qc-flags">
@@ -439,7 +444,8 @@ onMounted(() => {
         </ul>
       </template>
       <h4 class="section-title">答案</h4>
-      <p class="q-text answer">{{ preview.answer || '—' }}</p>
+      <RichTextViewer v-if="!preview.options.length" class="q-text" :content="preview.answer" empty="—" />
+      <p v-else class="q-text answer">{{ preview.answer || '—' }}</p>
       <h4 class="section-title">解析</h4>
       <RichTextViewer class="q-text" :content="preview.analysis" empty="—" />
       <template v-if="preview.variantOf != null">

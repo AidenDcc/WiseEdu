@@ -106,7 +106,12 @@ onMounted(load)
             {{ 'ABCDEF'[i] }}. <RichTextViewer :content="opt" tag="span" />
           </li>
         </ul>
-        <div class="pv-answer"><span class="tag tag-green">答案</span>{{ active.answer }}</div>
+        <div class="pv-answer">
+          <span class="tag tag-green">答案</span>
+          <!-- 客观题答案是字母；问答题答案是富文本（公式/插图） -->
+          <template v-if="active.options.length">{{ active.answer }}</template>
+          <RichTextViewer v-else :content="active.answer" tag="span" empty="—" />
+        </div>
         <p class="pv-analysis"><b>解析：</b><RichTextViewer :content="active.analysis" tag="span" /></p>
         <div v-if="active.variantOf" class="pv-variant">
           <AppIcon name="branch" :size="13" /> 变式自母题 #{{ active.variantOf }}

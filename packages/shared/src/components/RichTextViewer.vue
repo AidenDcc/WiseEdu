@@ -89,10 +89,12 @@ onMounted(hydrate)
 
 .rich-text :deep(img) {
   max-width: 100%;
-  height: auto;
   border-radius: 8px;
   vertical-align: middle;
 }
+/* height:auto 只留给没写高度的图：宽高属性都在的（编辑器里四边单向拉伸过的）要按属性渲染，
+   否则 height:auto 会把垂直拉伸回弹成原比例 */
+.rich-text :deep(img:not([height])) { height: auto; }
 
 .rich-text :deep(ul),
 .rich-text :deep(ol) { margin: 0 0 8px; padding-left: 22px; }

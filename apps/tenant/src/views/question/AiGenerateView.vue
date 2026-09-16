@@ -327,7 +327,12 @@ onMounted(load)
               {{ 'ABCDEF'[oi] }}. <RichTextViewer :content="opt" tag="span" />
             </li>
           </ul>
-          <div class="rc-answer"><span class="tag tag-green">答案</span>{{ item.answer }}</div>
+          <div class="rc-answer">
+            <span class="tag tag-green">答案</span>
+            <!-- 客观题答案是字母；解答题答案是富文本（公式节点） -->
+            <template v-if="item.options.length">{{ item.answer }}</template>
+            <RichTextViewer v-else :content="item.answer" tag="span" />
+          </div>
           <p class="rc-analysis"><b>解析：</b><RichTextViewer :content="item.analysis" tag="span" /></p>
           <div class="rc-ops">
             <template v-if="!adoptedIds.has(i)">

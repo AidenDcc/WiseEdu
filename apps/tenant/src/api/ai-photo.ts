@@ -86,7 +86,9 @@ export async function recognizePhotoFile(file: File, taskId: string): Promise<Ph
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const { content } = await visionChat(messages, { json: true, maxTokens: 8192 })
-      const list = normalizeQuestionList(content, { maxCount: MAX_QUESTIONS_PER_PHOTO })
+      /* richAnswer：解答/填空类（无选项）题的答案转富文本，校对区用编辑器承载，
+         LaTeX 公式还原为标准公式节点；客观题答案仍是选项字母，不受影响 */
+      const list = normalizeQuestionList(content, { maxCount: MAX_QUESTIONS_PER_PHOTO, richAnswer: true })
       return list.map((q, i) => ({
         id: `${taskId}_r${i}`,
         stem: clip(q.stem),
