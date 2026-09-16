@@ -3674,15 +3674,38 @@ export function recognizeFile(id: number): { file: OrgFile; questionCount: numbe
 /* ================= 公式中心（FR-FX-001 ~ 004） ================= */
 
 export const standardFormulas: StandardFormula[] = [
-  { id: 1, name: '二次方程求根公式', branch: '数学', chapter: '函数与方程', latex: 'x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}', collected: true },
-  { id: 2, name: '基本不等式', branch: '数学', chapter: '不等式', latex: 'a+b \\geq 2\\sqrt{ab} \\quad (a,b>0)', collected: false },
-  { id: 3, name: '等差数列通项', branch: '数学', chapter: '数列', latex: 'a_n = a_1 + (n-1)d', collected: false },
-  { id: 4, name: '两角和差公式', branch: '数学', chapter: '三角恒等变换', latex: '\\sin(\\alpha \\pm \\beta) = \\sin\\alpha\\cos\\beta \\pm \\cos\\alpha\\sin\\beta', collected: false },
-  { id: 5, name: '牛顿第二定律', branch: '物理', chapter: '力学', latex: '\\vec{F} = m\\vec{a}', collected: false },
-  { id: 6, name: '万有引力定律', branch: '物理', chapter: '天体运动', latex: 'F = G\\frac{m_1 m_2}{r^2}', collected: false },
-  { id: 7, name: '质量守恒（配平）', branch: '化学', chapter: '化学方程式', latex: '2H_2 + O_2 \\xrightarrow{\\text{点燃}} 2H_2O', collected: false },
-  { id: 8, name: '理想气体状态方程', branch: '物理', chapter: '热学', latex: 'pV = nRT', collected: false },
+  { id: 1, name: '二次方程求根公式', branch: '数学', chapter: '函数与方程', latex: 'x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}', collected: true, knowledge: ['一元二次方程', '二次函数'] },
+  { id: 2, name: '基本不等式', branch: '数学', chapter: '不等式', latex: 'a+b \\geq 2\\sqrt{ab} \\quad (a,b>0)', collected: false, knowledge: ['不等式'] },
+  { id: 3, name: '等差数列通项', branch: '数学', chapter: '数列', latex: 'a_n = a_1 + (n-1)d', collected: false, knowledge: ['数列'] },
+  { id: 4, name: '两角和差公式', branch: '数学', chapter: '三角恒等变换', latex: '\\sin(\\alpha \\pm \\beta) = \\sin\\alpha\\cos\\beta \\pm \\cos\\alpha\\sin\\beta', collected: false, knowledge: ['三角恒等变换', '三角函数'] },
+  { id: 5, name: '牛顿第二定律', branch: '物理', chapter: '力学', latex: '\\vec{F} = m\\vec{a}', collected: false, knowledge: ['牛顿运动定律'] },
+  { id: 6, name: '万有引力定律', branch: '物理', chapter: '天体运动', latex: 'F = G\\frac{m_1 m_2}{r^2}', collected: false, knowledge: ['牛顿运动定律'] },
+  { id: 7, name: '质量守恒（配平）', branch: '化学', chapter: '化学方程式', latex: '2H_2 + O_2 \\xrightarrow{\\text{点燃}} 2H_2O', collected: false, knowledge: ['质量守恒定律', '化学方程式'] },
+  { id: 8, name: '理想气体状态方程', branch: '物理', chapter: '热学', latex: 'pV = nRT', collected: false, knowledge: [] },
+  { id: 9, name: '二次函数顶点式', branch: '数学', chapter: '二次函数', latex: 'y = a(x-h)^2 + k \\quad (a \\neq 0)', collected: false, knowledge: ['二次函数'] },
+  { id: 10, name: '点到直线距离公式', branch: '数学', chapter: '解析几何', latex: 'd = \\frac{|Ax_0+By_0+C|}{\\sqrt{A^2+B^2}}', collected: false, knowledge: ['解析几何'] },
+  { id: 11, name: '等比数列前 n 项和', branch: '数学', chapter: '数列', latex: 'S_n = \\frac{a_1(1-q^n)}{1-q} \\quad (q \\neq 1)', collected: false, knowledge: ['数列'] },
+  { id: 12, name: '抛物线标准方程', branch: '数学', chapter: '圆锥曲线', latex: 'y^2 = 2px \\quad (p>0)', collected: false, knowledge: ['抛物线', '圆锥曲线'] },
+  { id: 13, name: '对数换底公式', branch: '数学', chapter: '对数函数', latex: '\\log_a b = \\frac{\\ln b}{\\ln a}', collected: false, knowledge: ['对数函数'] },
+  { id: 14, name: '导数定义', branch: '数学', chapter: '导数', latex: "f'(x_0) = \\lim_{\\Delta x \\to 0} \\frac{f(x_0+\\Delta x)-f(x_0)}{\\Delta x}", collected: false, knowledge: ['导数概念'] },
+  { id: 15, name: '欧姆定律', branch: '物理', chapter: '恒定电流', latex: 'I = \\frac{U}{R}', collected: false, knowledge: ['恒定电流', '欧姆定律'] },
+  { id: 16, name: '电功率公式', branch: '物理', chapter: '恒定电流', latex: 'P = UI = I^2R = \\frac{U^2}{R}', collected: false, knowledge: ['恒定电流'] },
+  { id: 17, name: '浮力公式', branch: '物理', chapter: '力学', latex: 'F_{\\text{浮}} = \\rho_{\\text{液}} g V_{\\text{排}}', collected: false, knowledge: ['二力平衡'] },
+  { id: 18, name: '匀变速位移-速度关系', branch: '物理', chapter: '力学', latex: 'v^2 - v_0^2 = 2ax', collected: false, knowledge: ['匀变速直线运动'] },
+  { id: 19, name: '物质的量浓度', branch: '化学', chapter: '物质的量', latex: 'c = \\frac{n}{V}', collected: false, knowledge: ['物质的量'] },
+  { id: 20, name: '溶质质量分数', branch: '化学', chapter: '实验与计算', latex: '\\omega = \\frac{m_{\\text{溶质}}}{m_{\\text{溶液}}} \\times 100\\%', collected: false, knowledge: ['溶质质量分数'] },
 ]
+
+/** 标准公式库列表过滤：学科 / 知识点 tag（命中其一即可）/ 关键词（FR-FX 查询契约，与真实后端同 URL） */
+export function listStandardFormulas(filter: { subject?: string; knowledge?: string[]; keyword?: string } = {}): StandardFormula[] {
+  const kw = (filter.keyword ?? '').trim()
+  return standardFormulas.filter((row) => {
+    if (filter.subject && row.branch !== filter.subject) return false
+    if (filter.knowledge?.length && !row.knowledge.some((tag) => filter.knowledge!.includes(tag))) return false
+    if (kw && !row.name.includes(kw) && !row.chapter.includes(kw) && !row.latex.includes(kw)) return false
+    return true
+  })
+}
 
 export function collectStandardFormula(id: number): StandardFormula {
   const item = standardFormulas.find((row) => row.id === id)
@@ -3693,10 +3716,21 @@ export function collectStandardFormula(id: number): StandardFormula {
 
 let formulaSeq = 200
 export const orgFormulas: OrgFormula[] = [
-  { id: 201, name: '圆锥曲线焦点弦长', category: '解析几何', latex: '|AB| = \\frac{2p}{\\sin^2\\theta}', scope: 'shared', status: 'approved', owner: '李文博', updatedAt: nowStr(-90) },
-  { id: 202, name: '三棱锥体积速算', category: '立体几何', latex: 'V = \\frac{1}{6}|\\vec{a} \\cdot (\\vec{b} \\times \\vec{c})|', scope: 'shared', status: 'pending', owner: '李文博', updatedAt: nowStr(-12) },
-  { id: 203, name: '裂项相消通式', category: '数列', latex: '\\frac{1}{n(n+1)} = \\frac{1}{n} - \\frac{1}{n+1}', scope: 'mine', status: 'approved', owner: '陈明远', updatedAt: nowStr(-40) },
+  { id: 201, name: '圆锥曲线焦点弦长', subject: '数学', category: '解析几何', latex: '|AB| = \\frac{2p}{\\sin^2\\theta}', scope: 'shared', status: 'approved', owner: '李文博', updatedAt: nowStr(-90) },
+  { id: 202, name: '三棱锥体积速算', subject: '数学', category: '立体几何', latex: 'V = \\frac{1}{6}|\\vec{a} \\cdot (\\vec{b} \\times \\vec{c})|', scope: 'shared', status: 'pending', owner: '李文博', updatedAt: nowStr(-12) },
+  { id: 203, name: '裂项相消通式', subject: '数学', category: '数列', latex: '\\frac{1}{n(n+1)} = \\frac{1}{n} - \\frac{1}{n+1}', scope: 'mine', status: 'approved', owner: '陈明远', updatedAt: nowStr(-40) },
+  { id: 204, name: '位移-速度关系速用', subject: '物理', category: '运动学', latex: 'v^2 - v_0^2 = 2ax', scope: 'mine', status: 'approved', owner: '陈明远', updatedAt: nowStr(-6) },
 ]
+
+/** 我的公式列表过滤：学科 / 关键词（scope 仍由视图按「我的」客户端过滤） */
+export function listOrgFormulas(filter: { subject?: string; keyword?: string } = {}): OrgFormula[] {
+  const kw = (filter.keyword ?? '').trim()
+  return orgFormulas.filter((row) => {
+    if (filter.subject && row.subject !== filter.subject) return false
+    if (kw && !row.name.includes(kw) && !row.category.includes(kw) && !row.latex.includes(kw)) return false
+    return true
+  })
+}
 
 /** LaTeX 粗粒度语法校验：花括号/定界符配对（FR-FX-002） */
 export function validateLatex(latex: string): string | null {
@@ -3717,15 +3751,17 @@ export function saveOrgFormula(input: Partial<OrgFormula> & { name: string; late
   if (input.name.trim().length < 2 || input.name.trim().length > 20) throw new Error('公式名称须为 2-20 字')
   const latexError = validateLatex(input.latex)
   if (latexError) throw new Error(latexError)
+  if (input.id == null && !input.subject?.trim()) throw new Error('请选择学科')
   if (input.id != null) {
     const item = orgFormulas.find((row) => row.id === input.id)
     if (!item) throw new Error('公式不存在')
-    Object.assign(item, { name: input.name.trim(), latex: input.latex, category: input.category ?? item.category, updatedAt: nowStr() })
+    Object.assign(item, { name: input.name.trim(), latex: input.latex, subject: input.subject ?? item.subject, category: input.category ?? item.category, updatedAt: nowStr() })
     return item
   }
   const item: OrgFormula = {
     id: ++formulaSeq,
     name: input.name.trim(),
+    subject: input.subject!.trim(),
     category: input.category ?? '未分类',
     latex: input.latex,
     scope: 'mine',

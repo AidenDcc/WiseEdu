@@ -546,6 +546,8 @@ export interface StandardFormula {
   chapter: string
   latex: string
   collected: boolean
+  /** 知识点叶子 tag（与所选教材树的 OrgKnowledgeNode.tag 一致），用于知识点过滤 */
+  knowledge: string[]
 }
 
 export type FormulaScope = 'mine' | 'shared'
@@ -553,6 +555,9 @@ export type FormulaScope = 'mine' | 'shared'
 export interface OrgFormula {
   id: number
   name: string
+  /** 学科（租户字典 subject），我的公式页签 / 编辑器默认筛选用，保存时必填 */
+  subject: string
+  /** 细分类（数列/解析几何…），新建默认「未分类」，不再单独编辑 */
   category: string
   latex: string
   scope: FormulaScope

@@ -1,16 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import katex from 'katex'
+import 'katex/dist/katex.min.css'
 import { showToast } from '@aiteach/shared'
 import type { OrgFormula, StandardFormula } from '@aiteach/shared'
 import AppModal from './AppModal.vue'
+import { FORMULA_CATEGORIES, PLACEHOLDER } from './formula-symbols'
 import { fetchFormulas, fetchStandardFormulas } from '@/api/org'
 
 /**
- * 公式插入 / 编辑弹窗（FR-FX 复用）。
+ * 公式编辑器（WPS 公式助手风格，FR-FX 复用）。
  *
- * 「从公式库插入」直接复用现成的平台标准公式库与我的公式库接口，教师不必手写 LaTeX ——
- * 这是「插入公式」这条需求的主要落点，手写 LaTeX 只作为兜底。
+ * 「编辑 LaTeX」页签 = 分类符号/模板面板 + 源码编辑 + KaTeX 实时预览：
+ * 模板里的 \square 占位符插入后自动选中，键入即替换。
+ * 「标准公式库 / 我的公式库」页签按当前学科拉取，点选后插入到光标处（非整体替换）。
  */
 const props = withDefaults(
   defineProps<{
@@ -41,45 +44,36 @@ const standard = ref<StandardFormula[]>([])
 const mine = ref<OrgFormula[]>([])
 const loaded = ref<Record<string, boolean>>({})
 
-/** 常用符号 / 结构：点一下即追加到源码，覆盖 K12 高频写法 */
-const SYMBOLS: Array<{ label: string; insert: string; tip: string }> = [
-  { label: 'a/b', insert: '\\frac{}{}', tip: '分数' },
-  { label: '√', insert: '\\sqrt{}', tip: '根号' },
-  { label: 'xⁿ', insert: '^{}', tip: '上标' },
-  { label: 'xₙ', insert: '_{}', tip: '下标' },
-  { label: 'Σ', insert: '\\sum_{i=1}^{n}', tip: '求和' },
-  { label: '∫', insert: '\\int_{a}^{b}', tip: '积分' },
-  { label: 'lim', insert: '\\lim_{x \\to 0}', tip: '极限' },
-  { label: 'α', insert: '\\alpha', tip: '阿尔法' },
-  { label: 'β', insert: '\\beta', tip: '贝塔' },
-  { label: 'θ', insert: '\\theta', tip: '西塔' },
-  { label: 'π', insert: '\\pi', tip: '派' },
-  { label: '≤', insert: '\\leq', tip: '小于等于' },
-  { label: '≥', insert: '\\geq', tip: '大于等于' },
-  { label: '≠', insert: '\\neq', tip: '不等于' },
-  { label: '±', insert: '\\pm', tip: '正负' },
-  { label: '∞', insert: '\\infty', tip: '无穷' },
-  { label: '→', insert: '\\to', tip: '趋于' },
-  { label: '∵', insert: '\\because', tip: '因为' },
-  { label: '∴', insert: '\\therefore', tip: '所以' },
-]
+/* ===== 编辑页：分类面板 ===== */
+const activeCategory = ref(FORMULA_CATEGORIES[0].key)
+const category = computed(
+  () => FORMULA_CATEGORIES.find((row) => row.key === activeCategory.value) ?? FORMULA_CATEGORIES[0],
+)
 
 const SOURCE = ref<HTMLTextAreaElement | null>(null)
+/** 源码框失焦后记住的光标位置，供「公式库点选插入」落到原位置 */
+const caret = ref(latex.value.length)
 
-function appendSymbol(snippet: string) {
+function syncCaret() {
   const el = SOURCE.value
-  if (!el) {
-    latex.value += snippet
-    return
-  }
-  const start = el.selectionStart ?? latex.value.length
-  const end = el.selectionEnd ?? start
+  if (el && typeof el.selectionStart === 'number') caret.value = el.selectionStart
+}
+
+/** 点选符号 / 公式库行：插入到光标处；模板的首个占位符自动选中，键入即替换 */
+function insertAtCursor(snippet: string) {
+  const el = SOURCE.value
+  const fromSource = el && document.activeElement === el && typeof el.selectionStart === 'number'
+  const start = fromSource ? (el!.selectionStart as number) : caret.value
+  const end = fromSource ? (el!.selectionEnd ?? start) : start
   latex.value = latex.value.slice(0, start) + snippet + latex.value.slice(end)
-  /* 光标落在花括号内，符合「先写结构再填空」的手感 */
-  const caret = start + snippet.length - (snippet.endsWith('}') ? 1 : 0)
+  const ph = snippet.indexOf(PLACEHOLDER)
+  const pos = ph >= 0 ? start + ph : start + snippet.length
+  caret.value = ph >= 0 ? pos + PLACEHOLDER.length : pos
   requestAnimationFrame(() => {
-    el.focus()
-    el.setSelectionRange(caret, caret)
+    if (tab.value !== 'input') return
+    el?.focus()
+    if (ph >= 0) el?.setSelectionRange(pos, pos + PLACEHOLDER.length)
+    else el?.setSelectionRange(pos, pos)
   })
 }
 
@@ -96,47 +90,43 @@ const previewHtml = computed(() => {
   }
 })
 
+/** 面板按钮的 KaTeX 预览 */
+function renderPreview(source: string): string {
+  try {
+    return katex.renderToString(source, { throwOnError: false })
+  } catch {
+    return ''
+  }
+}
+
 async function loadTab(target: Tab) {
   tab.value = target
   if (target === 'input' || loaded.value[target]) return
   loaded.value[target] = true
   try {
-    if (target === 'standard') standard.value = await fetchStandardFormulas()
-    else mine.value = await fetchFormulas()
+    if (target === 'standard') {
+      standard.value = await fetchStandardFormulas(props.subject ? { subject: props.subject } : {})
+    } else {
+      mine.value = await fetchFormulas(props.subject ? { subject: props.subject } : {})
+    }
   } catch {
     showToast('公式库加载失败', 'error')
   }
 }
 
+const kw = computed(() => keyword.value.trim())
 const standardList = computed(() => {
-  const kw = keyword.value.trim()
-  /* 搜索命中为空就是为空，要能落到「没有匹配的公式」空态，不能退回全量 */
-  if (kw) {
-    return standard.value.filter((row) => row.name.includes(kw) || row.chapter.includes(kw) || row.latex.includes(kw))
-  }
-  if (!props.subject) return standard.value
-  /* 学科筛选后为空时才退回全量，避免教师以为公式库没数据 */
-  const bySubject = standard.value.filter((row) => row.branch === props.subject)
-  return bySubject.length ? bySubject : standard.value
+  if (!kw.value) return standard.value
+  return standard.value.filter((row) => row.name.includes(kw.value) || row.chapter.includes(kw.value) || row.latex.includes(kw.value))
 })
-
 const mineList = computed(() => {
-  const kw = keyword.value.trim()
-  if (!kw) return mine.value
-  return mine.value.filter((row) => row.name.includes(kw) || row.category.includes(kw) || row.latex.includes(kw))
+  if (!kw.value) return mine.value
+  return mine.value.filter((row) => row.name.includes(kw.value) || row.category.includes(kw.value) || row.latex.includes(kw.value))
 })
 
-/** 列表里的公式也做 KaTeX 预览 —— 教师靠长相认公式，不靠读 LaTeX */
-function renderPreview(source: string): string {
-  try {
-    return katex.renderToString(source, { throwOnError: false })
-  } catch {
-    return source
-  }
-}
-
+/** 公式库点选：插入光标处并切回编辑页查看结果 */
 function pick(source: string) {
-  latex.value = source
+  insertAtCursor(source)
   tab.value = 'input'
 }
 
@@ -152,18 +142,20 @@ function confirm() {
 onMounted(() => {
   loadTab('input')
   /* 预取公式库，切页签时无等待 */
-  void fetchStandardFormulas().then((rows) => {
-    standard.value = rows
-    loaded.value.standard = true
-  }).catch(() => undefined)
+  void fetchStandardFormulas(props.subject ? { subject: props.subject } : {})
+    .then((rows) => {
+      standard.value = rows
+      loaded.value.standard = true
+    })
+    .catch(() => undefined)
 })
 </script>
 
 <template>
-  <AppModal :title="editing ? '编辑公式' : '插入公式'" :width="760" @close="emit('close')">
+  <AppModal :title="editing ? '编辑公式' : '插入公式'" :width="920" @close="emit('close')">
     <div class="fp-tabs">
       <button class="fp-tab" :class="{ on: tab === 'input' }" type="button" @click="loadTab('input')">
-        手输 LaTeX
+        编辑 LaTeX
       </button>
       <button class="fp-tab" :class="{ on: tab === 'standard' }" type="button" @click="loadTab('standard')">
         平台标准公式库
@@ -174,6 +166,39 @@ onMounted(() => {
     </div>
 
     <template v-if="tab === 'input'">
+      <div class="fp-editor">
+        <div class="fp-rail">
+          <button
+            v-for="cat in FORMULA_CATEGORIES"
+            :key="cat.key"
+            class="fp-cat"
+            :class="{ on: cat.key === activeCategory }"
+            type="button"
+            @click="activeCategory = cat.key"
+          >
+            {{ cat.title }}
+          </button>
+        </div>
+        <div class="fp-panel">
+          <div class="fp-grid">
+            <button
+              v-for="item in category.items"
+              :key="item.latex + item.label"
+              class="fp-cell"
+              type="button"
+              :title="item.label"
+              @click="insertAtCursor(item.latex)"
+            >
+              <span v-if="renderPreview(item.latex)" class="fp-cell-math" v-html="renderPreview(item.latex)" />
+              <span v-else class="fp-cell-label">{{ item.label }}</span>
+            </button>
+          </div>
+          <p class="f-hint" style="margin: 6px 2px 0">
+            {{ category.title }} · 点击插入到光标处，<code>\square</code> 占位符自动选中、键入即替换
+          </p>
+        </div>
+      </div>
+
       <div class="f-field">
         <label class="f-label">LaTeX 源码<span class="req">*</span></label>
         <textarea
@@ -181,24 +206,11 @@ onMounted(() => {
           v-model="latex"
           class="f-textarea"
           rows="3"
-          placeholder="如：x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}"
+          placeholder="如：x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}（也可从上方面板点选插入）"
+          @click="syncCaret"
+          @keyup="syncCaret"
+          @select="syncCaret"
         />
-      </div>
-
-      <div class="f-field">
-        <label class="f-label">常用符号 / 结构</label>
-        <div class="fp-symbols">
-          <button
-            v-for="s in SYMBOLS"
-            :key="s.insert"
-            class="fp-sym"
-            type="button"
-            :title="s.tip"
-            @click="appendSymbol(s.insert)"
-          >
-            {{ s.label }}
-          </button>
-        </div>
       </div>
 
       <div class="f-field">
@@ -232,7 +244,7 @@ onMounted(() => {
           <code class="fp-item-latex">{{ row.latex }}</code>
         </button>
         <p v-if="(tab === 'standard' ? standardList : mineList).length === 0" class="fp-empty">
-          没有匹配的公式，可切到「手输 LaTeX」直接输入
+          {{ props.subject ? `「${props.subject}」暂无公式，可切到「编辑 LaTeX」直接输入` : '没有匹配的公式，可切到「编辑 LaTeX」直接输入' }}
         </p>
       </div>
     </template>
@@ -255,7 +267,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.fp-tabs { display: flex; gap: 6px; margin-bottom: 16px; }
+.fp-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
 .fp-tab {
   border: 1.5px solid var(--border);
   background: #fff;
@@ -269,19 +281,68 @@ onMounted(() => {
 .fp-tab:hover { border-color: var(--brand); color: var(--brand-deep); }
 .fp-tab.on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-deep); }
 
-.fp-symbols { display: flex; flex-wrap: wrap; gap: 6px; }
-.fp-sym {
-  min-width: 38px;
-  height: 32px;
-  padding: 0 9px;
+/* 编辑页：左分类栏 + 右符号宫格 */
+.fp-editor { display: flex; gap: 12px; margin-bottom: 14px; }
+.fp-rail {
+  width: 118px;
+  flex-shrink: 0;
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fp-cat {
+  text-align: left;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 7px 10px;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.fp-cat:hover { background: var(--brand-soft); color: var(--brand-deep); }
+.fp-cat.on { background: var(--brand); color: #fff; }
+
+.fp-panel { flex: 1; min-width: 0; }
+.fp-grid {
+  max-height: 264px;
+  overflow-y: auto;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 6px;
+  align-content: start;
+}
+.fp-cell {
+  min-height: 40px;
   border: 1.5px solid var(--border);
   border-radius: 8px;
   background: #fff;
-  color: var(--ink-2);
-  font-size: 13.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+  overflow: hidden;
   transition: all 0.15s;
 }
-.fp-sym:hover { border-color: var(--brand); color: var(--brand-deep); background: var(--brand-soft); }
+.fp-cell:hover { border-color: var(--brand); background: var(--brand-soft); }
+.fp-cell-math {
+  font-size: 15px;
+  color: var(--ink);
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.fp-cell-label { font-size: 12px; color: var(--ink-2); }
 
 .fp-kinds { display: flex; gap: 10px; }
 .fp-kind {

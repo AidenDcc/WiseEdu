@@ -66,7 +66,7 @@ onMounted(load)
       <div v-for="row in pendingReview" :key="row.id" class="formula-row pending">
         <div class="fr-main">
           <span class="fr-name">{{ row.name }}</span>
-          <span class="tag tag-gray">{{ row.category }}</span>
+          <span class="tag tag-gray">{{ row.subject }} · {{ row.category }}</span>
           <span class="f-hint">提交人 {{ row.owner }} · {{ row.updatedAt }}</span>
         </div>
         <code class="fr-latex">{{ row.latex }}</code>
@@ -85,7 +85,7 @@ onMounted(load)
       <div v-for="row in onshelf" :key="row.id" class="formula-row">
         <div class="fr-main">
           <span class="fr-name">{{ row.name }}</span>
-          <span class="tag tag-gray">{{ row.category }}</span>
+          <span class="tag tag-gray">{{ row.subject }} · {{ row.category }}</span>
           <span class="f-hint">贡献者 {{ row.owner }} · {{ row.updatedAt }}</span>
         </div>
         <code class="fr-latex">{{ row.latex }}</code>

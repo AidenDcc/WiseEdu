@@ -113,9 +113,16 @@ const orgRoutes: MockRoute[] = [
   { method: 'POST', path: '/tenant/files/recognize', handler: ({ body }) => guard(() => org.recognizeFile(Number(body.id))) },
 
   // 公式中心
-  { method: 'GET', path: '/tenant/formulas/standard', handler: () => guard(() => org.standardFormulas) },
+  { method: 'GET', path: '/tenant/formulas/standard', handler: ({ query }) => guard(() => org.listStandardFormulas({
+    subject: String(query.subject ?? ''),
+    knowledge: String(query.knowledge ?? '').split(',').filter(Boolean),
+    keyword: String(query.keyword ?? ''),
+  })) },
   { method: 'POST', path: '/tenant/formulas/collect', handler: ({ body }) => guard(() => org.collectStandardFormula(Number(body.id))) },
-  { method: 'GET', path: '/tenant/formulas', handler: () => guard(() => org.orgFormulas) },
+  { method: 'GET', path: '/tenant/formulas', handler: ({ query }) => guard(() => org.listOrgFormulas({
+    subject: String(query.subject ?? ''),
+    keyword: String(query.keyword ?? ''),
+  })) },
   { method: 'POST', path: '/tenant/formulas/save', handler: ({ body }) => guard(() => org.saveOrgFormula(body as never)) },
   { method: 'POST', path: '/tenant/formulas/share', handler: ({ body }) => guard(() => org.shareFormula(Number(body.id))) },
   { method: 'POST', path: '/tenant/formulas/review', handler: ({ body }) => guard(() => org.reviewFormula(Number(body.id), Boolean(body.pass))) },

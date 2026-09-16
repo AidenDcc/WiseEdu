@@ -1,6 +1,6 @@
 /**
  * 机构端业务 API 封装（FR-TM / FR-PP / FR-JC / FR-FL / FR-FX / FR-PM / FR-SQ / FR-OS）。
- * Mock 模式下 query 参数不生效，统一用 withQuery 手动拼接查询串。
+ * GET 查询串统一用 withQuery 手动拼接（mock 路由与真实后端按同一 URL 契约解析）。
  */
 import { request } from '@aiteach/shared'
 import type {
@@ -210,16 +210,30 @@ export function recognizeFile(id: number) {
 }
 
 /* ===== 公式中心 ===== */
-export function fetchStandardFormulas() {
-  return request<StandardFormula[]>('/tenant/formulas/standard')
+export interface StandardFormulaQuery {
+  subject?: string
+  /** 知识点叶子 tag，命中其一即可 */
+  knowledge?: string[]
+  keyword?: string
+}
+export function fetchStandardFormulas(query: StandardFormulaQuery = {}) {
+  return request<StandardFormula[]>(withQuery('/tenant/formulas/standard', {
+    subject: query.subject,
+    keyword: query.keyword,
+    knowledge: query.knowledge?.join(','),
+  }))
 }
 export function collectStandardFormula(id: number) {
   return request<StandardFormula>('/tenant/formulas/collect', { method: 'POST', data: { id } })
 }
-export function fetchFormulas() {
-  return request<OrgFormula[]>('/tenant/formulas')
+export interface OrgFormulaQuery {
+  subject?: string
+  keyword?: string
 }
-export function saveFormula(data: { id?: number; name: string; category?: string; latex: string }) {
+export function fetchFormulas(query: OrgFormulaQuery = {}) {
+  return request<OrgFormula[]>(withQuery('/tenant/formulas', query))
+}
+export function saveFormula(data: { id?: number; name: string; subject?: string; category?: string; latex: string }) {
   return request<OrgFormula>('/tenant/formulas/save', { method: 'POST', data })
 }
 export function shareFormula(id: number) {
