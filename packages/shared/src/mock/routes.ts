@@ -109,9 +109,10 @@ const orgRoutes: MockRoute[] = [
   { method: 'POST', path: '/tenant/folders/save', handler: ({ body }) => guard(() => org.saveFolder(body as never)) },
   { method: 'POST', path: '/tenant/folders/delete', handler: ({ body }) => guard(() => ({ moved: org.deleteFolder(Number(body.id)) })) },
   { method: 'GET', path: '/tenant/files', handler: () => guard(() => ({ list: org.orgFiles, usage: org.storageUsage })) },
-  { method: 'POST', path: '/tenant/files/upload', handler: ({ body }) => guard(() => org.uploadFiles(body.names as string[], Number(body.folderId ?? 0))) },
+  { method: 'POST', path: '/tenant/files/upload', handler: ({ body }) => guard(() => org.uploadFiles(body.names as string[], Number(body.folderId ?? 0), body.sizes as number[] | undefined)) },
   { method: 'POST', path: '/tenant/files/delete', handler: ({ body }) => guard(() => { org.deleteFile(Number(body.id)); return null }) },
   { method: 'POST', path: '/tenant/files/recognize', handler: ({ body }) => guard(() => org.recognizeFile(Number(body.id))) },
+  { method: 'POST', path: '/tenant/files/import-recognized', handler: ({ body }) => guard(() => org.importRecognizedFile(Number(body.id), { makePaper: Boolean(body.makePaper), paperName: String(body.paperName ?? ''), questions: body.questions as never })) },
 
   // 公式中心
   { method: 'GET', path: '/tenant/formulas/standard', handler: ({ query }) => guard(() => org.listStandardFormulas({

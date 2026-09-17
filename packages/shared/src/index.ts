@@ -130,4 +130,4 @@ export {
   platformPrompts,
   PERM_MODULES,
 } from './mock/org-store'
-export type { PhotoTask } from './mock/org-store'
+export type { PhotoTask, RecognizedImportQuestion } from './mock/org-store'

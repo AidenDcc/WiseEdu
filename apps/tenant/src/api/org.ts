@@ -27,7 +27,7 @@ import type {
   StandardFormula,
   TextbookOption,
 } from '@aiteach/shared'
-import type { PhotoTask } from '@aiteach/shared'
+import type { PhotoTask, RecognizedImportQuestion } from '@aiteach/shared'
 
 function withQuery<T extends object>(url: string, params: T): string {
   const search = new URLSearchParams()
@@ -203,14 +203,24 @@ export function deleteFolder(id: number) {
 export function fetchFiles() {
   return request<{ list: OrgFile[]; usage: { usedGb: number; quotaGb: number } }>('/tenant/files')
 }
-export function uploadFiles(names: string[], folderId: number) {
-  return request<OrgFile[]>('/tenant/files/upload', { method: 'POST', data: { names, folderId } })
+export function uploadFiles(names: string[], folderId: number, sizes?: number[]) {
+  return request<OrgFile[]>('/tenant/files/upload', { method: 'POST', data: { names, folderId, sizes } })
 }
 export function deleteFile(id: number) {
   return request<null>('/tenant/files/delete', { method: 'POST', data: { id } })
 }
 export function recognizeFile(id: number) {
   return request<{ file: OrgFile; questionCount: number; paperId: number }>('/tenant/files/recognize', { method: 'POST', data: { id } })
+}
+/** 文档 AI 识别确认入库：题目入题库 + 按题型归组生成草稿试卷（paperId 为 null 表示纯题集） */
+export function importRecognizedFile(
+  id: number,
+  payload: { makePaper: boolean; paperName: string; questions: RecognizedImportQuestion[] },
+) {
+  return request<{ file: OrgFile; questionCount: number; paperId: number | null }>('/tenant/files/import-recognized', {
+    method: 'POST',
+    data: { id, ...payload },
+  })
 }
 
 /* ===== 公式中心 ===== */

@@ -1,17 +1,27 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { AppIcon, showToast } from '@aiteach/shared'
+import { AppIcon, showToast, hasImage, toPlainText } from '@aiteach/shared'
 import type { FileFolder, OrgFile } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
+import RichTextEditor from '@/components/ui/RichTextEditor.vue'
 import {
   deleteFile,
   deleteFolder,
   fetchFiles,
   fetchFolders,
-  recognizeFile,
+  importRecognizedFile,
   saveFolder,
   uploadFiles,
 } from '@/api/org'
+import {
+  fileContentOf,
+  recognizeFileContent,
+  registerFileContent,
+} from '@/api/ai-file'
+import type { FileRecognizeResult, RecognizedQuestion } from '@/api/ai-file'
+import { useBaseData } from '@/composables/useBaseData'
+
+const { subjects, grades, questionTypes, difficulties, ensure, optionLabel } = useBaseData()
 
 const folders = ref<FileFolder[]>([])
 const files = ref<OrgFile[]>([])
@@ -21,6 +31,7 @@ const activeFolder = ref(0)
 const keyword = ref('')
 
 async function load() {
+  await ensure()
   const [folderList, fileList] = await Promise.all([fetchFolders(), fetchFiles()])
   folders.value = folderList
   files.value = fileList.list
@@ -94,40 +105,149 @@ async function onDeleteFolder(folder: FileFolder) {
   load()
 }
 
-/* ===== 上传 ===== */
+/* ===== 上传（真实文件；实体保留在 ai-file 的缓存里供 AI 识别用） ===== */
 const uploadOpen = ref(false)
-const uploadNames = ref<string[]>([])
+const uploadPending = ref<File[]>([])
 const uploadTarget = ref(0)
+const fileInput = ref<HTMLInputElement | null>(null)
 
-function onAddUpload() {
-  const name = window.prompt('输入模拟文件名（如：期末复习题集.pdf）', `新文件-${Date.now() % 1000}.pdf`)
-  if (name) uploadNames.value.push(name)
+function onPickFiles() {
+  fileInput.value?.click()
+}
+
+function onFilesPicked(event: Event) {
+  const input = event.target as HTMLInputElement
+  const picked = Array.from(input.files ?? [])
+  /* 同名去重（后选的覆盖先选的），避免列表里出现两个分不清的同名文件 */
+  picked.forEach((file) => {
+    const dup = uploadPending.value.findIndex((row) => row.name === file.name)
+    if (dup >= 0) uploadPending.value.splice(dup, 1)
+    uploadPending.value.push(file)
+  })
+  input.value = ''
+}
+
+function fmtSize(mb: number): string {
+  return mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.round(mb * 1024)} KB`
 }
 
 async function submitUpload() {
-  if (!uploadNames.value.length) return
-  await uploadFiles(uploadNames.value, uploadTarget.value)
+  if (!uploadPending.value.length) return
+  const pending = [...uploadPending.value]
+  const uploaded = await uploadFiles(
+    pending.map((file) => file.name),
+    uploadTarget.value,
+    pending.map((file) => file.size / 1048576),
+  )
+  /* 实体文件按返回顺序绑定，后续「识别入库」有真实内容可走 AI 引擎 */
+  uploaded.forEach((row, i) => registerFileContent(row.id, pending[i]))
   uploadOpen.value = false
-  uploadNames.value = []
-  showToast('上传完成', 'success')
+  uploadPending.value = []
+  showToast(`上传完成（${uploaded.length} 个文件）`, 'success')
   load()
 }
 
-/* ===== 识别入库（FR-FL-004/005，含额度确认） ===== */
-async function onRecognize(row: OrgFile) {
-  if (
-    !window.confirm(
-      `对《${row.name}》执行文档识别入库？\n预计消耗 1 次 AI 额度，识别结果：拆题入题库 + 生成草稿试卷。`,
-    )
-  ) {
+/* ===== AI 识别入库（FR-FL-004/005 扩展：先确认、可修改，再入库） ===== */
+
+const CHOICE_TYPES = ['单选题', '多选题', '判断题']
+function isChoiceType(type: string): boolean {
+  return CHOICE_TYPES.includes(type)
+}
+
+const recogOpen = ref(false)
+const recogPhase = ref<'running' | 'edit' | 'failed'>('running')
+const recogProgress = ref(0)
+const recogFailReason = ref('')
+/** 正在识别的文件与其预览（真实图片显示缩略图，其余显示文件卡） */
+const recogFile = ref<OrgFile | null>(null)
+const recogPreview = ref('')
+const recogResult = ref<FileRecognizeResult | null>(null)
+let recogTimer = 0
+
+async function startRecognize(row: OrgFile) {
+  recogFile.value = row
+  recogResult.value = null
+  recogFailReason.value = ''
+  recogPreview.value = ''
+  recogPhase.value = 'running'
+  recogProgress.value = 0
+  recogOpen.value = true
+  /* 真实图片文件先备好预览 */
+  const raw = fileContentOf(row.id)
+  if (row.kind === 'image' && raw) recogPreview.value = URL.createObjectURL(raw)
+  window.clearInterval(recogTimer)
+  recogTimer = window.setInterval(() => {
+    recogProgress.value = Math.min(97, recogProgress.value + 5 + Math.random() * 6)
+  }, 260)
+  try {
+    const result = await recognizeFileContent(row)
+    recogResult.value = result
+    recogPhase.value = 'edit'
+  } catch (error) {
+    recogFailReason.value = error instanceof Error ? error.message : '识别失败'
+    recogPhase.value = 'failed'
+  } finally {
+    window.clearInterval(recogTimer)
+    recogProgress.value = 100
+  }
+}
+
+function closeRecognize() {
+  window.clearInterval(recogTimer)
+  if (recogPreview.value) URL.revokeObjectURL(recogPreview.value)
+  recogOpen.value = false
+  recogFile.value = null
+  recogResult.value = null
+}
+
+/** 修改题型时同步选项结构：客观题保底 4 个空选项，主观题清空选项 */
+function onRecogTypeChange(q: RecognizedQuestion) {
+  if (isChoiceType(q.type)) {
+    if (!q.options.length) q.options = q.type === '判断题' ? ['正确', '错误'] : ['', '', '', '']
+    q.score = 5
+  } else {
+    q.options = []
+    q.score = 12
+  }
+}
+
+async function submitRecognize() {
+  const row = recogFile.value
+  const result = recogResult.value
+  if (!row || !result) return
+  const picked = result.questions.filter((q) => q.include)
+  if (!picked.length) {
+    showToast('请至少勾选 1 道题目', 'error')
     return
   }
   try {
-    const { questionCount, paperId } = await recognizeFile(row.id)
+    const { questionCount, paperId } = await importRecognizedFile(row.id, {
+      makePaper: result.isPaper,
+      paperName: result.paperName,
+      questions: result.questions.map((q) => ({
+        stem: q.stem,
+        options: isChoiceType(q.type) ? q.options.filter((opt) => toPlainText(opt).trim() || hasImage(opt)) : [],
+        answer: q.answer,
+        analysis: q.analysis,
+        subject: q.subject,
+        grade: q.grade,
+        type: q.type,
+        difficulty: q.difficulty,
+        knowledge: q.knowledge,
+        score: q.score,
+        include: q.include,
+      })),
+    })
+    closeRecognize()
     await load()
-    showToast(`识别完成：${questionCount} 题入题库（待终审），草稿试卷 #${paperId} 已生成`, 'success')
+    showToast(
+      paperId != null
+        ? `入库完成：${questionCount} 题入题库（待终审），草稿试卷 #${paperId} 已生成`
+        : `入库完成：${questionCount} 题入题库（待终审）`,
+      'success',
+    )
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '识别失败', 'error')
+    showToast(error instanceof Error ? error.message : '入库失败', 'error')
   }
 }
 
@@ -227,7 +347,7 @@ onMounted(load)
               <td>
                 <div class="op-group">
                   <button class="mini-btn" @click="onPreview(row)">预览</button>
-                  <button v-if="row.recognize === 'none'" class="mini-btn success" @click="onRecognize(row)">识别入库</button>
+                  <button v-if="row.recognize === 'none'" class="mini-btn success" @click="startRecognize(row)">识别入库</button>
                   <button class="mini-btn" @click="onDownload(row)">下载</button>
                   <button class="mini-btn danger" @click="onDelete(row)">删除</button>
                 </div>
@@ -255,7 +375,7 @@ onMounted(load)
       </template>
     </AppModal>
 
-    <!-- 上传弹窗 -->
+    <!-- 上传弹窗（真实文件；实体留在内存里供 AI 识别） -->
     <AppModal v-if="uploadOpen" title="上传文件" :width="460" @close="uploadOpen = false">
       <div class="f-field">
         <label class="f-label">目标文件夹</label>
@@ -265,18 +385,134 @@ onMounted(load)
         </select>
       </div>
       <div class="f-field">
-        <label class="f-label">文件（支持 pdf / word / ppt / 图片 / zip，单文件 ≤200MB）</label>
-        <button class="btn btn-ghost btn-sm" type="button" @click="onAddUpload"><AppIcon name="plus" :size="14" /> 添加文件</button>
-        <div v-if="uploadNames.length" class="pending-list">
-          <span v-for="(name, i) in uploadNames" :key="i" class="pending-chip">
-            {{ name }}
-            <button class="chip-x" type="button" @click="uploadNames.splice(i, 1)"><AppIcon name="close" :size="11" /></button>
+        <label class="f-label">文件（支持 pdf / word / ppt / 图片 / zip，单文件 ≤200MB；图片可直接 AI 识别）</label>
+        <input
+          ref="fileInput"
+          type="file"
+          multiple
+          hidden
+          accept=".pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.gif,.zip"
+          @change="onFilesPicked"
+        />
+        <button class="btn btn-ghost btn-sm" type="button" @click="onPickFiles"><AppIcon name="plus" :size="14" /> 选择文件</button>
+        <div v-if="uploadPending.length" class="pending-list">
+          <span v-for="(file, i) in uploadPending" :key="`${file.name}-${i}`" class="pending-chip">
+            {{ file.name }}（{{ fmtSize(file.size / 1048576) }}）
+            <button class="chip-x" type="button" @click="uploadPending.splice(i, 1)"><AppIcon name="close" :size="11" /></button>
           </span>
         </div>
       </div>
       <template #footer>
         <button class="btn btn-ghost" @click="uploadOpen = false">取消</button>
-        <button class="btn btn-primary" :disabled="!uploadNames.length" @click="submitUpload">上传（{{ uploadNames.length }}）</button>
+        <button class="btn btn-primary" :disabled="!uploadPending.length" @click="submitUpload">上传（{{ uploadPending.length }}）</button>
+      </template>
+    </AppModal>
+
+    <!-- AI 识别：进度 → 确认编辑 → 入库 -->
+    <AppModal v-if="recogOpen" :title="`AI 识别 · ${recogFile?.name ?? ''}`" :width="920" @close="closeRecognize">
+      <!-- 进度 -->
+      <div v-if="recogPhase === 'running'" class="recog-running">
+        <div class="run-ring"><AppIcon name="sparkles" :size="30" /></div>
+        <p class="run-title">AI 正在识别文档内容…</p>
+        <div class="run-steps">
+          <span>提取文档题目</span>
+          <span>判定试卷/题集类型</span>
+          <span>结构化公式与图形</span>
+        </div>
+        <div class="progress-track"><div class="progress-fill" :style="{ width: `${recogProgress}%` }" /></div>
+        <p class="f-hint">{{ recogProgress < 100 ? '正在调用大模型…' : '整理识别结果…' }}</p>
+      </div>
+
+      <!-- 失败 -->
+      <div v-else-if="recogPhase === 'failed'" class="recog-failed">
+        <AppIcon name="warning" :size="30" />
+        <p>{{ recogFailReason }}</p>
+        <button class="btn btn-ghost btn-sm" @click="recogFile && startRecognize(recogFile)">重试</button>
+      </div>
+
+      <!-- 确认编辑 -->
+      <div v-else-if="recogResult" class="recog-layout">
+        <!-- 左：原文件预览 -->
+        <div class="origin-pane">
+          <div class="pane-title">原始文件</div>
+          <img v-if="recogPreview" class="origin-img" :src="recogPreview" :alt="recogFile?.name" />
+          <div v-else class="origin-card">
+            <AppIcon :name="recogFile ? KIND_ICON[recogFile.kind] : 'file'" :size="36" />
+            <p class="origin-name">{{ recogFile?.name }}</p>
+            <p class="f-hint">{{ recogFile ? fmtSize(recogFile.sizeMb) : '' }}</p>
+          </div>
+        </div>
+
+        <!-- 右：结构化结果（逐题可改） -->
+        <div class="struct-pane">
+          <div class="pane-title">
+            识别结果（{{ recogResult.questions.length }} 题）
+            <span class="tag" :class="recogResult.engine === 'ai' ? 'tag-green' : 'tag-gray'" style="margin-left: 8px">
+              {{ recogResult.engine === 'ai' ? '真实 AI' : '本地演示' }}
+            </span>
+          </div>
+
+          <!-- 试卷结论 -->
+          <div class="paper-judge">
+            <label class="pj-check">
+              <input v-model="recogResult.isPaper" type="checkbox" />
+              识别为<b>完整试卷</b>（入库时生成草稿试卷）
+            </label>
+            <input v-if="recogResult.isPaper" v-model="recogResult.paperName" class="f-input" placeholder="试卷名称" />
+          </div>
+
+          <div v-for="(q, qi) in recogResult.questions" :key="q.key" class="recog-q" :class="{ off: !q.include }">
+            <div class="rq-head">
+              <label class="rq-include">
+                <input v-model="q.include" type="checkbox" />
+                <b>第 {{ qi + 1 }} 题</b>
+              </label>
+              <select v-model="q.type" class="f-select rq-type" @change="onRecogTypeChange(q)">
+                <option v-for="t in questionTypes" :key="t" :value="t">{{ t }}</option>
+              </select>
+              <select v-model="q.subject" class="f-select rq-meta">
+                <option v-for="s in subjects" :key="s" :value="s">{{ optionLabel(subjects, s) }}</option>
+              </select>
+              <select v-model="q.grade" class="f-select rq-meta">
+                <option v-for="g in grades" :key="g" :value="g">{{ optionLabel(grades, g) }}</option>
+              </select>
+              <select v-model="q.difficulty" class="f-select rq-meta">
+                <option v-for="d in difficulties" :key="d" :value="d">{{ d }}</option>
+              </select>
+              <label class="rq-score">分值 <input v-model.number="q.score" type="number" min="0.5" max="100" step="0.5" class="f-input" /></label>
+              <button class="mini-btn danger" type="button" @click="recogResult?.questions.splice(qi, 1)">删除</button>
+            </div>
+            <label class="f-label">题干</label>
+            <RichTextEditor v-model="q.stem" :subject="q.subject" :min-height="70" placeholder="识别出的题干，可直接修正" />
+            <template v-if="isChoiceType(q.type)">
+              <label class="f-label" style="margin-top: 8px">选项</label>
+              <div v-for="(opt, oi) in q.options" :key="oi" class="rq-opt">
+                <span class="rq-letter">{{ 'ABCDEF'[oi] }}</span>
+                <RichTextEditor v-model="q.options[oi]" class="rq-opt-editor" compact :subject="q.subject" :min-height="36" :placeholder="`选项 ${'ABCDEF'[oi]}`" />
+                <button v-if="q.options.length > 2 && q.type !== '判断题'" class="mini-btn danger" type="button" @click="q.options.splice(oi, 1)">删</button>
+              </div>
+              <button v-if="q.type !== '判断题' && q.options.length < 6" class="btn btn-ghost btn-sm" type="button" @click="q.options.push('')">
+                <AppIcon name="plus" :size="13" /> 添加选项
+              </button>
+              <label class="f-label" style="margin-top: 8px">答案（选项字母，多选连写如 AC）</label>
+              <input v-model="q.answer" class="f-input" placeholder="如 A 或 AC" />
+            </template>
+            <template v-else>
+              <label class="f-label" style="margin-top: 8px">答案（主观题，支持公式）</label>
+              <RichTextEditor v-model="q.answer" :subject="q.subject" :min-height="70" placeholder="参考答案，可用公式按钮插入 LaTeX" />
+            </template>
+            <label class="f-label" style="margin-top: 8px">解析</label>
+            <RichTextEditor v-model="q.analysis" :subject="q.subject" :min-height="60" placeholder="解析（选填）" />
+          </div>
+          <p v-if="!recogResult.questions.length" class="f-hint">识别结果为空，可重试或放弃</p>
+        </div>
+      </div>
+
+      <template #footer>
+        <button class="btn btn-ghost" @click="closeRecognize">取消</button>
+        <button v-if="recogPhase === 'edit'" class="btn btn-primary" :disabled="!recogResult?.questions.some((q) => q.include)" @click="submitRecognize">
+          确认入库（消耗 1 次 AI 额度）
+        </button>
       </template>
     </AppModal>
   </div>
@@ -315,4 +551,56 @@ onMounted(load)
   font-size: 12.5px; color: var(--ink-2); padding: 4px 10px;
 }
 .chip-x { display: flex; color: var(--sub); }
+
+/* ===== AI 识别弹窗 ===== */
+.recog-running { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 18px 0 8px; }
+.run-ring {
+  width: 64px; height: 64px; border-radius: 50%;
+  background: var(--brand-soft); color: var(--brand-deep);
+  display: flex; align-items: center; justify-content: center;
+  animation: ring-pulse 1.6s ease-in-out infinite;
+}
+@keyframes ring-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.92); opacity: 0.75; } }
+.run-title { font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.run-steps { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.run-steps span { font-size: 12px; color: var(--sub); background: #f5f8f8; border-radius: 999px; padding: 3px 10px; }
+.progress-track { width: 100%; height: 7px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.progress-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--brand), var(--brand-deep)); transition: width 0.25s; }
+.recog-failed { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 16px 0; color: var(--ink-2); }
+
+.recog-layout { display: grid; grid-template-columns: 280px 1fr; gap: 14px; align-items: start; }
+.origin-pane {
+  border: 1px solid var(--border); border-radius: 10px; padding: 12px;
+  background: #f7fafa; position: sticky; top: 0;
+}
+.pane-title { font-size: 13px; font-weight: 700; color: var(--ink); margin-bottom: 10px; display: flex; align-items: center; }
+.origin-img { width: 100%; border-radius: 8px; border: 1px solid var(--border); }
+.origin-card { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 28px 10px; color: var(--brand-deep); }
+.origin-name { margin: 0; font-size: 12.5px; color: var(--ink-2); word-break: break-all; text-align: center; }
+
+.struct-pane { min-width: 0; }
+.paper-judge {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  border: 1px dashed var(--border); border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 12px; background: #fff;
+}
+.pj-check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); }
+.paper-judge .f-input { width: 260px; }
+
+.recog-q { border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 12px; background: #fff; }
+.recog-q.off { opacity: 0.55; }
+.rq-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.rq-include { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink); }
+.rq-type { width: 96px; }
+.rq-meta { width: 88px; }
+.rq-score { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--sub); margin-left: auto; }
+.rq-score .f-input { width: 64px; }
+.rq-opt { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.rq-letter {
+  width: 24px; height: 24px; flex-shrink: 0; border-radius: 6px;
+  background: var(--brand-soft); color: var(--brand-deep);
+  font-size: 12px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.rq-opt-editor { flex: 1; min-width: 0; }
 </style>

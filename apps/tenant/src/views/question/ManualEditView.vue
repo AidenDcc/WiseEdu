@@ -6,6 +6,9 @@ import type { OrgCategory } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import RichTextEditor from '@/components/ui/RichTextEditor.vue'
 import { fetchCategories, fetchQuestions, saveQuestion } from '@/api/org'
+import { checkQuestionByAi } from '@/api/ai-check'
+import type { AiCheckReport } from '@/api/ai-check'
+import { alignKnowledgeToPool } from '@/api/ai-photo'
 import { useBaseData } from '@/composables/useBaseData'
 import { useKnowledgePool } from '@/composables/useKnowledgePool'
 
@@ -265,6 +268,150 @@ async function save(submit: boolean) {
   } finally {
     saving.value = false
   }
+}
+
+/* ===== AI 检测（质检 + 缺失答案/解析补充，结论可回写表单） ===== */
+const checkOpen = ref(false)
+const checkPhase = ref<'running' | 'done' | 'failed'>('running')
+const checkProgress = ref(0)
+const checkFailReason = ref('')
+const checkReport = ref<AiCheckReport | null>(null)
+let checkTimer = 0
+
+const OVERALL_TEXT = { pass: '检测通过', warn: '建议关注', fail: '需修正' } as const
+const LEVEL_TEXT = { ok: '正常', warn: '提示', error: '错误' } as const
+
+function checkInput() {
+  return {
+    subject: form.subject,
+    grade: form.grade,
+    type: form.type,
+    difficulty: form.difficulty,
+    knowledge: [...form.knowledge],
+    stem: form.stem,
+    options: isChoice.value ? form.options.filter((opt) => hasContent(opt)) : [],
+    answer: answerText.value,
+    analysis: form.analysis,
+  }
+}
+
+async function runCheck() {
+  checkOpen.value = true
+  checkPhase.value = 'running'
+  checkProgress.value = 0
+  checkReport.value = null
+  checkFailReason.value = ''
+  /* 与 AI 出题页同一套假进度：接口未返回前先走到 97%，完成后补满 */
+  window.clearInterval(checkTimer)
+  checkTimer = window.setInterval(() => {
+    checkProgress.value = Math.min(97, checkProgress.value + 5 + Math.random() * 6)
+  }, 260)
+  try {
+    checkReport.value = await checkQuestionByAi(checkInput())
+    checkPhase.value = 'done'
+  } catch (error) {
+    checkFailReason.value = error instanceof Error ? error.message : '检测失败'
+    checkPhase.value = 'failed'
+  } finally {
+    window.clearInterval(checkTimer)
+    checkProgress.value = 100
+  }
+}
+
+function closeCheck() {
+  window.clearInterval(checkTimer)
+  checkOpen.value = false
+}
+
+/** AI 建议与当前表单是否有实质差异（纯文本比较，忽略 HTML 标签差异） */
+function fieldDiffers(current: string, next: string): boolean {
+  return toPlainText(current).trim() !== toPlainText(next).trim()
+}
+
+const corrected = computed(() => checkReport.value?.corrected)
+
+/** 逐字段修正建议（与当前值有差异才列出）；answer 仅当非选项结构差异时单列 */
+const corrections = computed(() => {
+  const c = corrected.value
+  if (!c) return [] as Array<{ field: string; label: string; value: string }>
+  const rows: Array<{ field: string; label: string; value: string }> = []
+  if (fieldDiffers(form.stem, c.stem)) rows.push({ field: 'stem', label: '题干', value: c.stem })
+  if (isChoice.value && c.options.length) {
+    const cur = form.options.map((opt) => toPlainText(opt).trim()).join('｜')
+    const next = c.options.map((opt) => toPlainText(opt).trim()).join('｜')
+    if (cur !== next) rows.push({ field: 'options', label: '选项与正确项', value: c.options.join('<br>') })
+  }
+  if (fieldDiffers(answerText.value, c.answer)) rows.push({ field: 'answer', label: '答案', value: c.answer })
+  if (fieldDiffers(form.analysis, c.analysis)) rows.push({ field: 'analysis', label: '解析', value: c.analysis })
+  return rows
+})
+
+/** 基本信息修正建议（学科/年级/难度/知识点与表单不一致时） */
+const metaCorrection = computed(() => {
+  const c = corrected.value
+  if (!c) return null
+  const parts: string[] = []
+  if (c.subject && c.subject !== form.subject && subjects.value.includes(c.subject)) parts.push(`学科 ${form.subject} → ${c.subject}`)
+  if (c.grade && c.grade !== form.grade && grades.value.includes(c.grade)) parts.push(`年级 ${form.grade} → ${c.grade}`)
+  if (c.difficulty && c.difficulty !== form.difficulty && difficulties.value.includes(c.difficulty)) {
+    parts.push(`难度 ${form.difficulty} → ${c.difficulty}`)
+  }
+  const aligned = (c.knowledge ?? [])
+    .map((name) => alignKnowledgeToPool(name, knowledgePool.value))
+    .filter((name) => name && !form.knowledge.includes(name))
+  if (aligned.length) parts.push(`知识点建议：${aligned.join('、')}`)
+  return parts.length ? { text: parts.join('；'), knowledge: aligned } : null
+})
+
+function applyCorrection(field: string) {
+  const c = corrected.value
+  if (!c) return
+  if (field === 'stem') form.stem = c.stem
+  else if (field === 'options') {
+    form.options = [...c.options]
+    form.answers = c.answer
+      .toUpperCase()
+      .replace(/[^A-F]/g, '')
+      .split('')
+      .map((ch) => 'ABCDEF'.indexOf(ch))
+      .filter((i) => i >= 0)
+  } else if (field === 'answer') {
+    if (isChoice.value) {
+      form.answers = c.answer
+        .toUpperCase()
+        .replace(/[^A-F]/g, '')
+        .split('')
+        .map((ch) => 'ABCDEF'.indexOf(ch))
+        .filter((i) => i >= 0)
+    } else if (form.type === '填空题') {
+      form.fillAnswers = c.answer.split('｜').map((value) => ({ value: value.trim(), equivalents: '' }))
+    } else {
+      form.essayAnswer = c.answer
+    }
+  } else if (field === 'analysis') {
+    form.analysis = c.analysis
+  }
+  dirty.value = true
+  showToast('已回写到表单', 'success')
+}
+
+function applyMetaCorrection() {
+  const c = corrected.value
+  const meta = metaCorrection.value
+  if (!c || !meta) return
+  if (c.subject && subjects.value.includes(c.subject)) form.subject = c.subject
+  if (c.grade && grades.value.includes(c.grade)) form.grade = c.grade
+  if (c.difficulty && difficulties.value.includes(c.difficulty)) form.difficulty = c.difficulty
+  if (meta.knowledge.length) {
+    form.knowledge = [...new Set([...form.knowledge, ...meta.knowledge])].slice(0, 5)
+  }
+  dirty.value = true
+  showToast('基本信息已回写', 'success')
+}
+
+function applyAllCorrections() {
+  corrections.value.forEach((row) => applyCorrection(row.field))
+  applyMetaCorrection()
 }
 
 /* ===== 预览 ===== */
@@ -555,6 +702,9 @@ onMounted(load)
     <div class="panel action-bar">
       <button class="btn btn-ghost" @click="onCancel">取消</button>
       <div style="display: flex; gap: 10px; margin-left: auto">
+        <button class="btn btn-ghost" :disabled="saving" @click="runCheck">
+          <AppIcon name="sparkles" :size="15" /> AI 检测
+        </button>
         <button class="btn btn-ghost" @click="previewOpen = true">
           <AppIcon name="search" :size="15" /> 预览
         </button>
@@ -586,6 +736,72 @@ onMounted(load)
         </div>
         <p v-if="hasContent(form.analysis)" class="pv-analysis"><b>解析：</b><RichTextViewer :content="form.analysis" tag="span" /></p>
       </div>
+    </AppModal>
+    <!-- AI 检测：进度 + 审查结论 + 修正回写 -->
+    <AppModal v-if="checkOpen" title="AI 检测" :width="660" @close="closeCheck">
+      <!-- 进度 -->
+      <div v-if="checkPhase === 'running'" class="check-running">
+        <div class="run-ring"><AppIcon name="sparkles" :size="30" /></div>
+        <p class="run-title">AI 正在检测这道题…</p>
+        <div class="run-steps">
+          <span>匹配基本信息</span>
+          <span>审查题干与选项</span>
+          <span>验算答案与解析</span>
+        </div>
+        <div class="progress-track"><div class="progress-fill" :style="{ width: `${checkProgress}%` }" /></div>
+        <p class="f-hint">{{ checkProgress < 100 ? '正在调用大模型…' : '整理检测结论…' }}</p>
+      </div>
+
+      <!-- 失败 -->
+      <div v-else-if="checkPhase === 'failed'" class="check-failed">
+        <AppIcon name="warning" :size="30" />
+        <p>{{ checkFailReason }}</p>
+        <button class="btn btn-ghost btn-sm" @click="runCheck">重试</button>
+      </div>
+
+      <!-- 结论 + 修正回写 -->
+      <template v-else-if="checkReport">
+        <div class="check-head">
+          <span class="tag" :class="checkReport.overall === 'pass' ? 'tag-green' : checkReport.overall === 'warn' ? 'tag-blue' : 'tag-red'">
+            {{ OVERALL_TEXT[checkReport.overall] }}
+          </span>
+          <span class="tag" :class="checkReport.engine === 'deepseek' ? 'tag-green' : 'tag-gray'">
+            {{ checkReport.engine === 'deepseek' ? '真实 AI' : '本地演示' }}
+          </span>
+          <span v-if="checkReport.tokens" class="f-hint" style="margin-left: auto">{{ checkReport.tokens }} tokens</span>
+        </div>
+        <ul class="check-items">
+          <li v-for="(item, i) in checkReport.items" :key="i" :class="`lv-${item.level}`">
+            <div class="ci-bar">
+              <b>{{ item.aspect }}</b>
+              <span class="lv-tag">{{ LEVEL_TEXT[item.level] }}</span>
+            </div>
+            <p>{{ item.message }}</p>
+          </li>
+        </ul>
+
+        <template v-if="corrections.length || metaCorrection">
+          <div class="corr-title">AI 修正建议（点击「采纳」回写到表单）</div>
+          <div v-if="metaCorrection" class="corr-row">
+            <div class="corr-label">基本信息</div>
+            <div class="corr-value">{{ metaCorrection.text }}</div>
+            <button class="mini-btn" type="button" @click="applyMetaCorrection">采纳</button>
+          </div>
+          <div v-for="row in corrections" :key="row.field" class="corr-row">
+            <div class="corr-label">{{ row.label }}</div>
+            <div class="corr-value"><RichTextViewer :content="row.value" tag="span" /></div>
+            <button class="mini-btn" type="button" @click="applyCorrection(row.field)">采纳</button>
+          </div>
+          <button class="btn btn-primary btn-sm" style="margin-top: 12px" @click="applyAllCorrections">
+            全部采纳并回写
+          </button>
+        </template>
+        <p v-else-if="!checkReport.corrected" class="f-hint" style="margin-top: 10px">AI 未返回可回写的修正版</p>
+        <p v-else class="f-hint" style="margin-top: 10px">未发现需要修正的问题</p>
+      </template>
+      <template #footer>
+        <button class="btn btn-ghost" @click="closeCheck">关闭</button>
+      </template>
     </AppModal>
   </div>
 </template>
@@ -658,6 +874,48 @@ onMounted(load)
 }
 
 .preview-card { background: #f7fafa; border-radius: 12px; padding: 16px 18px; }
+
+/* ===== AI 检测弹窗 ===== */
+.check-running { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 18px 0 8px; }
+.run-ring {
+  width: 64px; height: 64px; border-radius: 50%;
+  background: var(--brand-soft); color: var(--brand-deep);
+  display: flex; align-items: center; justify-content: center;
+  animation: ring-pulse 1.6s ease-in-out infinite;
+}
+@keyframes ring-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.92); opacity: 0.75; } }
+.run-title { font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.run-steps { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.run-steps span {
+  font-size: 12px; color: var(--sub); background: #f5f8f8;
+  border-radius: 999px; padding: 3px 10px;
+}
+.progress-track { width: 100%; height: 7px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.progress-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--brand), var(--brand-deep)); transition: width 0.25s; }
+.check-failed { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 16px 0; color: var(--ink-2); }
+
+.check-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.check-items { list-style: none; margin: 0 0 4px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.check-items li { border: 1px solid var(--border); border-left-width: 3px; border-radius: 8px; padding: 8px 12px; background: #fbfdfd; }
+.check-items li.lv-ok { border-left-color: var(--success); }
+.check-items li.lv-warn { border-left-color: #d97706; }
+.check-items li.lv-error { border-left-color: var(--danger, #dc2626); }
+.ci-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+.ci-bar b { font-size: 13px; color: var(--ink); }
+.lv-tag { font-size: 11px; border-radius: 999px; padding: 1px 8px; background: #f5f8f8; color: var(--sub); }
+.lv-ok .lv-tag { color: var(--success); }
+.lv-warn .lv-tag { color: #d97706; }
+.lv-error .lv-tag { color: #dc2626; }
+.check-items p { margin: 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.6; }
+
+.corr-title { font-size: 13px; font-weight: 700; color: var(--ink); margin: 14px 0 8px; }
+.corr-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  border: 1px dashed var(--border); border-radius: 8px;
+  padding: 8px 10px; margin-bottom: 8px; background: #fff;
+}
+.corr-label { font-size: 12px; font-weight: 600; color: var(--brand-deep); width: 64px; flex-shrink: 0; padding-top: 2px; }
+.corr-value { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.6; max-height: 110px; overflow-y: auto; }
 .pv-meta { display: flex; gap: 8px; margin-bottom: 12px; }
 .pv-stem { font-size: 14.5px; color: var(--ink); line-height: 1.8; margin-bottom: 12px; }
 .option-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }

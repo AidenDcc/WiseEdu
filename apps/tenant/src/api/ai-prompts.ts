@@ -150,3 +150,85 @@ export function buildPhotoUserPrompt(fileName: string): string {
     '卷面上的图形若印刷不清，可在 diagram 字段用 SVG 按规则重绘，否则填 null。',
   ].join('\n')
 }
+
+/* ==================== AI 检测提示词（手动录入质检） ==================== */
+
+export const CHECK_SYSTEM_PROMPT = `你是一名资深 K12 学科质检专家，负责审查教师录入的题目，找出错误并给出可直接使用的修正版。
+
+# 任务
+用户会提交一道题的完整信息（基本信息 + 题干/选项/答案/解析）。你需要：
+1. 基本信息匹配：判断学科、年级、题型、难度、知识点与题干内容是否匹配（如把初三二次函数题标成「高一·集合」即不匹配；知识点张冠李戴即不匹配）；
+2. 题干审查：表述是否完整、严谨、无歧义，公式是否合法，是否存在知识性错误；
+3. 选项审查（客观题）：选项数量与题型是否匹配、是否有重复/重叠/明显错误的选项、干扰项是否有效；
+4. 答案审查：客观题答案字母是否在选项范围内且确实正确（必要时自己演算）；主观题答案是否与题干设问对应、要点是否完整；
+5. 解析审查：解析是否正确、步骤是否完整、与答案是否自洽；
+6. 补充义务：若用户未提供答案或解析（空字符串），你必须根据题干推算并补全 —— 这是「AI 补充」功能，补全的解析开头标注「（AI 补）」。
+
+# 输出格式（硬性要求，只输出 JSON，不输出任何其他文字）
+{
+  "overall": "pass | warn | fail",
+  "items": [
+    { "aspect": "基本信息匹配 | 题干 | 选项 | 答案 | 解析", "level": "ok | warn | error", "message": "一句话结论与依据" }
+  ],
+  "questions": [ { 修正后的完整题目 } ]
+}
+- overall：全部 ok 或仅轻微提示 → pass；有可接受的小问题 → warn；存在必须修正的错误（答案错/题干病句/超纲等）→ fail。
+- items：按五个 aspect 各给一条，逐题审查，不遗漏；没问题的 aspect 也给出 level=ok 与简短肯定语。
+- questions：恰好 1 个元素，为修正后的完整题目，结构与出题 Schema 一致（即使无需修正，也原样转写一遍，供系统回写）。
+  修正原则：只改错误，不擅自改写没有问题的内容；主观题（填空/解答）answer 给要点字符串。
+
+${SCHEMA_RULES}
+
+${FORMULA_RULES}
+
+${SELF_CHECK}`
+
+/** AI 检测的用户提示词：把当前表单内容如实提交 */
+export function buildCheckUserPrompt(input: {
+  subject: string
+  grade: string
+  type: string
+  difficulty: string
+  knowledge: string[]
+  stem: string
+  options: string[]
+  answer: string
+  analysis: string
+}): string {
+  return [
+    '请审查下面这道题：',
+    `- 学科：${input.subject}`,
+    `- 年级：${input.grade}`,
+    `- 题型：${input.type}`,
+    `- 难度：${input.difficulty}`,
+    `- 知识点：${input.knowledge.join('、') || '（未选）'}`,
+    `- 题干：${input.stem || '（空）'}`,
+    `- 选项：${input.options.length ? input.options.map((opt, i) => `${'ABCDEF'[i]}. ${opt}`).join('  ') : '（无选项）'}`,
+    `- 答案：${input.answer || '（空）'}`,
+    `- 解析：${input.analysis || '（空）'}`,
+    '',
+    '请按系统要求输出 JSON：items 给五个 aspect 的审查结论，questions 给修正后的完整题目（答案/解析为空时必须补全）。',
+  ].join('\n')
+}
+
+/* ==================== 文档识别提示词（我的文件 → 结构化） ==================== */
+
+/**
+ * 文档识别在拍照识别基础上扩展两个字段：
+ * - is_paper：整份文档是否构成一张完整试卷（有卷头/大题结构/成套题目），决定入库时是否生成草稿试卷；
+ * - paper_name：建议的试卷名称（取文档名去扩展名，可润色）。
+ */
+export const FILE_SYSTEM_PROMPT = `${PHOTO_SYSTEM_PROMPT}
+
+# 额外输出字段（放在 questions 同级）
+- "is_paper": true 或 false —— 整份文档是否构成一张完整试卷；
+- "paper_name": 试卷名称字符串（is_paper 为 true 时必填，取文档主题命名）。`
+
+export function buildFileUserPrompt(fileName: string): string {
+  return [
+    `请识别这份文档（${fileName}）中的全部试题，按题号顺序逐题输出 JSON。`,
+    '客观题（选择/判断）务必转录全部选项；解答题/填空题 options 填空数组。',
+    '卷面上的图形若印刷不清，可在 diagram 字段用 SVG 按规则重绘，否则填 null。',
+    '同时给出 is_paper（是否为完整试卷）与 paper_name（建议试卷名）。',
+  ].join('\n')
+}

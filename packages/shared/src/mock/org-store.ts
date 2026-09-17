@@ -3628,16 +3628,26 @@ export function deleteFolder(id: number): number {
   return inner.length
 }
 
-export function uploadFiles(names: string[], folderId: number): OrgFile[] {
-  return names.map((name) => {
+/** 扩展名 → 文件类型（真实上传的 jpg/docx 等也归到对应大类） */
+const FILE_KIND_BY_EXT: Record<string, OrgFile['kind']> = {
+  pdf: 'pdf',
+  word: 'word', doc: 'word', docx: 'word',
+  ppt: 'ppt', pptx: 'ppt',
+  image: 'image', jpg: 'image', jpeg: 'image', png: 'image', webp: 'image', gif: 'image',
+  zip: 'zip',
+}
+
+export function uploadFiles(names: string[], folderId: number, sizes?: number[]): OrgFile[] {
+  return names.map((name, i) => {
     const ext = name.split('.').pop()?.toLowerCase() ?? 'pdf'
-    const kind = (['pdf', 'word', 'image', 'ppt', 'zip'].includes(ext) ? ext : 'pdf') as OrgFile['kind']
+    const kind = FILE_KIND_BY_EXT[ext] ?? 'pdf'
     const item: OrgFile = {
       id: ++fileSeq,
       name,
       kind,
       folderId,
-      sizeMb: Math.round((1 + Math.random() * 20) * 10) / 10,
+      /* 真实上传（sizes 传入）用实际大小；模拟上传保持随机演示值 */
+      sizeMb: sizes?.[i] != null ? Math.round(sizes[i] * 10) / 10 : Math.round((1 + Math.random() * 20) * 10) / 10,
       recognize: 'none',
       owner: CURRENT.name,
       uploadedAt: nowStr(),
@@ -3692,6 +3702,105 @@ export function recognizeFile(id: number): { file: OrgFile; questionCount: numbe
   })
   papers.unshift(paper)
   return { file: item, questionCount: count, paperId: paper.id }
+}
+
+/* ================= 文档 AI 识别：确认后入库（FR-FL-004/005 扩展） ================= */
+
+export interface RecognizedImportQuestion {
+  stem: string
+  options: string[]
+  answer: string
+  analysis: string
+  subject: string
+  grade: string
+  type: string
+  difficulty: string
+  knowledge: string[]
+  score: number
+  /** 确认弹窗里的勾选：取消勾选则不入库 */
+  include: boolean
+}
+
+/** 题型 → 试卷大题标题（组卷自动归类与协同组卷页保持同一套命名） */
+const IMPORT_SECTION_TITLE: Record<string, string> = {
+  单选题: '单项选择题',
+  多选题: '多项选择题',
+  判断题: '判断题',
+  填空题: '填空题',
+  解答题: '解答题',
+}
+const SECTION_TYPE_ORDER = ['单选题', '多选题', '判断题', '填空题', '解答题']
+
+/**
+ * 文档识别确认入库：勾选题目入题库（待终审），makePaper 时按题型自动归组
+ * 生成草稿试卷（大题顺序固定：单选 → 多选 → 判断 → 填空 → 解答）。
+ * 返回 { questionCount, paperId }；paperId 为 null 表示纯题集入库（未生成试卷）。
+ */
+export function importRecognizedFile(
+  id: number,
+  payload: { makePaper: boolean; paperName: string; questions: RecognizedImportQuestion[] },
+): { file: OrgFile; questionCount: number; paperId: number | null } {
+  const item = orgFiles.find((row) => row.id === id)
+  if (!item) throw new Error('文件不存在')
+  if (item.recognize === 'done') throw new Error('该文件已识别入库')
+  consumeQuota(1)
+  const included = payload.questions.filter((q) => q.include && q.stem.trim())
+  if (!included.length) throw new Error('请至少勾选 1 道题目')
+  const imported = included.map((q) => {
+    /* 客观题答案是字母保持纯文本；主观题答案是富文本（公式/插图），同解析口径净化 */
+    const question = seedQuestion({
+      id: ++questionSeq,
+      stem: sanitizeRichHtml(q.stem),
+      subject: q.subject,
+      grade: q.grade,
+      type: q.type,
+      difficulty: q.difficulty,
+      knowledge: q.knowledge.slice(0, 3),
+      answer: q.options.length ? q.answer.trim() : sanitizeRichHtml(q.answer),
+      analysis: sanitizeRichHtml(q.analysis),
+      options: (q.options ?? []).map((opt) => sanitizeRichHtml(opt)),
+      source: '文档导入',
+      status: 'checking',
+      library: 'personal',
+      categoryId: 2,
+      owner: CURRENT.name,
+      ownerId: CURRENT.id,
+    })
+    questions.unshift(question)
+    window_setTimeout(() => {
+      question.status = 'pending'
+      question.aiChecks = aiChecksFor(question.stem)
+      question.aiSuspects = []
+    }, 0)
+    return { question, score: q.score }
+  })
+  let paperId: number | null = null
+  if (payload.makePaper) {
+    const sections = SECTION_TYPE_ORDER.map((type, i) => {
+      const rows = imported.filter((row) => row.question.type === type)
+      if (!rows.length) return null
+      return {
+        id: ++sectionSeq,
+        title: `${'一二三四五六七八'[i]}、${IMPORT_SECTION_TITLE[type] ?? `${type}大题`}`,
+        questions: rows.map((row) => ({ questionId: row.question.id, score: row.score })),
+      }
+    }).filter((section): section is NonNullable<typeof section> => section !== null)
+    /* 大题编号按实际个数重新顺排（上面的 i 是固定顺序位，可能出现跳号） */
+    sections.forEach((section, i) => {
+      section.title = section.title.replace(/^[一二三四五六七八九十]+、/, `${'一二三四五六七八'[i]}、`)
+    })
+    const paper = seedPaper({
+      id: ++paperSeq,
+      name: payload.paperName.trim() || item.name.replace(/\.\w+$/, ''),
+      status: 'draft',
+      sections,
+      owner: CURRENT.name,
+    })
+    papers.unshift(paper)
+    paperId = paper.id
+  }
+  item.recognize = 'done'
+  return { file: item, questionCount: imported.length, paperId }
 }
 
 /* ================= 公式中心（FR-FX-001 ~ 004） ================= */
