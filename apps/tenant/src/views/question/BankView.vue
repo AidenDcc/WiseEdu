@@ -551,8 +551,9 @@ onMounted(() => {
 .opt-chip.on { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
 
 /* ===== 列表 =====
-   面板撑满右栏剩余高度：工具栏、分页固定，仅题目列表区域滚动 */
-.table-panel { min-width: 0; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+   面板撑满右栏剩余高度：工具栏、分页固定，仅题目列表区域滚动。
+   面板自带内边距：搜索框 / 显示切换 / 手动录题按钮不与面板边缘贴边 */
+.table-panel { min-width: 0; flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 14px 16px 12px; }
 .list-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-shrink: 0; }
 .search-box { position: relative; width: 240px; }
 .search-box .f-input { padding-left: 32px; height: 34px; width: 100%; }

@@ -5,6 +5,7 @@ import { AppIcon, RichTextViewer, showToast, truncateRich } from '@aiteach/share
 import type { GeneratedQuestion, OrgQuestion } from '@aiteach/shared'
 import { adoptGenerated, fetchQuestions, fetchQuota, variantOf } from '@/api/org'
 import { aiEngine, generateByAi } from '@/api/ai-generate'
+import { getCheckRounds, setCheckRounds, verifyQuestionsByAi, type AiVerifyReport } from '@/api/ai-verify'
 import { useBaseData } from '@/composables/useBaseData'
 import { useKnowledgePool } from '@/composables/useKnowledgePool'
 
@@ -49,6 +50,34 @@ const phase = ref<'form' | 'running' | 'result'>('form')
 const progress = ref(0)
 const results = ref<GeneratedQuestion[]>([])
 const adoptedIds = ref<Set<number>>(new Set())
+
+/* ===== AI 质检（可设置检查轮次；超轮仍有异常 → 提醒人工介入） ===== */
+/** 检查轮次（0=关闭，1~3；localStorage 持久化，跨页面共享同一份设置） */
+const checkRounds = ref(getCheckRounds())
+function onRoundsChange() {
+  setCheckRounds(checkRounds.value)
+}
+/** 最近一次质检报告（结果阶段逐题打标 / 超轮告警用） */
+const verifyReport = ref<AiVerifyReport | null>(null)
+/** 运行阶段的质检进度文案 */
+const verifyStage = ref('')
+/** 每题最严重的质检结论（error > warn > ok） */
+function issueOf(index: number) {
+  const last = verifyReport.value?.rounds[verifyReport.value.rounds.length - 1]
+  if (!last) return null
+  return last.issues.find((issue) => issue.index === index) ?? null
+}
+
+/** 把逐轮调用（每轮 rounds=1）的报告合并成一份：轮次连续编号、token 累加 */
+function mergeRoundReport(prev: AiVerifyReport | null, next: AiVerifyReport): AiVerifyReport {
+  if (!prev) return next
+  const base = prev.rounds.length
+  return {
+    ...next,
+    rounds: [...prev.rounds, ...next.rounds.map((r) => ({ ...r, round: base + r.round }))],
+    tokens: prev.tokens + next.tokens,
+  }
+}
 
 async function load() {
   await ensure()
@@ -128,6 +157,33 @@ async function run() {
     engine.value = result.engine
     lastTokens.value = result.tokens
     adoptedIds.value = new Set()
+    /* AI 质检：按设置轮次复核答案/解析（超轮仍有 error → 结果页提醒人工介入）。
+       质检失败不拖垮本次生成：给出提示，结果仍可人工核对后采纳 */
+    verifyReport.value = null
+    verifyStage.value = ''
+    if (checkRounds.value > 0 && results.value.length) {
+      try {
+        for (let r = 1; r <= checkRounds.value; r += 1) {
+          verifyStage.value = `AI 质检：第 ${r} / ${checkRounds.value} 轮复核答案与解析…`
+          const report = await verifyQuestionsByAi(
+            results.value,
+            { scene: variantOfId.value ? 'AI 变式' : 'AI 出题', subject: form.subject, grade: form.grade },
+            /* 传剩余轮次：verifyQuestionsByAi 内部从第 1 轮数，这里逐轮调用以便刷新进度 */
+            1,
+          )
+          verifyReport.value = mergeRoundReport(verifyReport.value, report)
+          /* 应用本轮修正版（有错才修正，修正版进入下一轮输入） */
+          if (report.corrected.length === results.value.length) results.value = report.corrected
+          const last = verifyReport.value.rounds[verifyReport.value.rounds.length - 1]
+          if (!last?.issues.some((issue) => issue.level === 'error')) break
+        }
+      } catch (error) {
+        showToast(error instanceof Error ? `AI 质检未执行：${error.message}` : 'AI 质检未执行', 'error')
+      } finally {
+        verifyStage.value = ''
+      }
+    }
+    if (verifyReport.value) lastTokens.value += verifyReport.value.tokens
     progress.value = 100
     quota.value.used += estimate.value
     window.setTimeout(() => {
@@ -234,6 +290,15 @@ onMounted(load)
           <label class="f-label">数量（1 ~ 10）</label>
           <input v-model.number="form.count" type="number" min="1" max="10" class="f-input" />
         </div>
+        <div class="f-field compact">
+          <label class="f-label" title="生成后自动复核答案/解析的轮数；超轮仍有异常将提醒人工介入">AI 检查轮次</label>
+          <select v-model.number="checkRounds" class="f-select" @change="onRoundsChange">
+            <option :value="0">关闭</option>
+            <option :value="1">1 轮</option>
+            <option :value="2">2 轮</option>
+            <option :value="3">3 轮</option>
+          </select>
+        </div>
       </div>
 
       <div class="f-field">
@@ -296,11 +361,25 @@ onMounted(load)
         <span class="pl-step" :class="{ done: progress > 85 }">纠错校标</span>
       </div>
       <div class="progress-track"><div class="progress-fill" :style="{ width: `${progress}%` }" /></div>
-      <p class="f-hint">{{ progress }}% · 通常 5 ~ 15 秒完成</p>
+      <p class="f-hint">{{ verifyStage || `${progress}% · 通常 5 ~ 15 秒完成` }}</p>
     </div>
 
     <!-- 结果阶段 -->
     <template v-else>
+      <!-- 质检超轮告警：超过设定检查轮次仍有异常 → 提醒人工介入处理 -->
+      <div v-if="verifyReport?.needsManual" class="verify-alert">
+        <AppIcon name="warning" :size="16" />
+        <span>
+          AI 质检已完成 {{ verifyReport.rounds.length }} 轮，仍有 {{ verifyReport.remaining.length }} 处异常（如答案存疑），
+          <b>请人工介入处理</b>：核对/编辑后再采纳，或丢弃重出。
+        </span>
+      </div>
+      <div v-else-if="verifyReport && verifyReport.rounds.length" class="verify-pass">
+        <AppIcon name="check" :size="15" />
+        <span>
+          AI 质检 {{ verifyReport.rounds.length }} 轮通过{{ verifyReport.rounds.some((r) => r.issues.length) ? '（已按质检意见自动修正，请抽查）' : '，答案与解析复核无误' }}
+        </span>
+      </div>
       <div class="result-head">
         <h3>
           生成完成（{{ results.length }} 题）· 已采纳 {{ adoptedIds.size }} 题
@@ -319,6 +398,10 @@ onMounted(load)
             <span class="tag tag-blue">{{ item.options.length > 0 ? '客观题' : form.type }}</span>
             <span class="tag tag-gray">{{ item.difficulty }}</span>
             <span v-for="k in item.knowledge" :key="k" class="tag tag-gray">{{ k }}</span>
+            <!-- 质检结论打标：error 红（需人工），warn 橙，通过绿 -->
+            <span v-if="issueOf(i)?.level === 'error'" class="tag tag-red" :title="issueOf(i)?.message">质检异常 · {{ issueOf(i)?.aspect }}</span>
+            <span v-else-if="issueOf(i)?.level === 'warn'" class="tag tag-orange" :title="issueOf(i)?.message">质检提醒 · {{ issueOf(i)?.aspect }}</span>
+            <span v-else-if="verifyReport?.rounds.length" class="tag tag-green">质检通过</span>
             <span v-if="adoptedIds.has(i)" class="tag tag-green">已采纳</span>
           </div>
           <RichTextViewer class="rc-stem" :content="item.stem" />
@@ -356,7 +439,7 @@ onMounted(load)
 .vs-stem { font-size: 13px; color: var(--ink-2); max-width: 480px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .form-panel { padding: 18px 20px; }
-.prop-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0 14px; }
+.prop-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0 14px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .k-chip {
   border: 1.5px solid var(--border);
@@ -400,6 +483,22 @@ onMounted(load)
 
 .result-head { display: flex; align-items: center; justify-content: space-between; }
 .result-head h3 { font-size: 15.5px; color: var(--ink); }
+
+/* ===== 质检结论条 ===== */
+.verify-alert {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--danger-soft); color: var(--danger);
+  border: 1px solid rgba(214, 69, 69, 0.35);
+  border-radius: 10px; padding: 10px 14px;
+  font-size: 13px; line-height: 1.6;
+}
+.verify-pass {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--success-soft); color: var(--success);
+  border: 1px solid rgba(16, 142, 90, 0.3);
+  border-radius: 10px; padding: 9px 14px;
+  font-size: 13px;
+}
 .result-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 14px; }
 .result-card { padding: 16px 18px; }
 .result-card.adopted { border-color: var(--success); }

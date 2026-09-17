@@ -30,8 +30,9 @@ export function photoModelName(): string {
 
 /** 单张图片识别出的结果题数上限（防御模型无限拆题） */
 const MAX_QUESTIONS_PER_PHOTO = 15
-/** 识别出的题干文本长度上限，防止异常输出撑爆存储与渲染 */
-const MAX_FIELD_LENGTH = 4000
+/** 识别出的题干文本长度上限，防止异常输出撑爆存储与渲染
+ *  （多小问解答题的完整解析可能较长，给到 8000 字符，避免把正常长解析拦腰截断） */
+const MAX_FIELD_LENGTH = 8000
 
 /** 本地图片文件 → base64 data URL：等比压缩到长边 ≤1568px（视觉模型性价比最高的区间），JPEG 0.85 */
 export async function fileToDataUrl(file: File): Promise<string> {

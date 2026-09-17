@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { AppIcon, showToast, toPlainText } from '@aiteach/shared'
 import type { PhotoTask } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import RichTextEditor from '@/components/ui/RichTextEditor.vue'
 import { decidePhoto, fetchKnowledgeTree, fetchPhotoTasks, recognizePhoto, registerPhotoTask, uploadPhotos } from '@/api/org'
 import { alignKnowledgeToPool, persistEmbeddedImages, photoEngine, photoModelName, recognizePhotoFile } from '@/api/ai-photo'
+import { getCheckRounds, setCheckRounds, verifyQuestionsByAi, type VerifyIssue } from '@/api/ai-verify'
 import { collectTags } from '@/composables/useKnowledgePool'
 import { useBaseData } from '@/composables/useBaseData'
 
@@ -25,6 +26,17 @@ const engineLabel = computed(() =>
 /** 任务 id → 本地文件（失败重试用）与缩略图 objectURL（确认弹窗展示原图用） */
 const fileByTaskId = new Map<string, File>()
 const previewByTaskId = new Map<string, string>()
+
+/* ===== AI 质检（可设置检查轮次；超轮仍有异常 → 确认时提醒人工介入） ===== */
+/** 检查轮次（0=关闭，1~3；localStorage 持久化） */
+const checkRounds = ref(getCheckRounds())
+function onRoundsChange() {
+  setCheckRounds(checkRounds.value)
+}
+/** 任务 id → 每题质检结论（resultId → 该题 issues 列表，仅最后一轮 warn/error） */
+const verifyIssuesByTaskId = reactive(new Map<string, Map<string, VerifyIssue[]>>())
+/** 任务 id → 质检汇总（任务列表打标用） */
+const verifySummaryByTaskId = reactive(new Map<string, { error: number; warn: number; manual: boolean }>())
 
 const MAX_FILES = 20
 const MAX_SIZE_MB = 10
@@ -189,7 +201,9 @@ async function runRecognize(task: PhotoTask) {
       const options = await Promise.all(row.options.map((opt) => persistEmbeddedImages(opt, subject)))
       normalized.push({ ...row, stem, options, analysis, subject, grade, knowledge })
     }
-    const done: PhotoTask = { ...task, status: 'done', results: normalized }
+    /* AI 质检：按设置轮次复核答案/解析，修正版回写后再回注册 */
+    const verified = await verifyTaskResults({ ...task, status: 'done', results: normalized })
+    const done: PhotoTask = { ...verified, status: 'done' }
     tasks.value[pos()] = done
     /* 回注册到任务库：确认入库/存草稿/丢弃与 mock 识别同一条 decide 链路 */
     tasks.value[pos()] = await registerPhotoTask(done)
@@ -202,9 +216,94 @@ async function runRecognize(task: PhotoTask) {
   }
 }
 
+/**
+ * 识别结果的 AI 质检：按设置轮次逐轮复核（每轮修正版作为下一轮输入），
+ * 修正字段回写结果，最后一轮的 warn/error 结论逐题留痕（确认弹窗提醒）；
+ * 超轮仍有 error 级异常时标记 manual，提醒人工介入处理。
+ */
+async function verifyTaskResults(task: PhotoTask): Promise<PhotoTask> {
+  if (checkRounds.value <= 0 || !task.results.length) return task
+  try {
+    let current: import('@aiteach/shared').GeneratedQuestion[] = task.results.map((row) => ({
+      id: row.id,
+      stem: row.stem,
+      options: [...row.options],
+      answer: row.answer,
+      analysis: row.analysis,
+      knowledge: [...row.knowledge],
+      difficulty: row.difficulty,
+      subject: row.subject,
+      grade: row.grade,
+    }))
+    let lastIssues: VerifyIssue[] = []
+    let manual = false
+    for (let r = 1; r <= checkRounds.value; r += 1) {
+      const report = await verifyQuestionsByAi(current, { scene: '拍照识别' }, 1)
+      lastIssues = report.rounds[report.rounds.length - 1]?.issues ?? []
+      if (report.corrected.length === current.length) {
+        current = await Promise.all(
+          report.corrected.map(async (fixed, i) => {
+            const origin = current[i]
+            const subject = origin.subject ?? ''
+            /* 修正版里的内联配图同样转存媒体库，避免 data URL 进存储 */
+            const [stem, analysis] = await Promise.all([
+              persistEmbeddedImages(fixed.stem, subject),
+              persistEmbeddedImages(fixed.analysis, subject),
+            ])
+            const options = await Promise.all(fixed.options.map((opt) => persistEmbeddedImages(opt, subject)))
+            return { ...origin, stem, options, analysis, answer: fixed.answer, knowledge: fixed.knowledge, difficulty: fixed.difficulty }
+          }),
+        )
+      }
+      /* 本轮无 error 级问题即通过；否则用修正版继续下一轮 */
+      manual = lastIssues.some((issue) => issue.level === 'error')
+      if (!manual) break
+    }
+    const byResult = new Map<string, VerifyIssue[]>()
+    let errorCount = 0
+    let warnCount = 0
+    for (const issue of lastIssues) {
+      const row = current[issue.index]
+      if (!row) continue
+      const bucket = byResult.get(row.id) ?? []
+      bucket.push(issue)
+      byResult.set(row.id, bucket)
+      if (issue.level === 'error') errorCount += 1
+      else warnCount += 1
+    }
+    verifyIssuesByTaskId.set(task.id, byResult)
+    verifySummaryByTaskId.set(task.id, { error: errorCount, warn: warnCount, manual })
+    /* 修正版回写为识别结果结构（decided 由后续确认链路维护） */
+    return {
+      ...task,
+      results: current.map((row) => ({
+        id: row.id,
+        stem: row.stem,
+        options: row.options,
+        answer: row.answer,
+        analysis: row.analysis,
+        knowledge: row.knowledge,
+        difficulty: row.difficulty,
+        subject: row.subject,
+        grade: row.grade,
+        decided: null,
+      })),
+    }
+  } catch {
+    /* 质检失败不拖垮识别结果：不留痕，按未质检处理（与原行为一致） */
+    return task
+  }
+}
+
+/** 确认弹窗里当前结果的质检结论 */
+function issuesOfResult(taskId: string, resultId: string): VerifyIssue[] {
+  return verifyIssuesByTaskId.get(taskId)?.get(resultId) ?? []
+}
+
 async function recognize(id: string) {
   try {
-    const updated = await recognizePhoto(id)
+    /* mock 识别结果同样过质检轮询，无 Key 环境也能演示完整交互 */
+    const updated = await verifyTaskResults(await recognizePhoto(id))
     const pos = tasks.value.findIndex((task) => task.id === id)
     if (pos >= 0) tasks.value[pos] = updated
   } catch (error) {
@@ -316,7 +415,16 @@ onMounted(load)
       <div class="page-head" style="margin-bottom: 12px">
         <h2>AI 拍照识题</h2>
         <span class="f-hint">已处理 {{ doneCount }} / {{ tasks.length }} 张 · 单次最多 20 张，支持 jpg / png / webp</span>
-        <span class="tag" :class="engine === 'vision' ? 'tag-green' : 'tag-gray'" style="margin-left: auto">
+        <label class="rounds-pick" title="识别后自动复核答案/解析的轮数；超轮仍有异常将提醒人工介入">
+          AI 检查轮次
+          <select v-model.number="checkRounds" class="f-select" @change="onRoundsChange">
+            <option :value="0">关闭</option>
+            <option :value="1">1 轮</option>
+            <option :value="2">2 轮</option>
+            <option :value="3">3 轮</option>
+          </select>
+        </label>
+        <span class="tag" :class="engine === 'vision' ? 'tag-green' : 'tag-gray'">
           {{ engineLabel }}
         </span>
       </div>
@@ -381,6 +489,14 @@ onMounted(load)
               <td>
                 <template v-if="task.status === 'done'">
                   {{ task.results.length }} 题 · 已处理 {{ task.results.filter((row) => row.decided).length }}
+                  <!-- 质检结论打标：超轮异常红、有提醒橙、通过绿 -->
+                  <span
+                    v-if="verifySummaryByTaskId.get(task.id)"
+                    class="tag"
+                    :class="verifySummaryByTaskId.get(task.id)!.manual ? 'tag-red' : verifySummaryByTaskId.get(task.id)!.warn ? 'tag-orange' : 'tag-green'"
+                  >
+                    质检{{ verifySummaryByTaskId.get(task.id)!.manual ? '异常 · 需人工' : verifySummaryByTaskId.get(task.id)!.warn ? '有提醒' : '通过' }}
+                  </span>
                 </template>
                 <span v-else class="f-hint">{{ task.failReason ?? '—' }}</span>
               </td>
@@ -444,6 +560,17 @@ onMounted(load)
               <span v-if="activeResult.grade" class="tag tag-blue">{{ activeResult.grade }}</span>
               <span class="tag tag-gray">{{ activeResult.difficulty }}</span>
               <span v-for="k in activeResult.knowledge" :key="k" class="tag tag-green">{{ k }}</span>
+            </div>
+            <!-- AI 质检结论：超轮仍有异常 → 醒目提醒人工介入处理 -->
+            <div v-if="issuesOfResult(activeTask.id, activeResult.id).length" class="verify-issues">
+              <p
+                v-for="(issue, ii) in issuesOfResult(activeTask.id, activeResult.id)"
+                :key="ii"
+                :class="issue.level"
+              >
+                <b>质检{{ issue.level === 'error' ? '异常' : '提醒' }} · {{ issue.aspect }}：</b>{{ issue.message }}
+                <template v-if="issue.level === 'error'">（已超过设定检查轮次，请人工核对后入库）</template>
+              </p>
             </div>
             <div class="prop-row">
               <div class="f-field compact">
@@ -562,6 +689,20 @@ onMounted(load)
 }
 
 .result-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.rounds-pick {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--sub); white-space: nowrap;
+}
+.rounds-pick .f-select { width: 88px; height: 30px; font-size: 12.5px; }
+/* 质检结论：error 红条（超轮异常，需人工介入）、warn 黄条 */
+.verify-issues {
+  display: flex; flex-direction: column; gap: 5px;
+  margin-bottom: 10px; border-radius: 9px;
+}
+.verify-issues p { font-size: 12.5px; line-height: 1.6; border-radius: 8px; padding: 7px 11px; }
+.verify-issues p.error { background: var(--danger-soft); color: var(--danger); }
+.verify-issues p.warn { background: var(--warn-soft); color: var(--warn); }
 .prop-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; margin-bottom: 10px; }
 .option-edit-list { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .option-edit-row { display: grid; grid-template-columns: 26px 1fr 24px; gap: 8px; align-items: start; width: 100%; }

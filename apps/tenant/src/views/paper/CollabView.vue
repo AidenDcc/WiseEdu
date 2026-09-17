@@ -75,12 +75,14 @@ function applyBasket() {
   if (fresh.length) logAction(`从组卷库带入 ${fresh.length} 道题目（自动归类大题）`)
 }
 
-/* ===== 左侧选题池（仅已入库题目可入卷，FR-PP-003） ===== */
-const poolFilter = reactive({ type: '', difficulty: '', keyword: '' })
+/* ===== 左侧选题池（仅已入库题目可入卷，FR-PP-003） =====
+   默认按试卷学科过滤：选题池跟随卷头学科，切换学科即切换题源（可选看全部学科） */
+const poolFilter = reactive({ type: '', difficulty: '', keyword: '', subjectScope: 'paper' as 'paper' | 'all' })
 const pool = computed(() =>
   questions.value.filter(
     (row) =>
       row.status === 'approved' &&
+      (poolFilter.subjectScope === 'all' || row.subject === draft.subject) &&
       (!poolFilter.type || row.type === poolFilter.type) &&
       (!poolFilter.difficulty || row.difficulty === poolFilter.difficulty) &&
       (!poolFilter.keyword || toPlainText(row.stem).includes(poolFilter.keyword)),
@@ -88,6 +90,29 @@ const pool = computed(() =>
 )
 /** 已在卷中的题目不可重复加入 */
 const inPaperIds = computed(() => new Set(draft.sections.flatMap((section) => section.questions.map((q) => q.questionId))))
+
+/* ===== 卷面试题渲染：与真实试卷一致（完整题干 + 选项 / 判断样式） ===== */
+
+/** 客观题正确答案字母（用于高亮正确选项；判断题 answer 为 A/B） */
+function answerLettersOf(id: number): string[] {
+  const item = questionOf(id)
+  if (!item || !item.options.length) return []
+  return [...new Set(item.answer.toUpperCase().replace(/[^A-F]/g, '').split(''))]
+}
+
+/** 判断题选项按试卷样式渲染 √ / ×，其余题型渲染 A/B/C… */
+function optionMark(id: number, index: number): string {
+  const item = questionOf(id)
+  if (item?.type === '判断题') return index === 0 ? '√' : '×'
+  return 'ABCDEF'[index]
+}
+
+/** 题干前展示来源；手动录入与 AI 生成（出题/变式）不展示 */
+const HIDDEN_SOURCE = new Set(['手动录入', 'AI 出题', 'AI 变式'])
+function sourceOf(id: number): string {
+  const item = questionOf(id)
+  return item && !HIDDEN_SOURCE.has(item.source) ? item.source : ''
+}
 
 /* ===== 大题自动归类：加入题目时按题型匹配/新建大题（FR：自动识别大题类型） ===== */
 
@@ -288,6 +313,10 @@ onMounted(load)
     <div class="panel pool-panel">
       <div class="section-title">选题池（仅「已入库」题目可入卷）</div>
       <div class="pool-filter">
+        <select v-model="poolFilter.subjectScope" class="f-select" style="grid-column: span 2">
+          <option value="paper">学科：跟随试卷（{{ draft.subject }}）</option>
+          <option value="all">学科：全部</option>
+        </select>
         <select v-model="poolFilter.type" class="f-select">
           <option value="">全部题型</option>
           <option v-for="t in questionTypes" :key="t" :value="t">{{ t }}</option>
@@ -369,14 +398,28 @@ onMounted(load)
         <p v-if="section.questions.length === 0" class="f-hint" style="padding: 8px 0">从左侧选题池加入题目</p>
         <div v-for="(entry, qi) in section.questions" :key="`${entry.questionId}-${qi}`" class="q-row">
           <span class="q-no">{{ qi + 1 }}</span>
-          <p class="q-stem">
-            <RichTextViewer
-              v-if="questionOf(entry.questionId)"
-              :content="questionOf(entry.questionId)!.stem"
-              tag="span"
-            />
-            <template v-else>题目 #{{ entry.questionId }}</template>
-          </p>
+          <!-- 完整题目：与真实试卷样式一致（题干 + 选项/判断），题干前标注来源 -->
+          <div class="q-body">
+            <p class="q-stem">
+              <span v-if="sourceOf(entry.questionId)" class="q-source">【{{ sourceOf(entry.questionId) }}】</span>
+              <RichTextViewer
+                v-if="questionOf(entry.questionId)"
+                :content="questionOf(entry.questionId)!.stem"
+                tag="span"
+              />
+              <template v-else>题目 #{{ entry.questionId }}</template>
+            </p>
+            <ul v-if="questionOf(entry.questionId)?.options.length" class="q-options">
+              <li
+                v-for="(opt, oi) in questionOf(entry.questionId)!.options"
+                :key="oi"
+                :class="{ right: answerLettersOf(entry.questionId).includes('ABCDEF'[oi]) }"
+              >
+                <span class="qo-letter">{{ optionMark(entry.questionId, oi) }}</span>
+                <RichTextViewer :content="opt" tag="span" />
+              </li>
+            </ul>
+          </div>
           <div class="q-ops">
             <input v-model.number="entry.score" type="number" min="0.5" max="100" step="0.5" class="f-input score-input" />
             <span class="f-hint">分</span>
@@ -490,18 +533,30 @@ onMounted(load)
 }
 .section-title-input:focus { outline: none; border-bottom-color: var(--brand); }
 .q-row {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: flex-start; gap: 10px;
   border: 1px solid var(--border); border-radius: 10px;
-  padding: 8px 12px; margin-bottom: 8px; background: #fbfdfd;
+  padding: 10px 12px; margin-bottom: 8px; background: #fbfdfd;
 }
 .q-no {
   width: 24px; height: 24px; flex-shrink: 0; border-radius: 7px;
   background: var(--brand-soft); color: var(--brand-deep);
-  font-size: 12px; font-weight: 700;
+  font-size: 12px; font-weight: 700; margin-top: 1px;
   display: flex; align-items: center; justify-content: center;
 }
-.q-stem { flex: 1; font-size: 13px; color: var(--ink-2); line-height: 1.5; }
-.q-ops { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.q-body { flex: 1; min-width: 0; }
+.q-stem { font-size: 13px; color: var(--ink-2); line-height: 1.6; }
+.q-source { color: var(--sub); font-size: 12px; margin-right: 2px; }
+/* 选项与真实试卷样式一致：字母（判断题为 √/×）+ 内容；正确项绿框高亮便于教师核对 */
+.q-options { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.q-options li {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 13px; color: var(--ink-2); line-height: 1.5;
+  padding: 4px 8px; border-radius: 7px; border: 1px solid transparent;
+}
+.q-options li.right { border-color: var(--success); background: var(--success-soft, #ecfaf4); }
+.qo-letter { font-weight: 700; color: var(--sub); flex-shrink: 0; }
+.q-options li.right .qo-letter { color: var(--success); }
+.q-ops { display: flex; align-items: center; gap: 6px; flex-shrink: 0; padding-top: 1px; }
 .score-input { width: 70px; text-align: right; }
 .add-section { border-style: dashed; }
 .stat-bar { display: flex; align-items: center; justify-content: space-between; position: sticky; bottom: 0; padding: 12px 16px; }

@@ -63,7 +63,7 @@ async function callDeepseek(input: CheckQuestionInput): Promise<AiCheckReport> {
   let lastError: unknown = null
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const { content, usage } = await chatCompletion(messages, { json: true, maxTokens: 8192 })
+      const { content, usage } = await chatCompletion(messages, { json: true, maxTokens: 8192, temperature: 0.2 })
       return parseCheckReport(content, usage.totalTokens)
     } catch (error) {
       lastError = error

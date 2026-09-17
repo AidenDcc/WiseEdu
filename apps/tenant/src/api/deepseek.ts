@@ -55,6 +55,8 @@ export interface ChatUsage {
 export interface ChatResult {
   content: string
   usage: ChatUsage
+  /** finish_reason：length 表示输出被 token 预算截断（调用方按失败处理、自动重试） */
+  finishReason: string
 }
 
 /** Deepseek 错误响应体：{ error: { message, type, code } } */
@@ -130,13 +132,18 @@ async function chatWithEndpoint(
       throw new Error(message)
     }
     const data = (await resp.json()) as {
-      choices?: Array<{ message?: { content?: string } }>
+      choices?: Array<{ message?: { content?: string }; finish_reason?: string }>
       usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
     }
     const content = data.choices?.[0]?.message?.content ?? ''
     if (!content.trim()) throw new Error('AI 返回了空内容，请重试')
+    const finishReason = data.choices?.[0]?.finish_reason ?? ''
+    /* finish_reason=length：输出在解析写到一半时被 token 预算截断，JSON 可能碰巧可解析
+       但内容残缺（典型症状：解析中途断掉）。按失败处理走重试，避免半截解析入库 */
+    if (finishReason === 'length') throw new Error('AI 输出内容过长被截断，已自动重试')
     return {
       content,
+      finishReason,
       usage: {
         promptTokens: data.usage?.prompt_tokens ?? 0,
         completionTokens: data.usage?.completion_tokens ?? 0,

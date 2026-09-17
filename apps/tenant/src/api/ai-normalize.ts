@@ -90,7 +90,10 @@ function escapeHtml(text: string): string {
 
 /** 把单个文本字段转成富文本 HTML：先转义，再公式，再按空行/换行分段 */
 export function richField(text: string): string {
-  let html = escapeHtml(text)
+  /* 模型在 JSON 里双转义换行（\\n），parse 后变成字面「\n」两个字符，若不处理会原样显示。
+     负向断言 (?![a-zA-Z]) 保护 LaTeX 命令：\ne \not \tan \times \theta 等后跟字母的不动 */
+  const normalized = text.replace(/\\n(?![a-zA-Z])/g, '\n').replace(/\\t(?![a-zA-Z])/g, ' ')
+  let html = escapeHtml(normalized)
   /* 块级公式独立成行；inline 用非贪婪且禁止跨 $ 配对（避免 `$a$ 和 $b$` 被整段吞掉）。
      注意：latex 内容取自上方已转义的 html，禁止再次 escapeHtml ——
      二次转义会把 &lt; 变成 &amp;lt;，KaTeX 会把它渲染成字面量 「&lt;」。 */

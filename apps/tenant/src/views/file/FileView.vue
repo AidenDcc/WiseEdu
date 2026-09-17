@@ -19,6 +19,8 @@ import {
   registerFileContent,
 } from '@/api/ai-file'
 import type { FileRecognizeResult, RecognizedQuestion } from '@/api/ai-file'
+import { getCheckRounds, setCheckRounds, verifyQuestionsByAi, type VerifyIssue } from '@/api/ai-verify'
+import { persistEmbeddedImages } from '@/api/ai-photo'
 import { useBaseData } from '@/composables/useBaseData'
 
 const { subjects, grades, questionTypes, difficulties, ensure, optionLabel } = useBaseData()
@@ -162,11 +164,87 @@ const recogFailReason = ref('')
 const recogFile = ref<OrgFile | null>(null)
 const recogPreview = ref('')
 const recogResult = ref<FileRecognizeResult | null>(null)
+/** 识别结果的 AI 质检报告（确认弹窗打标 + 超轮人工介入提醒） */
+const recogVerify = ref<{ issues: Map<string, VerifyIssue[]>; manual: boolean; rounds: number; engine: 'deepseek' | 'mock' } | null>(null)
+/** 检查轮次（0=关闭，1~3；localStorage 持久化） */
+const checkRounds = ref(getCheckRounds())
+function onRoundsChange() {
+  setCheckRounds(checkRounds.value)
+}
 let recogTimer = 0
+
+/**
+ * 识别结果的 AI 质检：按设置轮次逐轮复核答案/解析（每轮修正版进入下一轮），
+ * 修正字段回写确认列表；超轮仍有 error 级异常 → manual=true，提醒人工介入。
+ */
+async function runVerify(result: FileRecognizeResult) {
+  recogVerify.value = null
+  if (checkRounds.value <= 0 || !result.questions.length) return
+  try {
+    let current = result.questions.map((q) => ({
+      id: q.key,
+      stem: q.stem,
+      options: [...q.options],
+      answer: q.answer,
+      analysis: q.analysis,
+      knowledge: [...q.knowledge],
+      difficulty: q.difficulty,
+      subject: q.subject,
+      grade: q.grade,
+    }))
+    let lastIssues: VerifyIssue[] = []
+    let manual = false
+    let engine: 'deepseek' | 'mock' = 'mock'
+    for (let r = 1; r <= checkRounds.value; r += 1) {
+      const report = await verifyQuestionsByAi(current, { scene: '文档识别' }, 1)
+      engine = report.engine
+      lastIssues = report.rounds[report.rounds.length - 1]?.issues ?? []
+      if (report.corrected.length === current.length) {
+        current = await Promise.all(
+          report.corrected.map(async (fixed, i) => {
+            const origin = current[i]
+            /* 修正版里的内联配图转存素材库，避免 data URL 进存储后编辑器剥掉 */
+            const [stem, analysis] = await Promise.all([
+              persistEmbeddedImages(fixed.stem, origin.subject),
+              persistEmbeddedImages(fixed.analysis, origin.subject),
+            ])
+            const options = await Promise.all(fixed.options.map((opt) => persistEmbeddedImages(opt, origin.subject)))
+            return { ...origin, stem, options, analysis, answer: fixed.answer, knowledge: fixed.knowledge, difficulty: fixed.difficulty }
+          }),
+        )
+      }
+      manual = lastIssues.some((issue) => issue.level === 'error')
+      if (!manual) break
+    }
+    /* 修正版回写确认列表（key/顺序不变，编辑区所见即入库内容） */
+    current.forEach((row, i) => {
+      const q = result.questions[i]
+      if (!q) return
+      q.stem = row.stem
+      q.options = row.options
+      q.answer = row.answer
+      q.analysis = row.analysis
+      q.knowledge = row.knowledge
+      q.difficulty = row.difficulty
+    })
+    const issues = new Map<string, VerifyIssue[]>()
+    for (const issue of lastIssues) {
+      const row = current[issue.index]
+      if (!row) continue
+      const bucket = issues.get(row.id) ?? []
+      bucket.push(issue)
+      issues.set(row.id, bucket)
+    }
+    recogVerify.value = { issues, manual, rounds: checkRounds.value, engine }
+  } catch {
+    /* 质检失败不阻塞识别确认：不留痕，按未质检处理 */
+  }
+}
 
 async function startRecognize(row: OrgFile) {
   recogFile.value = row
   recogResult.value = null
+  recogVerify.value = null
   recogFailReason.value = ''
   recogPreview.value = ''
   recogPhase.value = 'running'
@@ -183,6 +261,8 @@ async function startRecognize(row: OrgFile) {
     const result = await recognizeFileContent(row)
     recogResult.value = result
     recogPhase.value = 'edit'
+    /* 识别完成即按设置轮次做 AI 质检（修正版直接呈现在确认列表里） */
+    await runVerify(result)
   } catch (error) {
     recogFailReason.value = error instanceof Error ? error.message : '识别失败'
     recogPhase.value = 'failed'
@@ -311,6 +391,15 @@ onMounted(load)
       <div class="filter-bar">
         <input v-model="keyword" class="f-input search-box" placeholder="搜索文件名" style="width: 220px" />
         <span class="f-hint">当前：{{ activeFolder === 0 ? '全部文件' : folderName(activeFolder) }}（{{ visibleFiles.length }}）</span>
+        <label class="rounds-pick" title="识别后自动复核答案/解析的轮数；超轮仍有异常将提醒人工介入">
+          AI 检查轮次
+          <select v-model.number="checkRounds" class="f-select" @change="onRoundsChange">
+            <option :value="0">关闭</option>
+            <option :value="1">1 轮</option>
+            <option :value="2">2 轮</option>
+            <option :value="3">3 轮</option>
+          </select>
+        </label>
         <button class="btn btn-primary btn-sm" style="margin-left: auto" @click="uploadTarget = activeFolder; uploadOpen = true">
           <AppIcon name="upload" :size="14" /> 上传文件
         </button>
@@ -452,6 +541,17 @@ onMounted(load)
             </span>
           </div>
 
+          <!-- AI 质检结论条：超轮仍有异常 → 提醒人工介入处理 -->
+          <div v-if="recogVerify" class="verify-banner" :class="{ manual: recogVerify.manual }">
+            <AppIcon :name="recogVerify.manual ? 'warning' : 'check'" :size="15" />
+            <span v-if="recogVerify.manual">
+              AI 质检 {{ recogVerify.rounds }} 轮后仍有 {{ recogVerify.issues.size }} 题存在异常（如答案存疑），<b>请人工核对后再入库</b>。
+            </span>
+            <span v-else>
+              AI 质检 {{ recogVerify.rounds }} 轮通过{{ recogVerify.engine === 'deepseek' ? '' : '（本地演示）' }}，答案与解析已复核{{ recogVerify.issues.size ? '，个别题目有提醒请留意' : '' }}。
+            </span>
+          </div>
+
           <!-- 试卷结论 -->
           <div class="paper-judge">
             <label class="pj-check">
@@ -480,6 +580,16 @@ onMounted(load)
                 <option v-for="d in difficulties" :key="d" :value="d">{{ d }}</option>
               </select>
               <label class="rq-score">分值 <input v-model.number="q.score" type="number" min="0.5" max="100" step="0.5" class="f-input" /></label>
+              <!-- 逐题质检打标：异常红 / 提醒橙 -->
+              <span
+                v-for="(issue, ii) in recogVerify?.issues.get(q.key) ?? []"
+                :key="ii"
+                class="tag"
+                :class="issue.level === 'error' ? 'tag-red' : 'tag-orange'"
+                :title="issue.message"
+              >
+                质检{{ issue.level === 'error' ? '异常' : '提醒' }} · {{ issue.aspect }}
+              </span>
               <button class="mini-btn danger" type="button" @click="recogResult?.questions.splice(qi, 1)">删除</button>
             </div>
             <label class="f-label">题干</label>
@@ -543,6 +653,22 @@ onMounted(load)
 
 .table-panel { padding: 14px 16px; }
 .file-ico { display: inline-flex; color: var(--brand-deep); margin-right: 5px; }
+
+.rounds-pick {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--sub); white-space: nowrap;
+}
+.rounds-pick .f-select { width: 84px; height: 32px; font-size: 12.5px; }
+
+/* AI 质检结论条：通过绿 / 超轮异常红 */
+.verify-banner {
+  display: flex; align-items: center; gap: 8px;
+  border-radius: 10px; padding: 9px 12px; margin-bottom: 12px;
+  font-size: 13px; line-height: 1.6;
+  background: var(--success-soft); color: var(--success);
+  border: 1px solid rgba(16, 142, 90, 0.3);
+}
+.verify-banner.manual { background: var(--danger-soft); color: var(--danger); border-color: rgba(214, 69, 69, 0.35); }
 
 .pending-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .pending-chip {
