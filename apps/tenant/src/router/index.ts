@@ -79,10 +79,25 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '教辅资料' },
       },
       {
-        path: 'material/media',
-        name: 'material-media',
-        component: () => import('@/views/material/MediaView.vue'),
-        meta: { title: '多媒体资源' },
+        path: 'material/media/image',
+        name: 'material-media-image',
+        component: () => import('@/views/material/MediaKindView.vue'),
+        props: { kind: 'image' },
+        meta: { title: '图片' },
+      },
+      {
+        path: 'material/media/animation',
+        name: 'material-media-animation',
+        component: () => import('@/views/material/MediaKindView.vue'),
+        props: { kind: 'animation' },
+        meta: { title: '小程序动画' },
+      },
+      {
+        path: 'material/media/video',
+        name: 'material-media-video',
+        component: () => import('@/views/material/MediaKindView.vue'),
+        props: { kind: 'video' },
+        meta: { title: '视频' },
       },
       /* ===== 我的文件（FR-FL） ===== */
       {

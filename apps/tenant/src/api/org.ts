@@ -5,6 +5,7 @@
 import { request } from '@aiteach/shared'
 import type {
   Campus,
+  DrawEditorType,
   FileFolder,
   GeneratedQuestion,
   MaterialExample,
@@ -188,6 +189,29 @@ export function linkMedia(id: number, targets: string[]) {
 }
 export function deleteMedia(id: number) {
   return request<{ linkedCount: number }>('/tenant/media/delete', { method: 'POST', data: { id } })
+}
+export function fetchMediaDetail(id: number) {
+  return request<OrgMedia>(`/tenant/media/detail?id=${id}`)
+}
+/** 保存绘图工程：仅草稿时不带 svgDataUrl；确认导出时携带 SVG 字节生成可引用 URL */
+export function saveDrawMedia(data: {
+  id?: number
+  name: string
+  subject: string
+  knowledge?: string[]
+  editorType: DrawEditorType
+  projectJson?: string
+  molfileText?: string
+  svgDataUrl?: string
+}) {
+  return request<OrgMedia>('/tenant/media/draw/save', { method: 'POST', data })
+}
+/** AI 构图草稿（mock 网关）：返回原始工程 JSON / molfile，前端必须经 Schema 校验后才可载入画布 */
+export function generateAiDraw(data: { mediaType: DrawEditorType; userPrompt: string }) {
+  return request<{ projectJson?: string; molfileText?: string }>('/tenant/media/ai/draw/generate', {
+    method: 'POST',
+    data,
+  })
 }
 
 /* ===== 我的文件 ===== */

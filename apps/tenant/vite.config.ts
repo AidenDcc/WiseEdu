@@ -7,6 +7,10 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      /* jsxgraph 的 exports map 未暴露 distrib 下的 CSS 深路径，这里显式指到文件 */
+      'jsxgraph-css': fileURLToPath(new URL('./node_modules/jsxgraph/distrib/jsxgraph.css', import.meta.url)),
+      /* ketcher-core 依赖 Node 的 events 模块，改用浏览器可用的 events 包 */
+      events: fileURLToPath(new URL('./node_modules/events/events.js', import.meta.url)),
     },
   },
   server: {

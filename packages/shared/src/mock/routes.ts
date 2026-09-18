@@ -100,7 +100,14 @@ const orgRoutes: MockRoute[] = [
 
   // 多媒体
   { method: 'GET', path: '/tenant/media', handler: () => guard(() => org.mediaResources) },
+  { method: 'GET', path: '/tenant/media/detail', handler: ({ query }) => guard(() => {
+    const item = org.getMediaById(Number(query.id))
+    if (!item) throw new Error('资源不存在')
+    return item
+  }) },
   { method: 'POST', path: '/tenant/media/upload', handler: ({ body }) => guard(() => org.uploadMedia(body as never)) },
+  { method: 'POST', path: '/tenant/media/draw/save', handler: ({ body }) => guard(() => org.saveDrawMedia(body as never)) },
+  { method: 'POST', path: '/tenant/media/ai/draw/generate', handler: ({ body }) => guard(() => org.generateAiDrawDraft(body as never)) },
   { method: 'POST', path: '/tenant/media/link', handler: ({ body }) => guard(() => ({ linkedCount: org.linkMedia(Number(body.id), body.targets as string[]) })) },
   { method: 'POST', path: '/tenant/media/delete', handler: ({ body }) => guard(() => ({ linkedCount: org.deleteMedia(Number(body.id)) })) },
 

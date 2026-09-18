@@ -39,7 +39,9 @@ export const menus: MenuItem[] = [
     icon: 'book',
     children: [
       { path: '/material/list', title: '教辅资料' },
-      { path: '/material/media', title: '多媒体资源' },
+      { path: '/material/media/image', title: '图片' },
+      { path: '/material/media/animation', title: '小程序动画' },
+      { path: '/material/media/video', title: '视频' },
     ],
   },
   { path: '/file', title: '我的文件', icon: 'folder' },

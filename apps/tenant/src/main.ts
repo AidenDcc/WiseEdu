@@ -1,3 +1,5 @@
+/* 必须最先引入：为依赖链里的 Node polyfill 补上 process 全局 */
+import './shims/node-globals'
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { setupApp } from '@aiteach/shared'

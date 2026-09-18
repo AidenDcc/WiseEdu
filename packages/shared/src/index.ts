@@ -101,6 +101,7 @@ export type {
   MaterialStatus,
   OrgMaterial,
   MediaKind,
+  DrawEditorType,
   OrgMedia,
   FileFolder,
   OrgFileKind,

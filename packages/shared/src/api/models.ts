@@ -504,6 +504,9 @@ export interface OrgMaterial {
 
 export type MediaKind = 'video' | 'animation' | 'image'
 
+/** 理科配图绘图工程类型（静态 SVG 配图，见绘图模块规格） */
+export type DrawEditorType = 'jsxgraph' | 'fabric-chem' | 'ketcher' | 'fabric-general'
+
 export interface OrgMedia {
   id: number
   name: string
@@ -518,6 +521,12 @@ export interface OrgMedia {
   /** 可引用地址（题目正文里的图片即引用此地址）；无字节的存量记录不带该字段 */
   url?: string
   mime?: string
+  /** 绘图工程：来源编辑器类型（存草稿时已有，纯上传的图片不带） */
+  editorType?: DrawEditorType
+  /** 绘图工程原始数据（jsxgraph / fabric 的 project JSON 字符串） */
+  projectJson?: string
+  /** Ketcher 分子工程（molfile V2000 文本） */
+  molfileText?: string
 }
 
 export interface FileFolder {

@@ -6,10 +6,14 @@ import { Mathematics } from '@tiptap/extension-mathematics'
 import { Image } from '@tiptap/extension-image'
 import { ResizableNodeView } from '@tiptap/core'
 import { AppIcon, isRichContent, normalizeRichHtml, resolveMediaSrc, showToast, toPlainText } from '@aiteach/shared'
-import type { OrgMedia } from '@aiteach/shared'
+import type { DrawEditorType, OrgMedia } from '@aiteach/shared'
 import FormulaPickerModal from './FormulaPickerModal.vue'
 import MediaPickerModal from './MediaPickerModal.vue'
-import { uploadMedia } from '@/api/org'
+import MediaDrawSelectDialog from '@/components/draw/MediaDrawSelectDialog.vue'
+import AiDrawGenerateDialog from '@/components/draw/AiDrawGenerateDialog.vue'
+import DrawEditorHost from '@/components/draw/DrawEditorHost.vue'
+import { DrawSvgImage } from '@/tiptap-extensions/drawSvgImage'
+import { fetchMediaDetail, uploadMedia } from '@/api/org'
 
 /** 拖拽的最小边长：再小控制点就糊成一个点，也失去了「缩回去」的手感 */
 const MIN_IMAGE_PX = 40
@@ -223,7 +227,7 @@ async function uploadImage(file: File) {
       return
     }
     instance.chain().focus().setImage({ src: media.url, alt: media.name, title: media.name }).run()
-    showToast('图片已插入，并存入多媒体资源', 'success')
+    showToast('图片已插入，并存入图片资源', 'success')
   } catch {
     showToast('图片上传失败', 'error')
   }
@@ -246,6 +250,78 @@ function onPickMedia(media: OrgMedia) {
 function onPickFile(file: File) {
   imageOpen.value = false
   void uploadImage(file)
+}
+
+/* ===== 理科配图：选择类型 → 编辑器；AI 草稿先校验再进画布；双击节点二次编辑 ===== */
+const drawSelectOpen = ref(false)
+const aiDrawOpen = ref<DrawEditorType | null>(null)
+interface DrawHostState {
+  editorType: DrawEditorType
+  mediaId?: number
+  projectJson?: string
+  molfileText?: string
+  /** 非空表示在二次编辑既有节点（值为节点位置），保存后更新节点而不是新插 */
+  editPos?: number
+}
+const drawHost = ref<DrawHostState | null>(null)
+
+function openDrawSelect() {
+  drawSelectOpen.value = true
+}
+
+function onDrawManual(type: DrawEditorType) {
+  drawSelectOpen.value = false
+  drawHost.value = { editorType: type }
+}
+
+function onDrawAi(type: DrawEditorType) {
+  drawSelectOpen.value = false
+  aiDrawOpen.value = type
+}
+
+function onDrawDraft(payload: { editorType: DrawEditorType; projectJson?: string; molfileText?: string }) {
+  aiDrawOpen.value = null
+  drawHost.value = { ...payload }
+}
+
+/** 宿主确认导出后：新图插入光标处；二次编辑则原位更新节点的 SVG */
+function onDrawSaved(media: OrgMedia) {
+  const instance = editor.value
+  const host = drawHost.value
+  drawHost.value = null
+  if (!instance || !media.url) return
+  if (host?.editPos != null) {
+    instance
+      .chain()
+      .setNodeSelection(host.editPos)
+      .updateAttributes('drawSvgImage', { svgUrl: media.url, alt: media.name })
+      .run()
+    showToast('配图已更新', 'success')
+  } else {
+    instance
+      .chain()
+      .focus()
+      .insertContent({
+        type: 'drawSvgImage',
+        attrs: { mediaId: media.id, svgUrl: media.url, alt: media.name },
+      })
+      .run()
+    showToast('理科配图已插入', 'success')
+  }
+}
+
+/** draw-svg-image 节点双击：读 media 记录唤起对应编辑器（工程数据重开，不从 SVG 反解析） */
+async function onDrawNodeEdit(mediaId: number, pos: number) {
+  try {
+    const media = await fetchMediaDetail(mediaId)
+    drawHost.value = {
+      editorType: media.editorType ?? 'fabric-general',
+      mediaId: media.id,
+      editPos: pos,
+    }
+  } catch {
+    showToast('配图工程读取失败，无法二次编辑', 'error')
+  }
 }
 
 /** 从剪贴板 / 拖拽事件里取图片文件 */
@@ -293,6 +369,8 @@ const editor = useEditor({
     }),
     /* allowBase64: false —— 在写入侧就堵死内联 base64，保证正文只存 URL */
     ResizableImage.configure({ inline: false, allowBase64: false }),
+    /* 理科静态配图节点：双击按 media_id 重开绘图编辑器二次编辑 */
+    DrawSvgImage,
     Mathematics.configure({
       katexOptions: { throwOnError: false },
       inlineOptions: { onClick: (node, pos) => openMathEdit(node, pos, false) },
@@ -344,6 +422,19 @@ onBeforeUnmount(() => {
   editor.value?.destroy()
 })
 
+/* 编辑器就绪后挂上 draw-svg-image 节点的双击回调（节点 NodeView 经 editor.storage 取） */
+watch(
+  () => editor.value,
+  (instance) => {
+    if (instance) {
+      ;(instance.storage as unknown as Record<string, unknown>).drawSvgImageOnEdit = (mediaId: number, pos: number) => {
+        void onDrawNodeEdit(mediaId, pos)
+      }
+    }
+  },
+  { immediate: true },
+)
+
 const isEmpty = computed(() => {
   void revision.value /* 显式依赖：见 revision 的注释 */
   return editor.value ? editor.value.isEmpty : !toPlainText(props.modelValue)
@@ -387,6 +478,10 @@ defineExpose({ isEmpty })
         <AppIcon name="image" :size="16" />
         <span class="rte-btn-text">图片</span>
       </button>
+      <button class="rte-btn" type="button" title="插入理科配图（几何图 / 化学装置图 / 分子结构式 / 简易示意图，可 AI 生成草稿；双击已插入配图可二次编辑）" @click="openDrawSelect">
+        <AppIcon name="shapes" :size="16" />
+        <span class="rte-btn-text">配图</span>
+      </button>
 
       <span class="rte-sep" />
 
@@ -422,6 +517,32 @@ defineExpose({ isEmpty })
       @close="imageOpen = false"
       @pick="onPickMedia"
       @pick-file="onPickFile"
+    />
+
+    <MediaDrawSelectDialog
+      v-if="drawSelectOpen"
+      @close="drawSelectOpen = false"
+      @manual="onDrawManual"
+      @ai="onDrawAi"
+    />
+
+    <AiDrawGenerateDialog
+      v-if="aiDrawOpen"
+      :initial-type="aiDrawOpen"
+      @close="aiDrawOpen = null"
+      @draft="onDrawDraft"
+    />
+
+    <DrawEditorHost
+      v-if="drawHost"
+      purpose="insert"
+      :editor-type="drawHost.editorType"
+      :media-id="drawHost.mediaId"
+      :initial-project-json="drawHost.projectJson"
+      :initial-molfile="drawHost.molfileText"
+      :subject="subject"
+      @close="drawHost = null"
+      @saved="onDrawSaved"
     />
   </div>
 </template>

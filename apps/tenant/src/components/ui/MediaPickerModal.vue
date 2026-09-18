@@ -144,7 +144,7 @@ function onDrop(event: DragEvent) {
       <div class="mp-drop" @click="fileInput?.click()" @dragover.prevent @drop.prevent="onDrop">
         <AppIcon name="upload" :size="26" />
         <p class="mp-drop-title">点击选择图片，或直接拖到这里</p>
-        <p class="f-hint">上传后自动存入「多媒体资源」，正文里只引用其地址</p>
+        <p class="f-hint">上传后自动存入「图片」资源库，正文里只引用其地址</p>
       </div>
       <input ref="fileInput" type="file" accept="image/*" class="mp-file" @change="onFileChange" />
     </template>

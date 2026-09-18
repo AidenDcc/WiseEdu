@@ -1,4 +1,5 @@
 {
+  "//": "启动全部三个应用（并行）: pnpm dev；或只启动某一个: pnpm dev:portal(门户端→http://localhost:5172/) / pnpm dev:admin(超管端→http://localhost:5173/) / pnpm dev:tenant(机构端→http://localhost:5174/)",
   "name": "ai-teaching-cloud",
   "version": "0.1.0",
   "private": true,
@@ -19,5 +20,10 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "pnpm": {
+    "ignoredBuiltDependencies": [
+      "canvas"
+    ]
   }
 }

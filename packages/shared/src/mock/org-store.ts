@@ -5,6 +5,7 @@
 import type {
   AiCheckResult,
   Campus,
+  DrawEditorType,
   FileFolder,
   GeneratedQuestion,
   MaterialExample,
@@ -3580,6 +3581,160 @@ export function deleteMedia(id: number): number {
   return item.linkedCount
 }
 
+/* ================= 理科配图绘图工程（静态 SVG 配图） =================
+ *
+ * 业务约束（规格硬性要求）：
+ * - 画布输出只能是静态图片，工程 JSON 里不允许出现 slider / animation / button，
+ *   入库前由前端 Schema 校验过滤（见 apps/tenant 的 drawSchemaValidator），这里兜底再清一遍；
+ * - 「保存草稿」只落 project_json / molfile_text；「确认导出」才携带 svg 字节生成可引用 URL；
+ * - 二次编辑读工程数据重开编辑器，不从 SVG 反解析。
+ */
+
+const INTERACTIVE_KEYS = new Set(['slider', 'sliders', 'animation', 'animations', 'button', 'buttons', 'play', 'pause', 'anim'])
+
+/** 入库前兜底清洗交互字段（前端校验之外的第二道闸，防绕过） */
+function stripInteractive(input: unknown): unknown {
+  if (Array.isArray(input)) {
+    return input.map(stripInteractive)
+  }
+  if (input && typeof input === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+      if (INTERACTIVE_KEYS.has(key.toLowerCase())) continue
+      out[key] = stripInteractive(value)
+    }
+    return out
+  }
+  return input
+}
+
+export function getMediaById(id: number): OrgMedia | undefined {
+  return mediaResources.find((row) => row.id === id)
+}
+
+export function saveDrawMedia(input: {
+  /** 二次编辑时携带，更新同一条记录 */
+  id?: number
+  name: string
+  subject: string
+  knowledge?: string[]
+  editorType: DrawEditorType
+  projectJson?: string
+  molfileText?: string
+  /** 确认导出时携带（SVG data URL）；仅保存草稿时不带 */
+  svgDataUrl?: string
+}): OrgMedia {
+  const existing = input.id != null ? mediaResources.find((row) => row.id === input.id) : undefined
+  const projectJson = input.projectJson ? JSON.stringify(stripInteractive(JSON.parse(input.projectJson))) : undefined
+
+  if (existing) {
+    existing.name = input.name
+    existing.subject = input.subject
+    if (input.knowledge) existing.knowledge = input.knowledge
+    existing.editorType = input.editorType
+    existing.projectJson = projectJson
+    existing.molfileText = input.molfileText
+    if (input.svgDataUrl) {
+      if (existing.url) unregisterMediaSrc(existing.url)
+      mediaBlobs.set(existing.id, input.svgDataUrl)
+      existing.url = mediaUrlOf(existing.id)
+      existing.mime = 'image/svg+xml'
+      registerMediaSrc(existing.url, input.svgDataUrl)
+      existing.sizeMb = Math.round(((input.svgDataUrl.length * 0.75) / 1024 / 1024) * 100) / 100
+    }
+    return existing
+  }
+
+  const item = uploadMedia({
+    name: input.name,
+    kind: 'image',
+    subject: input.subject,
+    knowledge: input.knowledge ?? [],
+    dataUrl: input.svgDataUrl,
+    mime: input.svgDataUrl ? 'image/svg+xml' : undefined,
+  })
+  item.editorType = input.editorType
+  item.projectJson = projectJson
+  item.molfileText = input.molfileText
+  return item
+}
+
+/**
+ * AI 构图草稿（mock 大模型网关）。
+ *
+ * 返回的原始工程 JSON 刻意混入交互字段 / 未知元件（见 jsxgraph 草稿里的 animation、
+ * chem 草稿里的 magnet_stirrer），用于走通前端 Schema 校验的过滤与提示链路；
+ * 真实网关接入后只替换本函数的数据来源，校验逻辑不变。
+ */
+export function generateAiDrawDraft(input: { mediaType: DrawEditorType; userPrompt: string }): {
+  projectJson?: string
+  molfileText?: string
+} {
+  void input.userPrompt
+  switch (input.mediaType) {
+    case 'jsxgraph':
+      return {
+        projectJson: JSON.stringify({
+          version: 1,
+          /* AI 幻觉出来的交互配置：校验器必须把它过滤掉 */
+          animation: { play: true, loop: true },
+          elements: [
+            { type: 'polygon', vertices: [[-3, 0.5], [0, 4.5], [3, 0.5]], label: 'ABC' },
+            { type: 'segment', p1: [0, 4.5], p2: [0, 0.5], dash: true },
+            { type: 'point', x: 0, y: 0.5, label: 'D' },
+            { type: 'angleMark', p1: [-3, 0.5], vertex: [0, 4.5], p2: [3, 0.5] },
+            { type: 'rightAngleMark', p1: [0, 4.5], vertex: [0, 0.5], p2: [3, 0.5] },
+            { type: 'text', x: -3.4, y: 4.9, text: 'AB = AC', latex: false },
+          ],
+        }),
+      }
+    case 'fabric-chem':
+      return {
+        projectJson: JSON.stringify({
+          version: 1,
+          elements: [
+            /* magnet_stirrer 不在预制元件白名单：校验过滤 + toast 提示 */
+            { elementId: 'alcohol_lamp', x: 60, y: 300 },
+            { elementId: 'test_tube', x: 55, y: 150, angle: -18 },
+            { elementId: 'rubber_stopper', x: 148, y: 128 },
+            { elementId: 'glass_tube', x: 210, y: 130, angle: 90 },
+            { elementId: 'gas_collect_bottle', x: 330, y: 220 },
+            { elementId: 'magnet_stirrer', x: 400, y: 400 },
+          ],
+          texts: [{ text: '加热制取氧气', x: 40, y: 40 }],
+        }),
+      }
+    case 'ketcher':
+      return {
+        /* 乙醇 Molfile V2000（AI 草稿，加载前须经 validateMolfile 校验） */
+        molfileText: [
+          ' ethanol',
+          '  Ketcher  926260000',
+          '',
+          '  3  2  0  0  0  0  0  0  0  0999 V2000',
+          '    0.0000    0.0000    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0',
+          '    1.0000    0.0000    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0',
+          '    2.0000    0.0000    0.0000 O   0  0  0  0  0  0  0  0  0  0  0  0',
+          '  1  2  1  0  0  0  0',
+          '  2  3  1  0  0  0  0',
+          'M  END',
+        ].join('\n'),
+      }
+    case 'fabric-general':
+      return {
+        /* 标准 fabric canvas JSON（loadFromJSON 可直接还原） */
+        projectJson: JSON.stringify({
+          version: '5.3.0',
+          objects: [
+            { type: 'rect', left: 60, top: 70, width: 220, height: 130, fill: 'transparent', stroke: '#3a4a63', strokeWidth: 2 },
+            { type: 'textbox', left: 90, top: 110, text: '光路示意图', fill: '#3a4a63', fontSize: 18, styles: {} },
+            { type: 'line', left: 310, top: 130, x1: 0, y1: 0, x2: 120, y2: 0, stroke: '#3a4a63', strokeWidth: 2.5 },
+          ],
+        }),
+      }
+  }
+}
+
 /* ================= 我的文件（FR-FL-001 ~ 005） ================= */
 
 let fileSeq = 400
@@ -4336,7 +4491,9 @@ export const orgMenuTree: OrgMenuNode[] = [
     enabled: true,
     children: [
       { key: 'material/list', title: '教辅资料', enabled: true },
-      { key: 'material/media', title: '多媒体资源', enabled: true },
+      { key: 'material/media/image', title: '图片', enabled: true },
+      { key: 'material/media/animation', title: '小程序动画', enabled: true },
+      { key: 'material/media/video', title: '视频', enabled: true },
     ],
   },
   { key: 'file', title: '我的文件', enabled: true },
