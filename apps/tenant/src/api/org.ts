@@ -5,6 +5,7 @@
 import { request } from '@aiteach/shared'
 import type {
   Campus,
+  ComposeSearchIntent,
   DrawEditorType,
   FileFolder,
   GeneratedQuestion,
@@ -82,6 +83,14 @@ export function fetchGlobalSearch(keyword: string) {
 /** 图片搜索的本地演示口径（未配置视觉通道时用）：按文件名返回一个演示关键词 */
 export function recognizeSearchImage(name: string) {
   return request<{ keyword: string }>('/tenant/search/image', { method: 'POST', data: { name } })
+}
+
+/**
+ * 题库组卷工作台 AI 搜索的本地演示解读（未配置 AI Key 时的回退）：
+ * 后端按题库语料做确定性的词表匹配，保证同一输入每次得到同一份解读。
+ */
+export function interpretComposeSearch(data: { text?: string; name?: string }) {
+  return request<ComposeSearchIntent>('/tenant/ai/compose-search', { method: 'POST', data })
 }
 
 /* ===== 字典 / 知识点树（题库管理筛选） ===== */

@@ -14,6 +14,7 @@ import {
   variantOf,
 } from '@/api/org'
 import { useScope } from '@/composables/useScope'
+import { useComposeBasket } from '@/composables/useComposeBasket'
 
 const router = useRouter()
 const route = useRoute()
@@ -188,6 +189,8 @@ function toggleAnalysis(id: number) {
 }
 
 /* ================= 组卷篮（加入组卷库） ================= */
+/* 组卷工作台的组卷车（localStorage）：跨标签页交接的落点，见 pourIntoCompose */
+const composeBasket = useComposeBasket()
 const BASKET_KEY = 'aiteach.paper-basket'
 const basket = ref<number[]>([])
 
@@ -222,6 +225,28 @@ function clearBasket() {
 
 function goCollab() {
   router.push({ path: '/paper/collab', query: { basket: '1' } })
+}
+
+/**
+ * 带着本页组卷篮去「题库组卷」工作台。
+ *
+ * 为什么需要这道桥：本页的篮子是 `sessionStorage`（按标签页隔离），而工作台开在**另一个
+ * 标签页**里，读不到它。所以交接必须在点击的当下、在本页把题灌进工作台的 localStorage 组卷车。
+ *
+ * 用 `<a target="_blank">` 而不是 `window.open`：新标签页由浏览器自己打开，永远不会被
+ * 弹窗拦截器拦下（本函数虽然是同步的，但把「开标签页」交给浏览器更稳）。
+ */
+function pourIntoCompose() {
+  const rows = basket.value
+    .map((id) => list.value.find((row) => row.id === id))
+    .filter((row): row is OrgQuestion => Boolean(row))
+  const added = composeBasket.addMany(rows, 'pool')
+  const skipped = rows.length - added
+  if (added === 0) {
+    showToast(rows.length === 0 ? '组卷篮中的题目已不在题库中' : `这 ${rows.length} 道题都已在组卷车中`)
+    return
+  }
+  showToast(skipped > 0 ? `已带入 ${added} 题，另有 ${skipped} 题已在组卷车中` : `已带入 ${added} 题到组卷工作台`)
 }
 
 /* ===== 操作：预览 / 编辑 / 变式 / 删除 ===== */
@@ -502,6 +527,9 @@ onMounted(() => {
       <AppIcon name="file" :size="16" />
       <span>已选 <b>{{ basket.length }}</b> 题</span>
       <button class="btn btn-primary btn-sm" @click="goCollab">去组卷</button>
+      <a class="btn btn-ghost btn-sm" href="/paper/compose" target="_blank" rel="noopener" @click="pourIntoCompose">
+        在新标签页组卷
+      </a>
       <button class="btn btn-ghost btn-sm" @click="clearBasket">清空</button>
     </div>
   </div>

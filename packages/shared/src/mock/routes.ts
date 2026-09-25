@@ -190,6 +190,14 @@ const orgRoutes: MockRoute[] = [
   // 全局搜索（FR-GN-026）：一次检索返回各资源分类，图片搜索在真实模式下走前端视觉识别
   { method: 'GET', path: '/tenant/search', handler: ({ query }) => guard(() => org.searchAll(String(query.keyword ?? ''))) },
   { method: 'POST', path: '/tenant/search/image', handler: ({ body }) => guard(() => org.recognizeSearchImage(String(body.name ?? ''))) },
+
+  // 题库组卷工作台：AI 搜索的本地演示解读（未配置 AI Key 时的回退口径）
+  {
+    method: 'POST',
+    path: '/tenant/ai/compose-search',
+    handler: ({ body }) =>
+      guard(() => org.interpretComposeSearch({ text: body.text as string | undefined, name: body.name as string | undefined })),
+  },
 ]
 
 export const mockRoutes: MockRoute[] = [

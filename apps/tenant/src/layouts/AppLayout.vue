@@ -179,15 +179,27 @@ onMounted(() => void ensureScope())
               :class="{ collapsed: !expandedKeys.includes(item.path) }"
             >
               <div class="sub-inner">
-                <RouterLink
-                  v-for="child in item.children"
-                  :key="child.path"
-                  :to="child.path"
-                  class="menu-sub"
-                  :class="{ active: route.path.startsWith(child.path) }"
-                >
-                  {{ child.title }}
-                </RouterLink>
+                <!-- 新标签页项渲染为 <a>：锚点导航不会被浏览器拦截，也不必先 window.open 再等异步 -->
+                <template v-for="child in item.children" :key="child.path">
+                  <a
+                    v-if="child.newTab"
+                    :href="child.path"
+                    target="_blank"
+                    rel="noopener"
+                    class="menu-sub"
+                    :title="`在新标签页打开${child.title}`"
+                  >
+                    {{ child.title }}<AppIcon class="ext" name="arrow-right" :size="11" />
+                  </a>
+                  <RouterLink
+                    v-else
+                    :to="child.path"
+                    class="menu-sub"
+                    :class="{ active: route.path.startsWith(child.path) }"
+                  >
+                    {{ child.title }}
+                  </RouterLink>
+                </template>
               </div>
             </div>
           </div>
@@ -219,16 +231,28 @@ onMounted(() => void ensureScope())
         @mouseleave="scheduleCloseFlyout"
       >
         <div class="flyout-title">{{ flyoutItem.title }}</div>
-        <RouterLink
-          v-for="child in flyoutItem.children"
-          :key="child.path"
-          :to="child.path"
-          class="flyout-item"
-          :class="{ active: route.path.startsWith(child.path) }"
-          @click="flyout = null"
-        >
-          {{ child.title }}
-        </RouterLink>
+        <template v-for="child in flyoutItem.children" :key="child.path">
+          <a
+            v-if="child.newTab"
+            :href="child.path"
+            target="_blank"
+            rel="noopener"
+            class="flyout-item"
+            :title="`在新标签页打开${child.title}`"
+            @click="flyout = null"
+          >
+            {{ child.title }}<AppIcon class="ext" name="arrow-right" :size="11" />
+          </a>
+          <RouterLink
+            v-else
+            :to="child.path"
+            class="flyout-item"
+            :class="{ active: route.path.startsWith(child.path) }"
+            @click="flyout = null"
+          >
+            {{ child.title }}
+          </RouterLink>
+        </template>
       </div>
     </Teleport>
 
@@ -405,6 +429,16 @@ onMounted(() => void ensureScope())
 }
 .menu-sub:hover { background: #f2f4fa; color: var(--ink); }
 .menu-sub.active { color: var(--brand); font-weight: 600; background: var(--brand-soft); }
+
+/* 新标签页入口的外链箭头：inline-flex 跟随文字基线，不改变 .menu-sub 的 block 布局 */
+.menu-sub .ext,
+.flyout-item .ext {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 4px;
+  opacity: 0.55;
+}
+.menu-sub .ext { margin-top: -2px; }
 
 .sidebar-foot {
   display: flex;

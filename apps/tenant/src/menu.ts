@@ -7,6 +7,12 @@ export interface MenuItem {
   title: string
   icon?: string
   children?: MenuItem[]
+  /**
+   * 在新标签页独立打开（全屏工作台式页面，不经 AppLayout 渲染）。
+   * 侧边栏据此渲染 `<a target="_blank">` 而不是 `<RouterLink>`；对应路由也必须注册在
+   * `/` 之外，否则会带着侧边栏渲染进当前页签，与新标签页的预期不符。
+   */
+  newTab?: boolean
 }
 
 export const menus: MenuItem[] = [
@@ -29,6 +35,8 @@ export const menus: MenuItem[] = [
     icon: 'file',
     children: [
       { path: '/paper/list', title: '试卷库' },
+      // 紧邻试卷库：组卷是「新建」动作，与「看已有试卷」放在一起更顺手；新标签页独立全屏
+      { path: '/paper/compose', title: '题库组卷', newTab: true },
       { path: '/paper/collab', title: '协同组卷' },
       { path: '/paper/review', title: '试卷审核中心' },
     ],

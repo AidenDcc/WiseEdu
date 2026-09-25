@@ -10,6 +10,15 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/LoginView.vue'),
     meta: { title: '登录' },
   },
+  /* 题库组卷：独立全屏工作台，侧边栏以新标签页打开它。
+     必须挂在 `/` 之外 —— 侧边栏在 AppLayout 里是无条件渲染的，放进 `/` 的 children
+     就一定会带上侧边栏，而这里要的是「自带顶栏、无侧边栏」的独立页面。 */
+  {
+    path: '/paper/compose',
+    name: 'paper-compose',
+    component: () => import('@/views/paper/compose/ComposeView.vue'),
+    meta: { title: '题库组卷' },
+  },
   {
     path: '/',
     component: () => import('@/layouts/AppLayout.vue'),

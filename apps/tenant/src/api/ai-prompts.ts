@@ -329,6 +329,44 @@ export function buildSearchImageUserPrompt(fileName: string): string {
   return `请判断这张图片（${fileName}）的内容，输出用于机构资源库检索的关键词 JSON。`
 }
 
+/* ==================== 题库组卷工作台：AI 搜索的意图解析 ==================== */
+
+/**
+ * 与 SEARCH_IMAGE_SYSTEM_PROMPT 的分工：那个只产出「一个关键词 + 学科年级」，供全局搜索面板
+ * 回填输入框；这个产出**完整的结构化条件**（题型、难度、知识点），因为组卷工作台要拿它直接
+ * 驱动筛选，而教师说「找几道高一数学三角函数的中等单选题」时，题型与难度和知识点同等重要。
+ *
+ * 仍然只让模型做「翻译」不做「检索」：机构资源已在前端全量持有，让模型列资源只会幻觉出
+ * 不存在的题号（见 ComposeSearchIntent 的注释）。
+ */
+export const COMPOSE_SEARCH_SYSTEM_PROMPT = `你是 K12 教学资源库的检索意图解析器。用户会给你一句话（也可能是一张题目截图或教材页面照片），你要把检索意图解析成结构化条件，供机构题库、试卷、教辅、视频、图片检索使用。
+
+# 输出
+只输出 JSON 对象：
+{"keywords":["核心概念"],"subject":"学科","grade":"年级","questionTypes":["单选题"],"difficulty":"中等","knowledge":["知识点标签"],"reason":"一句话说明"}
+
+# 字段规则
+1. keywords 取输入中区分度最高的学科核心概念（如「三角函数的图像与性质」「浮力」「立体几何」），2~8 字、不带标点，禁止「题目」「练习」「资料」「卷子」这类泛词，最多 3 个；
+2. subject / grade：无法判断返回空字符串 ""，不要猜测；
+3. questionTypes 只能取「单选题」「多选题」「判断题」「填空题」「解答题」，且**只填用户明确提到的**，没提返回 [];
+4. difficulty 只能取「容易」「较易」「中等」「较难」「困难」，没提返回 ""；
+5. knowledge 填教材通用的知识点名，不确定返回 []；
+6. reason 是给教师看的一句话解读，≤30 字，说明你把这条检索理解成了什么；
+7. 输入与教学无关、或无法辨认时，keywords 返回 []，不要编造。
+
+# 图片输入
+若给的是图片：有明确题干就取该题考查的知识点与题型；若是教材/课件页面，取该页主题作为 keywords。`
+
+/** 用户提示词：文本检索走这条 */
+export function buildComposeSearchUserPrompt(text: string): string {
+  return `请解析这条检索意图，输出 JSON：${text}`
+}
+
+/** 用户提示词：图片检索走这条（图片本身另以 image_url 内容块给出） */
+export function buildComposeSearchImagePrompt(fileName: string): string {
+  return `请解析这张图片（${fileName}）的检索意图，输出 JSON。`
+}
+
 /* ==================== AI 问答提示词（全局悬浮对话框） ==================== */
 
 /**

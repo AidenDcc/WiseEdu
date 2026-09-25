@@ -109,6 +109,7 @@ export type {
   OrgFileKind,
   OrgFile,
   OrgSearchResult,
+  ComposeSearchIntent,
   StandardFormula,
   FormulaScope,
   OrgFormula,

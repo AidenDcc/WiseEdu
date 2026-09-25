@@ -5,6 +5,7 @@
 import type {
   AiCheckResult,
   Campus,
+  ComposeSearchIntent,
   DrawEditorType,
   FileFolder,
   GeneratedQuestion,
@@ -4714,6 +4715,8 @@ export const orgMenuTree: OrgMenuNode[] = [
     enabled: true,
     children: [
       { key: 'paper/list', title: '试卷库', enabled: true },
+      // 题库组卷在侧边栏以新标签页打开（独立全屏工作台），此处仅同步菜单权限树
+      { key: 'paper/compose', title: '题库组卷', enabled: true },
       { key: 'paper/collab', title: '协同组卷', enabled: true },
       { key: 'paper/review', title: '试卷审核中心', enabled: true },
     ],
@@ -4799,4 +4802,129 @@ export function recognizeSearchImage(name: string): { keyword: string } {
   let sum = 0
   for (let i = 0; i < name.length; i += 1) sum += name.charCodeAt(i)
   return { keyword: IMAGE_KEYWORDS[sum % IMAGE_KEYWORDS.length] }
+}
+
+/* ================= 题库组卷工作台：AI 搜索的本地演示解读 ================= */
+
+/** 题型 / 难度 / 短称都是封闭集合，写死比从语料里推更稳（语料里不一定每种都出现） */
+const COMPOSE_TYPES: Array<{ name: string; aliases: string[] }> = [
+  { name: '单选题', aliases: ['单选题', '单选', '选择题', '单项选择'] },
+  { name: '多选题', aliases: ['多选题', '多选', '多项选择'] },
+  { name: '判断题', aliases: ['判断题', '判断', '对错题'] },
+  { name: '填空题', aliases: ['填空题', '填空'] },
+  { name: '解答题', aliases: ['解答题', '解答', '问答', '大题', '计算题'] },
+]
+
+const COMPOSE_DIFFICULTIES = ['容易', '较易', '中等', '较难', '困难']
+
+const EMPTY_INTENT: ComposeSearchIntent = {
+  keywords: [],
+  subject: '',
+  grade: '',
+  questionTypes: [],
+  difficulty: '',
+  knowledge: [],
+  reason: '',
+}
+
+/** 去重后的值域：学科 / 年级 / 知识点都从题库语料里现取，避免与种子数据脱节 */
+function vocabOf(pickValues: (row: OrgQuestion) => string[]): string[] {
+  return [...new Set(questions.flatMap(pickValues))].filter(Boolean)
+}
+
+/** 最长公共子串长度（滚动数组，输入都是短串） */
+function commonRunLength(a: string, b: string): number {
+  if (!a || !b) return 0
+  let best = 0
+  const prev = new Array<number>(b.length + 1).fill(0)
+  for (let i = 1; i <= a.length; i += 1) {
+    /* diag 始终持有 dp[i-1][j-1]：dp 只用到左上角与上一行，故一维足够 */
+    let diag = 0
+    for (let j = 1; j <= b.length; j += 1) {
+      const up = prev[j]
+      prev[j] = a[i - 1] === b[j - 1] ? diag + 1 : 0
+      diag = up
+      if (prev[j] > best) best = prev[j]
+    }
+  }
+  return best
+}
+
+/**
+ * 「部分提及」的强度门槛：公共子串至少 3 字。
+ *
+ * 曾经的实现是「共享任意 2 字滑窗即算命中」，在中文里几乎等于不过滤 ——「三角函数」
+ * 「二次函数」「函数与导数」两两共享「函数」，于是搜三角函数会把二次函数的题一起捞进来。
+ * 2 字在中文里不构成相关性证据，3 字才大致对应一个真实的话题片段。
+ */
+const FUZZY_RUN = 3
+
+/**
+ * 本地演示口径的检索意图解析（未配置 AI Key 时的回退）。
+ *
+ * 与 recognizeSearchImage 同一设计目标：**确定性、可复现** —— 演示时同一个输入必须每次
+ * 得到同一份解读，否则截图、录屏和口头讲解会对不上。全部规则都基于题库语料的词表匹配，
+ * 不含任何随机数或时间相关逻辑。
+ */
+export function interpretComposeSearch(input: { text?: string; name?: string }): ComposeSearchIntent {
+  const text = (input.text ?? '').trim()
+  if (text) return interpretComposeText(text)
+
+  const name = (input.name ?? '').trim()
+  if (!name) return { ...EMPTY_INTENT }
+
+  /* 图片输入没有文字，只有文件名。文件名常直接带着题目标题（「三角恒等变换.png」），
+     所以先拿文件名当搜索词试一次；确实什么也匹配不到时，再退回「按文件名稳定映射一个
+     知识点」——两条分支都是确定性的，演示仍可复现，但前者能让解读真的回应这张图。 */
+  const fromName = interpretComposeText(name)
+  if (fromName.knowledge.length || fromName.keywords.length) return fromName
+  return interpretComposeText(recognizeSearchImage(name).keyword)
+}
+
+function interpretComposeText(seeded: string): ComposeSearchIntent {
+  const text = seeded.trim()
+  if (!text) return { ...EMPTY_INTENT }
+
+  const lower = text.toLowerCase()
+  const contains = (value: string) => lower.includes(value.toLowerCase())
+
+  /* 知识点：先精确命中，再按公共子串长度捞出「部分提及」的标签
+     （说「三角函数」命中「三角函数的图像与性质」）。精确的排前面，模糊的按重合长度降序，
+     最多取 3 个 —— 避免一次带上半棵树把结果筛空。 */
+  const tags = vocabOf((row) => row.knowledge)
+  const exactTags = tags.filter((tag) => contains(tag))
+  const fuzzyTags = tags
+    .filter((tag) => !exactTags.includes(tag))
+    .map((tag) => ({ tag, run: commonRunLength(text, tag) }))
+    .filter((row) => row.run >= FUZZY_RUN)
+    .sort((a, b) => b.run - a.run)
+    .map((row) => row.tag)
+  const knowledge = [...exactTags, ...fuzzyTags].slice(0, 3)
+
+  const subject = vocabOf((row) => [row.subject]).find((value) => contains(value)) ?? ''
+  const grade = vocabOf((row) => [row.grade]).find((value) => contains(value)) ?? ''
+  const questionTypes = COMPOSE_TYPES.filter((entry) => entry.aliases.some(contains)).map((entry) => entry.name)
+  const difficulty = COMPOSE_DIFFICULTIES.find(contains) ?? ''
+
+  /* 关键词优先用命中的知识点（检索区分度最高），其次退回学科/年级这类较泛的词 */
+  const keywords = knowledge.length ? knowledge : [subject, grade].filter(Boolean)
+
+  const parts: string[] = []
+  if (keywords.length) parts.push(`按「${keywords.join('、')}」检索`)
+  /* 关键词为空时调用方（搜索栏）会退回用户原句检索，这里如实说明，别谎称「已按原词检索」 */
+  else parts.push('未匹配到题库知识点，按原句检索')
+  if (subject) parts.push(subject)
+  if (grade) parts.push(grade)
+  if (questionTypes.length) parts.push(questionTypes.join('/'))
+  if (difficulty) parts.push(difficulty)
+
+  return {
+    keywords,
+    subject,
+    grade,
+    questionTypes,
+    difficulty,
+    knowledge,
+    reason: `${parts.join(' · ')}（本地演示解读）`.slice(0, 60),
+  }
 }

@@ -7,6 +7,15 @@ import AppModal from '@/components/ui/AppModal.vue'
 import AppDrawer from '@/components/ui/AppDrawer.vue'
 import { fetchPapers, fetchQuestions, savePaper, swapPaperQuestion } from '@/api/org'
 import { useBaseData } from '@/composables/useBaseData'
+/* 大题归类规则与题库组卷工作台共用一份实现（见 paper-sections.ts 头部说明） */
+import {
+  MAX_SECTIONS,
+  defaultScore,
+  findSectionIndex,
+  makeSectionTitle,
+  sectionKeywordsOf,
+  sectionLabelOf,
+} from './paper-sections'
 
 const route = useRoute()
 const router = useRouter()
@@ -116,46 +125,22 @@ function sourceOf(id: number): string {
 
 /* ===== 大题自动归类：加入题目时按题型匹配/新建大题（FR：自动识别大题类型） ===== */
 
-/** 题型 → 大题标准名（新建大题时用它命名） */
-const SECTION_LABEL: Record<string, string> = {
-  单选题: '单项选择题',
-  多选题: '多项选择题',
-  判断题: '判断题',
-  填空题: '填空题',
-  解答题: '解答题',
-}
-/** 题型 → 大题标题匹配关键词（兼容「选择题」「一、单选题」等用户自定义标题） */
-const SECTION_KEYWORDS: Record<string, string[]> = {
-  单选题: ['单选', '选择'],
-  多选题: ['多选'],
-  判断题: ['判断'],
-  填空题: ['填空'],
-  解答题: ['解答', '问答'],
-}
-const NUMBERS = '一二三四五六七八'
-
-/** 去掉标题编号前缀（「一、」），只留大题名用于题型匹配 */
-function sectionTypeKey(title: string): string {
-  return title.replace(/^[一二三四五六七八九十]+、/, '').trim()
-}
-
 /** 找到容纳该题型的大题下标；没有则新建一个（大题满员时退回最后一个大题并提示） */
 function ensureSection(type: string): number {
-  const keywords = SECTION_KEYWORDS[type] ?? [type.replace(/题$/, '')]
-  const hit = draft.sections.findIndex((section) => keywords.some((kw) => sectionTypeKey(section.title).includes(kw)))
+  const hit = findSectionIndex(draft.sections, sectionLabelOf(type), sectionKeywordsOf(type))
   if (hit >= 0) return hit
-  if (draft.sections.length >= 8) {
-    showToast('大题已达 8 个上限，题目已加入最后一个大题（可手动调整归类）', 'error')
+  if (draft.sections.length >= MAX_SECTIONS) {
+    showToast(`大题已达 ${MAX_SECTIONS} 个上限，题目已加入最后一个大题（可手动调整归类）`, 'error')
     return draft.sections.length - 1
   }
-  const label = SECTION_LABEL[type] ?? `${type}大题`
-  draft.sections.push({ id: sectionSeqLocal++, title: `${NUMBERS[draft.sections.length]}、${label}`, questions: [] })
+  const label = sectionLabelOf(type)
+  draft.sections.push({
+    id: sectionSeqLocal++,
+    title: makeSectionTitle(label, draft.sections.length),
+    questions: [],
+  })
   logAction(`自动新建大题「${label}」`)
   return draft.sections.length - 1
-}
-
-function defaultScore(type: string): number {
-  return type === '解答题' ? 12 : 5
 }
 
 function addQuestion(row: OrgQuestion) {
@@ -179,11 +164,15 @@ function logAction(action: string) {
 }
 
 function addSection() {
-  if (draft.sections.length >= 8) {
-    showToast('大题最多 8 个', 'error')
+  if (draft.sections.length >= MAX_SECTIONS) {
+    showToast(`大题最多 ${MAX_SECTIONS} 个`, 'error')
     return
   }
-  draft.sections.push({ id: sectionSeqLocal++, title: `${'一二三四五六七八'[draft.sections.length]}、新大题`, questions: [] })
+  draft.sections.push({
+    id: sectionSeqLocal++,
+    title: makeSectionTitle('新大题', draft.sections.length),
+    questions: [],
+  })
 }
 function removeSection(si: number) {
   if (draft.sections.length <= 1) {

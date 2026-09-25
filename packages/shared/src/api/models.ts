@@ -575,6 +575,32 @@ export interface OrgSearchResult {
   files: OrgFile[]
 }
 
+/* ================ 题库组卷工作台：AI 检索意图 ================ */
+
+/**
+ * AI 搜索把一句话（或一张图）解析成的结构化检索条件。
+ *
+ * 为什么不让 AI 直接返回资源列表：机构端资源量很小且已在前端全量持有（题目/试卷/教辅/媒体
+ * 各自一次拉全），让模型去「记住」资源既不现实也会幻觉出不存在的题号。模型只负责把自然语言
+ * 翻译成条件，筛选仍由前端在同一份真实数据上做 —— 检索结果因此永远可回溯、可复现。
+ */
+export interface ComposeSearchIntent {
+  /** 检索关键词（区分度最高的学科核心概念，2-8 字，最多 3 个）；空数组表示未识别出可检索内容 */
+  keywords: string[]
+  /** 学科；无法判断为空串 */
+  subject: string
+  /** 年级；无法判断为空串 */
+  grade: string
+  /** 题型，取值限于 单选题 / 多选题 / 判断题 / 填空题 / 解答题；未提及为空数组 */
+  questionTypes: string[]
+  /** 难度，取值限于 容易 / 较易 / 中等 / 较难 / 困难；未提及为空串 */
+  difficulty: string
+  /** 教材知识点标签；不确定为空数组 */
+  knowledge: string[]
+  /** 面向教师的一句话解读（≤30 字），用于在界面上回显「AI 理解成了什么」 */
+  reason: string
+}
+
 export interface StandardFormula {
   id: number
   name: string
