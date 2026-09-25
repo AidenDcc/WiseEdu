@@ -162,7 +162,8 @@ export interface TenantDetailModel {
 
 /* ================ 全局字典（FR-PT-015 / 016） ================ */
 
-export type DictTypeKey = 'subject' | 'grade' | 'term' | 'questionType' | 'difficulty' | 'examType'
+/** copyright：机构端首页页脚文案，每条 name 为一段（版权主体 / 备案号 / 客服方式 …），按排序拼接展示 */
+export type DictTypeKey = 'subject' | 'grade' | 'term' | 'questionType' | 'difficulty' | 'examType' | 'copyright'
 
 export interface DictItem {
   id: number
@@ -454,6 +455,13 @@ export interface PaperSection {
   id: number
   title: string
   questions: Array<{ questionId: number; score: number }>
+  /**
+   * 大题材料（现代文 / 文言文 / 古诗 / 英语阅读短文…）：印在大题标题之下，整版通栏，
+   * 本大题各小题共用。没有材料的大题（选择题、填空、默写…）留空。
+   */
+  material?: string
+  /** 材料前的作答提示，如「阅读下面的文字，完成 1～5 题。」（与 material 同印） */
+  materialHint?: string
 }
 
 export type PaperStatus = 'draft' | 'aiReview' | 'pending' | 'approved' | 'rejected'
@@ -546,6 +554,25 @@ export interface OrgFile {
   recognize: 'none' | 'recognizing' | 'done' | 'failed'
   owner: string
   uploadedAt: string
+}
+
+/* ================ 全局搜索（FR-GN-026） ================ */
+
+/**
+ * 一次检索返回各资源分类，机构端搜索面板按分类页签展示。
+ * 分类与机构端资源一一对应：同步备课 = 教辅资料，视频 = 多媒体中的 video 资源。
+ */
+export interface OrgSearchResult {
+  /** 题目（题干 / 知识点命中） */
+  questions: OrgQuestion[]
+  /** 试卷（卷名 / 学科 / 年级命中） */
+  papers: OrgPaper[]
+  /** 同步备课资料（教辅：名称 / 类型 / 章节命中） */
+  preparations: OrgMaterial[]
+  /** 微课视频（多媒体资源） */
+  videos: OrgMedia[]
+  /** 我的文件（文件名 / 上传人命中） */
+  files: OrgFile[]
 }
 
 export interface StandardFormula {

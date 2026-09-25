@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppIcon, showToast, hueColor, resolveApiMode, getAppConfig, toPlainText, truncateRich } from '@aiteach/shared'
-import type { OrgPaper, OrgQuestion } from '@aiteach/shared'
+import { AppIcon, showToast, hueColor, resolveApiMode, getAppConfig } from '@aiteach/shared'
 import type { MenuItem } from '@/menu'
-import { flattenMenus, footerMenus, menus } from '@/menu'
+import { footerMenus, menus } from '@/menu'
 import { useAuthStore } from '@/stores/auth'
+import { useScope } from '@/composables/useScope'
+import ScopePicker from '@/components/ui/ScopePicker.vue'
+import GlobalSearchOverlay from '@/components/search/GlobalSearchOverlay.vue'
 import OrgNotificationCenter from '@/components/OrgNotificationCenter.vue'
-import { fetchOrgMessages, fetchPapers, fetchQuestions } from '@/api/org'
+import AiAssistant from '@/components/ai/AiAssistant.vue'
+import { fetchOrgMessages } from '@/api/org'
 
 const route = useRoute()
 const router = useRouter()
@@ -109,74 +112,11 @@ function openNotifications() {
   notifyOpen.value = true
 }
 
-/* ===== 顶部全局搜索（FR-GN-026） ===== */
-const searchRef = ref<HTMLElement | null>(null)
-const keyword = ref('')
+/* ===== 顶部全局「年级 / 学科」（ScopePicker 组件，localStorage 记忆，各业务视图带入默认值） ===== */
+const { ensureScope } = useScope()
+
+/* ===== 顶部全局搜索（FR-GN-026）：顶栏只作触发器，点击弹出搜索面板 ===== */
 const searchOpen = ref(false)
-const questionPool = ref<OrgQuestion[]>([])
-const paperPool = ref<OrgPaper[]>([])
-let searchLoaded = false
-
-async function ensureSearchData() {
-  if (searchLoaded) return
-  searchLoaded = true
-  try {
-    ;[questionPool.value, paperPool.value] = await Promise.all([fetchQuestions(), fetchPapers()])
-  } catch {
-    searchLoaded = false
-  }
-}
-
-const menuHits = computed(() => {
-  const kw = keyword.value.trim()
-  if (!kw) return [] as MenuItem[]
-  return flattenMenus(menus)
-    .filter((item) => item.children === undefined && item.title.includes(kw))
-    .slice(0, 5)
-})
-const questionHits = computed(() => {
-  const kw = keyword.value.trim()
-  if (!kw) return [] as OrgQuestion[]
-  return questionPool.value.filter((row) => toPlainText(row.stem).includes(kw)).slice(0, 4)
-})
-const paperHits = computed(() => {
-  const kw = keyword.value.trim()
-  if (!kw) return [] as OrgPaper[]
-  return paperPool.value.filter((row) => row.name.includes(kw)).slice(0, 4)
-})
-const hasHits = computed(() => menuHits.value.length + questionHits.value.length + paperHits.value.length > 0)
-
-function onSearchFocus() {
-  searchOpen.value = true
-  void ensureSearchData()
-}
-
-function closeSearch() {
-  searchOpen.value = false
-}
-
-function goMenu(item: MenuItem) {
-  closeSearch()
-  keyword.value = ''
-  router.push(item.path)
-}
-function goQuestion(row: OrgQuestion) {
-  closeSearch()
-  keyword.value = ''
-  router.push(`/question/manual?id=${row.id}`)
-}
-function goPaper(row: OrgPaper) {
-  closeSearch()
-  keyword.value = ''
-  router.push(`/paper/collab?id=${row.id}`)
-}
-
-function onDocumentClickSearch(event: MouseEvent) {
-  if (searchRef.value && !searchRef.value.contains(event.target as Node)) closeSearch()
-}
-
-onMounted(() => document.addEventListener('click', onDocumentClickSearch))
-onBeforeUnmount(() => document.removeEventListener('click', onDocumentClickSearch))
 
 async function onLogout() {
   if (!window.confirm('确定退出登录？')) return
@@ -186,6 +126,8 @@ async function onLogout() {
 }
 
 onMounted(refreshUnread)
+/* 触发字典加载并归一缓存的年级 / 学科（下拉选项与默认值都依赖字典） */
+onMounted(() => void ensureScope())
 </script>
 
 <template>
@@ -305,46 +247,14 @@ onMounted(refreshUnread)
           <span v-if="isMockMode" class="mock-badge" title="当前使用 Mock 数据，环境变量可切换至真实后端">演示数据</span>
         </div>
         <div class="topbar-right">
-          <!-- 全局搜索（FR-GN-026） -->
-          <div ref="searchRef" class="global-search">
+          <!-- 全局年级 / 学科：选定后缓存到本地，题库管理、录题中心跟随 -->
+          <ScopePicker />
+
+          <!-- 全局搜索（FR-GN-026）：只读触发器，点击弹出搜索面板（文本 / 图片检索） -->
+          <button class="global-search" type="button" title="全局搜索" @click="searchOpen = true">
             <AppIcon name="search" :size="15" />
-            <input
-              v-model="keyword"
-              placeholder="搜索功能 / 题目 / 试卷"
-              @focus="onSearchFocus"
-            />
-            <Transition name="fade">
-              <div v-if="searchOpen && keyword.trim()" class="search-panel">
-                <p v-if="!hasHits" class="search-empty">未找到「{{ keyword }}」相关内容</p>
-                <template v-else>
-                  <template v-if="menuHits.length">
-                    <p class="search-group">功能入口</p>
-                    <button v-for="item in menuHits" :key="item.path" class="search-item" type="button" @click="goMenu(item)">
-                      <AppIcon name="grid" :size="14" />
-                      {{ item.title }}
-                      <span class="search-path">{{ item.path }}</span>
-                    </button>
-                  </template>
-                  <template v-if="questionHits.length">
-                    <p class="search-group">题目</p>
-                    <button v-for="row in questionHits" :key="row.id" class="search-item" type="button" @click="goQuestion(row)">
-                      <AppIcon name="edit" :size="14" />
-                      {{ truncateRich(row.stem, 40) }}…
-                      <span class="search-path">#{{ row.id }} · {{ row.subject }}</span>
-                    </button>
-                  </template>
-                  <template v-if="paperHits.length">
-                    <p class="search-group">试卷</p>
-                    <button v-for="row in paperHits" :key="row.id" class="search-item" type="button" @click="goPaper(row)">
-                      <AppIcon name="file" :size="14" />
-                      {{ row.name }}
-                      <span class="search-path">{{ row.grade }} · {{ row.status }}</span>
-                    </button>
-                  </template>
-                </template>
-              </div>
-            </Transition>
-          </div>
+            <span class="search-hint">搜索题目 / 试卷 / 资料</span>
+          </button>
 
           <button class="icon-btn" title="消息中心" @click="openNotifications">
             <AppIcon name="bell" />
@@ -391,6 +301,12 @@ onMounted(refreshUnread)
 
     <!-- 消息中心抽屉 -->
     <OrgNotificationCenter :open="notifyOpen" @close="notifyOpen = false" @refresh="refreshUnread" />
+
+    <!-- 全局搜索面板（v-if 挂在关闭即卸载：关键词与结果不跨次保留） -->
+    <GlobalSearchOverlay v-if="searchOpen" @close="searchOpen = false" />
+
+    <!-- 全局 AI 问答（悬浮球可拖动，点击从右向左推出对话框） -->
+    <AiAssistant />
   </div>
 </template>
 
@@ -571,46 +487,20 @@ onMounted(refreshUnread)
 }
 .topbar-right { display: flex; align-items: center; gap: 14px; }
 
-/* ---- 全局搜索 ---- */
+/* ---- 全局搜索（只读触发器，实际检索在 GlobalSearchOverlay 面板内） ---- */
 .global-search {
-  position: relative;
   display: flex; align-items: center; gap: 7px;
-  width: 250px; height: 36px;
+  width: 200px; height: 36px;
   border: 1.5px solid var(--border); border-radius: 10px;
   background: #f7fafa; padding: 0 12px; color: var(--sub);
+  transition: border-color 0.15s, background 0.15s;
 }
-.global-search:focus-within { border-color: var(--brand); background: #fff; }
-.global-search input {
-  flex: 1; border: none; background: transparent; outline: none;
-  font-size: 13px; color: var(--ink-2);
+.global-search:hover { border-color: var(--brand); background: #fff; }
+.search-hint {
+  flex: 1; min-width: 0;
+  font-size: 13px; color: var(--sub); text-align: left;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.search-panel {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  width: 340px;
-  max-height: 420px;
-  overflow-y: auto;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: var(--shadow-lg);
-  padding: 8px;
-  z-index: 60;
-}
-.search-empty { font-size: 12.5px; color: var(--sub); padding: 14px; text-align: center; }
-.search-group {
-  font-size: 11.5px; font-weight: 700; color: var(--sub);
-  padding: 8px 10px 4px;
-}
-.search-item {
-  display: flex; align-items: center; gap: 8px;
-  width: 100%; border: none; background: transparent;
-  font-size: 13px; color: var(--ink-2); text-align: left;
-  padding: 8px 10px; border-radius: 8px; cursor: pointer;
-}
-.search-item:hover { background: var(--brand-soft); color: var(--brand-deep); }
-.search-path { margin-left: auto; font-size: 11px; color: var(--sub); flex-shrink: 0; }
 
 .icon-btn .badge {
   position: absolute;

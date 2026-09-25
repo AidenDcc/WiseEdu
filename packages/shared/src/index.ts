@@ -74,6 +74,8 @@ export {
   hasImage,
 } from './utils/richtext'
 export { registerMediaSrc, resolveMediaIn, resolveMediaSrc, unregisterMediaSrc } from './utils/media-ref'
+/* 统一 KaTeX 入口：已注册 mhchem（\ce{} 化学式），各渲染点一律从这里取 katex */
+export { default as katex } from './utils/katex'
 
 /* 字典 / AI 配置元数据（页面下拉与说明用） */
 export {
@@ -106,6 +108,7 @@ export type {
   FileFolder,
   OrgFileKind,
   OrgFile,
+  OrgSearchResult,
   StandardFormula,
   FormulaScope,
   OrgFormula,

@@ -9,6 +9,10 @@ import { deleteDictItem, fetchDict, moveDictItem, saveDictItem, toggleDictItem }
 const activeType = ref<DictTypeKey>('subject')
 const typeMeta = computed(() => DICT_TYPES.find((item) => item.key === activeType.value)!)
 
+/** 「名称」在各字典类型下的业务叫法不同（难度 = 等级名称，版权 = 展示文案） */
+const NAME_LABELS: Partial<Record<DictTypeKey, string>> = { difficulty: '等级名称', copyright: '展示文案' }
+const nameLabel = computed(() => NAME_LABELS[activeType.value] ?? '名称')
+
 const list = ref<DictItem[]>([])
 const loading = ref(false)
 
@@ -180,7 +184,7 @@ onMounted(load)
             <tr>
               <th v-if="activeType === 'grade'">学段</th>
               <th v-if="activeType === 'term'">学年 / 学期</th>
-              <th>{{ activeType === 'difficulty' ? '等级名称' : '名称' }}</th>
+              <th>{{ nameLabel }}</th>
               <th v-if="activeType === 'subject'">编码</th>
               <th v-if="activeType === 'term'">起止日期</th>
               <th v-if="activeType === 'questionType'">作答类型</th>
@@ -264,8 +268,15 @@ onMounted(load)
         </select>
       </div>
       <div class="f-field">
-        <label class="f-label">{{ activeType === 'difficulty' ? '等级名称' : '名称' }}<span class="req">*</span></label>
-        <input v-model="form.name" class="f-input" placeholder="同级不可重名" />
+        <label class="f-label">{{ nameLabel }}<span class="req">*</span></label>
+        <input
+          v-model="form.name"
+          class="f-input"
+          :placeholder="activeType === 'copyright' ? '如 © 2024-2026 星辰教育科技有限公司 版权所有' : '同级不可重名'"
+        />
+        <p v-if="activeType === 'copyright'" class="f-hint">
+          一行一条，机构端首页页脚按排序依次展示；停用后该条不再出现。
+        </p>
       </div>
       <div v-if="activeType === 'term'" class="f-field">
         <label class="f-label">起止日期<span class="req">*</span></label>

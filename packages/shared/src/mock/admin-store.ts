@@ -41,6 +41,7 @@ export const DICT_TYPES: Array<{ key: DictTypeKey; title: string; hint: string }
   { key: 'questionType', title: '题型', hint: '已被题目使用的题型不可修改作答类型' },
   { key: 'difficulty', title: '难度等级', hint: '系数 0.1-1.0，保留 1 位小数且不可重复' },
   { key: 'examType', title: '考试类型', hint: '题目筛选与组卷场景使用的考试类型' },
+  { key: 'copyright', title: '版权信息', hint: '机构端首页页脚文案，一行一条，按排序展示' },
 ]
 
 export const dictStore: Record<DictTypeKey, DictItem[]> = {
@@ -104,6 +105,14 @@ export const dictStore: Record<DictTypeKey, DictItem[]> = {
     { id: 58, name: '学业水平考试', sort: 8, enabled: true, refCount: 2 },
     { id: 59, name: '高考真题', sort: 9, enabled: true, refCount: 4 },
     { id: 60, name: '专题训练', sort: 10, enabled: true, refCount: 3 },
+  ],
+  /* 页脚文案：refCount 为该文案覆盖的机构数（平台统一展示，停用后机构端页脚不再出现该条） */
+  copyright: [
+    { id: 71, name: '© 2024-2026 星辰教育科技（杭州）有限公司 版权所有', sort: 1, enabled: true, refCount: 12 },
+    { id: 72, name: '浙ICP备 2026001234 号-1', sort: 2, enabled: true, refCount: 12 },
+    { id: 73, name: '浙公网安备 33010602001234 号', sort: 3, enabled: true, refCount: 12 },
+    { id: 74, name: '客服热线 400-800-1234 · support@aiteach.cn', sort: 4, enabled: true, refCount: 12 },
+    { id: 75, name: '本平台部分试题资源来自公开渠道，仅供教学研究使用', sort: 5, enabled: false, refCount: 0 },
   ],
 }
 

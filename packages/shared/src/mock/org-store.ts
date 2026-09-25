@@ -24,6 +24,7 @@ import type {
   OrgPrompt,
   OrgQuestion,
   OrgRole,
+  OrgSearchResult,
   PaperSection,
   QuestionLibrary,
   QuestionStatus,
@@ -35,6 +36,8 @@ import type {
 import { registerMediaSrc, unregisterMediaSrc } from '../utils/media-ref'
 /* 相对导入而非 '@aiteach/shared'：从 shared 内部引自己的桶文件会形成循环依赖 */
 import { hasImage, sanitizeRichHtml, toPlainText, truncateRich } from '../utils/richtext'
+/* 高考模拟卷（语文 / 数学 / 英语各一套，含阅读材料）单独成文件，避免本文件过长 */
+import { EXAM_PAPERS, EXAM_QUESTIONS } from './exam-seeds'
 
 function nowStr(offsetHours = 0): string {
   return new Date(Date.now() + offsetHours * 3600_000).toISOString().slice(0, 19).replace('T', ' ')
@@ -117,8 +120,8 @@ export function deleteCategory(id: number): void {
 
 /* ================= 题目（FR-TM-002 ~ 007 / 017 ~ 019 / 024 ~ 028） ================= */
 
-/** 运行期新建题目的自增 id：种子题已占用 9001-9100，从其后开始避免撞号 */
-let questionSeq = 9100
+/** 运行期新建题目的自增 id：种子题与高考模拟卷已占用 9001-9326，从其后开始避免撞号 */
+let questionSeq = 9400
 
 /** AI 多智能体检测结果（8 项，FR-AI-002） */
 function aiChecksFor(stem: string, suspects: string[] = []): AiCheckResult[] {
@@ -2035,6 +2038,7 @@ export const questions: OrgQuestion[] = [
     owner: '李文博',
     ownerId: 103,
   }),
+  ...EXAM_QUESTIONS,
 ]
 
 /* ================= 知识点树 / 教材级联（FR-TM-002） ================= */
@@ -2549,8 +2553,16 @@ const TREE_SPECS: Record<string, TreeSpec[]> = {
     },
     { name: '古代诗歌鉴赏', tag: '诗歌鉴赏' },
     { name: '语言文字运用', tag: '语言文字运用' },
+    {
+      name: '写作',
+      children: [
+        { name: '议论文写作', tag: '议论文写作' },
+        { name: '记叙文写作', tag: '记叙文写作' },
+      ],
+    },
   ],
   英语: [
+    { name: '听力理解', tag: '听力理解' },
     {
       name: '语法专项',
       children: [
@@ -3153,6 +3165,68 @@ export const papers: OrgPaper[] = [
     parallelLabel: 'B 卷',
     owner: '沈丽华',
   }),
+  /* 下方为资源型试卷种子：机构工作台「真题试卷」板块按名称归类到各标签页 */
+  seedPaper({
+    id: 305,
+    name: '2026 年杭州市中考数学真题（含详解）',
+    grade: '九年级',
+    sharedSquare: true,
+    owner: '陈明远',
+    updatedAt: nowStr(-26),
+  }),
+  seedPaper({
+    id: 306,
+    name: '2026 年南京市高一语文下学期期末试卷',
+    subject: '语文',
+    grade: '高一',
+    owner: '吴刚',
+    updatedAt: nowStr(-52),
+  }),
+  seedPaper({
+    id: 307,
+    name: '集合与函数 单元测试卷（第一章）',
+    grade: '高一',
+    owner: '沈丽华',
+    updatedAt: nowStr(-140),
+  }),
+  seedPaper({
+    id: 308,
+    name: '九年级数学下学期第一次月考卷',
+    grade: '九年级',
+    owner: '周雪',
+    updatedAt: nowStr(-190),
+  }),
+  seedPaper({
+    id: 309,
+    name: '2026 届高三数学模拟冲刺卷（三）',
+    grade: '高三',
+    sharedSquare: true,
+    owner: '陈明远',
+    updatedAt: nowStr(-8),
+  }),
+  seedPaper({
+    id: 310,
+    name: '小升初数学分班考试真题卷',
+    grade: '六年级',
+    owner: '王芳',
+    updatedAt: nowStr(-320),
+  }),
+  seedPaper({
+    id: 311,
+    name: '高一数学同步练习卷 · 函数与导数',
+    grade: '高一',
+    owner: '李文博',
+    updatedAt: nowStr(-70),
+  }),
+  seedPaper({
+    id: 312,
+    name: '初中物理力学综合测试卷（含答案）',
+    subject: '物理',
+    grade: '八年级',
+    owner: '吴刚',
+    updatedAt: nowStr(-96),
+  }),
+  ...EXAM_PAPERS,
 ]
 
 export function paperTotalScore(paper: OrgPaper): number {
@@ -3375,6 +3449,154 @@ export const materials: OrgMaterial[] = [
     createdAt: nowStr(-74),
     chapters: [],
   },
+  /* 下方为资源型教辅种子：机构工作台「同步备课 / 电子教辅」板块按类型归入课件 / 学案 / 作业 */
+  {
+    id: 704,
+    name: '初中数学几何模型精讲',
+    type: '讲义',
+    subject: '数学',
+    knowledge: ['立体几何', '三角形'],
+    sizeMb: 31.4,
+    status: 'done',
+    owner: '李文博',
+    createdAt: nowStr(-320),
+    chapters: [
+      { id: ++chapterSeq, title: '第一章 全等三角形模型', knowledge: ['三角形'], examples: seedExamples() },
+      { id: ++chapterSeq, title: '第二章 圆与辅助线', knowledge: ['圆'], examples: [] },
+    ],
+  },
+  {
+    id: 705,
+    name: '九年级化学推断题专项训练',
+    type: '练习册',
+    subject: '化学',
+    knowledge: ['物质推断'],
+    sizeMb: 18.9,
+    status: 'done',
+    owner: '周雪',
+    createdAt: nowStr(-410),
+    chapters: [{ id: ++chapterSeq, title: '专题一 常见物质推断', knowledge: ['物质推断'], examples: [] }],
+  },
+  {
+    id: 706,
+    name: '高中英语完形填空 100 篇',
+    type: '练习册',
+    subject: '英语',
+    knowledge: ['完形填空'],
+    sizeMb: 22.1,
+    status: 'done',
+    owner: '王芳',
+    createdAt: nowStr(-520),
+    chapters: [{ id: ++chapterSeq, title: 'Unit 1 - Unit 10', knowledge: ['完形填空'], examples: [] }],
+  },
+  {
+    id: 707,
+    name: '小学数学思维训练校本教材',
+    type: '讲义',
+    subject: '数学',
+    knowledge: ['数与代数'],
+    sizeMb: 15.7,
+    status: 'done',
+    owner: '沈丽华',
+    createdAt: nowStr(-600),
+    chapters: [{ id: ++chapterSeq, title: '第一章 数感与估算', knowledge: ['数与代数'], examples: seedExamples() }],
+  },
+  {
+    id: 708,
+    name: '初中物理实验探究笔记',
+    type: '笔记',
+    subject: '物理',
+    knowledge: ['力学实验'],
+    sizeMb: 9.3,
+    status: 'done',
+    owner: '吴刚',
+    createdAt: nowStr(-260),
+    chapters: [{ id: ++chapterSeq, title: '实验一 测量物质的密度', knowledge: ['力学实验'], examples: [] }],
+  },
+  {
+    id: 709,
+    name: '2026 届高三一轮复习学案（语文）',
+    type: '笔记',
+    subject: '语文',
+    knowledge: ['文言文阅读'],
+    sizeMb: 27.8,
+    status: 'proofreading',
+    owner: '王芳',
+    createdAt: nowStr(-36),
+    chapters: [{ id: ++chapterSeq, title: '专题一 文言实词', knowledge: ['文言文阅读'], examples: seedExamples() }],
+  },
+  {
+    id: 710,
+    name: '高中数学函数与导数复习笔记',
+    type: '笔记',
+    subject: '数学',
+    knowledge: ['函数与导数'],
+    sizeMb: 11.2,
+    status: 'done',
+    owner: '李文博',
+    createdAt: nowStr(-150),
+    chapters: [{ id: ++chapterSeq, title: '专题一 导数应用', knowledge: ['函数与导数'], examples: [] }],
+  },
+  {
+    id: 711,
+    name: '高一数学函数与导数课时练',
+    type: '练习册',
+    subject: '数学',
+    knowledge: ['函数与导数'],
+    sizeMb: 8.6,
+    status: 'done',
+    owner: '陈明远',
+    createdAt: nowStr(-118),
+    chapters: [{ id: ++chapterSeq, title: '课时 1 函数单调性', knowledge: ['函数单调性'], examples: [] }],
+  },
+  {
+    id: 712,
+    name: '高一数学集合与常用逻辑用语课件',
+    type: '讲义',
+    subject: '数学',
+    knowledge: ['集合', '常用逻辑用语'],
+    sizeMb: 26.5,
+    status: 'done',
+    owner: '陈明远',
+    createdAt: nowStr(-206),
+    chapters: [{ id: ++chapterSeq, title: '第一章 集合', knowledge: ['集合'], examples: [] }],
+  },
+  {
+    id: 713,
+    name: '九年级数学二次函数学案',
+    type: '笔记',
+    subject: '数学',
+    knowledge: ['二次函数'],
+    sizeMb: 12.4,
+    status: 'done',
+    owner: '周雪',
+    createdAt: nowStr(-166),
+    chapters: [{ id: ++chapterSeq, title: '专题一 二次函数图像', knowledge: ['二次函数'], examples: [] }],
+  },
+  {
+    id: 714,
+    name: '高二数学圆锥曲线专项练习',
+    type: '练习册',
+    subject: '数学',
+    knowledge: ['圆锥曲线'],
+    sizeMb: 19.8,
+    status: 'done',
+    owner: '李文博',
+    createdAt: nowStr(-284),
+    chapters: [{ id: ++chapterSeq, title: '专题一 椭圆与双曲线', knowledge: ['圆锥曲线'], examples: [] }],
+  },
+  {
+    id: 715,
+    name: '初中数学圆的性质复习笔记',
+    type: '笔记',
+    subject: '数学',
+    knowledge: ['圆'],
+    sizeMb: 7.9,
+    status: 'done',
+    owner: '沈丽华',
+    createdAt: nowStr(-248),
+    chapters: [{ id: ++chapterSeq, title: '专题一 圆周角与切线', knowledge: ['圆'], examples: [] }],
+  },
 ]
 
 export function uploadMaterial(input: { name: string; type: string; subject: string }): OrgMaterial {
@@ -3475,6 +3697,18 @@ export const mediaResources: OrgMedia[] = [
   { id: 603, name: '抛物线标准图（矢量）', kind: 'image', subject: '数学', knowledge: ['抛物线'], sizeMb: 0.8, linkedCount: 0, owner: '沈丽华', createdAt: nowStr(-50) },
   { id: 604, name: '单位圆与三角函数线', kind: 'image', subject: '数学', knowledge: ['三角函数'], sizeMb: 0.6, linkedCount: 1, owner: '陈明远', createdAt: nowStr(-180) },
   { id: 605, name: '立体几何三视图', kind: 'image', subject: '数学', knowledge: ['立体几何'], sizeMb: 0.7, linkedCount: 3, owner: '沈丽华', createdAt: nowStr(-30) },
+  /* 下方为资源型多媒体种子：机构工作台「同步备课 · 精选视频 / 课程小程序」板块取用 */
+  { id: 606, name: '二次函数图像变换演示', kind: 'animation', subject: '数学', knowledge: ['二次函数'], sizeMb: 21.3, linkedCount: 4, owner: '李文博', createdAt: nowStr(-88) },
+  { id: 607, name: '三角函数图像与性质交互卡片', kind: 'animation', subject: '数学', knowledge: ['三角函数'], sizeMb: 16.8, linkedCount: 2, owner: '陈明远', createdAt: nowStr(-140) },
+  { id: 608, name: '圆与切线位置关系探究', kind: 'animation', subject: '数学', knowledge: ['圆'], sizeMb: 13.5, linkedCount: 1, owner: '沈丽华', createdAt: nowStr(-205) },
+  { id: 609, name: '高一数学：函数的单调性与最值', kind: 'video', subject: '数学', knowledge: ['函数性质'], sizeMb: 214.6, durationSec: 812, linkedCount: 5, owner: '李文博', createdAt: nowStr(-62) },
+  { id: 610, name: '初中物理：浮力实验演示', kind: 'video', subject: '物理', knowledge: ['浮力'], sizeMb: 168.2, durationSec: 534, linkedCount: 2, owner: '吴刚', createdAt: nowStr(-118) },
+  { id: 611, name: '立体几何：空间向量法求二面角', kind: 'video', subject: '数学', knowledge: ['空间向量'], sizeMb: 243.9, durationSec: 1128, linkedCount: 3, owner: '陈明远', createdAt: nowStr(-175) },
+  { id: 612, name: '三角函数单位圆（矢量）', kind: 'image', subject: '数学', knowledge: ['三角函数'], sizeMb: 0.9, linkedCount: 6, owner: '沈丽华', createdAt: nowStr(-44) },
+  { id: 613, name: '函数与导数知识图谱', kind: 'image', subject: '数学', knowledge: ['函数与导数'], sizeMb: 1.4, linkedCount: 2, owner: '王芳', createdAt: nowStr(-96) },
+  { id: 614, name: '指数函数与对数函数图像对比', kind: 'animation', subject: '数学', knowledge: ['指数函数'], sizeMb: 14.9, linkedCount: 2, owner: '周雪', createdAt: nowStr(-54) },
+  { id: 615, name: '概率统计：随机抽样与样本估计', kind: 'video', subject: '数学', knowledge: ['统计'], sizeMb: 196.4, durationSec: 726, linkedCount: 1, owner: '周雪', createdAt: nowStr(-36) },
+  { id: 616, name: '平面向量：数量积的几何意义', kind: 'video', subject: '数学', knowledge: ['平面向量'], sizeMb: 182.7, durationSec: 588, linkedCount: 4, owner: '沈丽华', createdAt: nowStr(-22) },
 ]
 
 /**
@@ -4469,8 +4703,7 @@ export const orgMenuTree: OrgMenuNode[] = [
     enabled: true,
     children: [
       { key: 'question/bank', title: '题库管理', enabled: true },
-      { key: 'question/manual', title: '手动录题', enabled: true },
-      { key: 'question/ai', title: 'AI 智能出题', enabled: true },
+      { key: 'question/create', title: '录题中心', enabled: true },
       { key: 'question/photo', title: 'AI 拍照识题', enabled: true },
       { key: 'question/review', title: '题目审核中心', enabled: true },
     ],
@@ -4519,4 +4752,51 @@ export const orgMenuTree: OrgMenuNode[] = [
 export function saveOrgMenus(items: OrgMenuNode[]): void {
   orgMenuTree.length = 0
   orgMenuTree.push(...items)
+}
+
+/* ================= 全局搜索（FR-GN-026） ================= */
+
+/** 单个分类的返回上限：面板按页签展示，超出部分引导用户用更精确的关键词再搜 */
+const SEARCH_LIMIT = 20
+
+/** 关键词命中判定：任一字段包含关键词即算命中（英文不区分大小写） */
+function hit(keyword: string, ...fields: Array<string | string[] | undefined>): boolean {
+  const kw = keyword.toLowerCase()
+  return fields.some((field) =>
+    (Array.isArray(field) ? field.join(' ') : field ?? '').toLowerCase().includes(kw),
+  )
+}
+
+/**
+ * 全局检索：题目 / 试卷 / 同步备课（教辅）/ 视频 / 我的文件。
+ * 题干可能是富文本（公式、配图），比对前统一转纯文本。
+ */
+export function searchAll(keyword: string): OrgSearchResult {
+  const kw = keyword.trim()
+  if (!kw) return { questions: [], papers: [], preparations: [], videos: [], files: [] }
+  return {
+    questions: questions
+      .filter((row) => hit(kw, toPlainText(row.stem), row.knowledge, row.type, row.answer))
+      .slice(0, SEARCH_LIMIT),
+    papers: papers.filter((row) => hit(kw, row.name, row.subject, row.grade)).slice(0, SEARCH_LIMIT),
+    preparations: materials
+      .filter((row) => hit(kw, row.name, row.type, row.subject, row.knowledge, row.chapters.map((chapter) => chapter.title)))
+      .slice(0, SEARCH_LIMIT),
+    videos: mediaResources
+      .filter((row) => row.kind === 'video' && hit(kw, row.name, row.subject, row.knowledge))
+      .slice(0, SEARCH_LIMIT),
+    files: orgFiles.filter((row) => hit(kw, row.name, row.owner)).slice(0, SEARCH_LIMIT),
+  }
+}
+
+/**
+ * 图片搜索的本地演示口径：真实多模态识图在前端完成（tenant/src/api/ai-search.ts），
+ * 未配置视觉通道时按文件名稳定映射一个知识点关键词，保证每次演示结果可复现。
+ */
+const IMAGE_KEYWORDS = ['函数', '三角函数', '立体几何', '浮力', '概率']
+
+export function recognizeSearchImage(name: string): { keyword: string } {
+  let sum = 0
+  for (let i = 0; i < name.length; i += 1) sum += name.charCodeAt(i)
+  return { keyword: IMAGE_KEYWORDS[sum % IMAGE_KEYWORDS.length] }
 }

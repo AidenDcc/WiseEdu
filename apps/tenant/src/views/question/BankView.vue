@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { AppIcon, RichTextViewer, showToast, ApiError, QUESTION_STATUS_TEXT, hasImage, toPlainText, truncateRich } from '@aiteach/shared'
 import type { OrgQuestion } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
@@ -13,8 +13,13 @@ import {
   fetchTenantDict,
   variantOf,
 } from '@/api/org'
+import { useScope } from '@/composables/useScope'
 
 const router = useRouter()
+const route = useRoute()
+
+/** 顶部栏的全局年级 / 学科：作为筛选默认值，切换时同步 */
+const { grade: scopeGrade, subject: scopeSubject, ensureScope } = useScope()
 
 const LIBRARY_TEXT: Record<string, string> = { personal: '个人题库', org: '机构公共', wrong: '错题库' }
 const STATUS_CLASS: Record<string, string> = {
@@ -32,6 +37,9 @@ const loading = ref(false)
 async function load() {
   loading.value = true
   try {
+    // 字典加载失败不阻断开列（顶部栏作用域退化为缓存值，筛选仍可手动调整）
+    await ensureScope().catch(() => {})
+    applyScope()
     list.value = await fetchQuestions()
   } finally {
     loading.value = false
@@ -46,7 +54,7 @@ function onKnowledgeChange(tags: string[] | null) {
 
 /* ================= 右上：可折叠筛选条件 ================= */
 interface FilterRowDef {
-  key: 'type' | 'difficulty' | 'grade' | 'term' | 'examType'
+  key: 'type' | 'difficulty' | 'grade' | 'subject' | 'term' | 'examType'
   label: string
   dict?: string
   options?: string[]
@@ -56,6 +64,7 @@ const FILTER_ROWS: FilterRowDef[] = [
   { key: 'type', label: '题型', dict: 'questionType' },
   { key: 'difficulty', label: '难度', dict: 'difficulty' },
   { key: 'grade', label: '年级', dict: 'grade' },
+  { key: 'subject', label: '学科', dict: 'subject' },
   { key: 'term', label: '学期', options: ['上学期', '下学期'] },
   { key: 'examType', label: '考试类型', dict: 'examType' },
 ]
@@ -64,6 +73,7 @@ const filterSel = reactive<Record<FilterRowDef['key'], string[]>>({
   type: [],
   difficulty: [],
   grade: [],
+  subject: [],
   term: [],
   examType: [],
 })
@@ -96,6 +106,15 @@ function clearFilters() {
   FILTER_ROWS.forEach((row) => (filterSel[row.key] = []))
 }
 
+/* ================= 顶部栏全局年级 / 学科 → 筛选默认值 ================= */
+/** 题库默认只看当前作用域（年级 + 学科）；顶部栏切换后立刻跟随，避免两个入口各说各话 */
+function applyScope() {
+  if (scopeGrade.value) filterSel.grade = [scopeGrade.value]
+  if (scopeSubject.value) filterSel.subject = [scopeSubject.value]
+}
+
+watch([scopeGrade, scopeSubject], () => applyScope())
+
 async function loadDicts() {
   const dictTypes = [...new Set(FILTER_ROWS.map((row) => row.dict).filter((d): d is string => !!d))]
   await Promise.all(
@@ -106,7 +125,14 @@ async function loadDicts() {
 }
 
 /* ================= 列表筛选 / 分页 ================= */
-const keyword = ref('')
+/** 工作台全局搜索跳转过来时带 ?keyword=；同路由换关键词不会重新挂载，故用 watch 跟随 */
+const keyword = ref(typeof route.query.keyword === 'string' ? route.query.keyword : '')
+watch(
+  () => route.query.keyword,
+  (value) => {
+    if (typeof value === 'string') keyword.value = value
+  },
+)
 const viewMode = ref<'table' | 'detail'>('table')
 const page = ref(1)
 
@@ -114,6 +140,7 @@ const FIELD_OF: Record<FilterRowDef['key'], (row: OrgQuestion) => string> = {
   type: (row) => row.type,
   difficulty: (row) => row.difficulty,
   grade: (row) => row.grade,
+  subject: (row) => row.subject,
   term: (row) => row.term ?? '',
   examType: (row) => row.examType ?? '',
 }
@@ -131,8 +158,9 @@ const filtered = computed(() => {
   })
 })
 
-const pageSize = computed(() => (viewMode.value === 'table' ? 10 : 4))
-const paged = computed(() => filtered.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
+/** 表格与详细两种展示每页都是 10 条 */
+const pageSize = 10
+const paged = computed(() => filtered.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 
 watch([activeTags, () => JSON.stringify(filterSel), keyword, viewMode], () => {
   page.value = 1
@@ -200,8 +228,9 @@ function goCollab() {
 const preview = ref<OrgQuestion | null>(null)
 const variantOpen = ref<OrgQuestion | null>(null)
 
-function goEdit(id?: number) {
-  router.push({ path: '/question/manual', query: id != null ? { id: String(id) } : {} })
+/** 带题目 id 进录题中心（落手动态；新建入口在侧边菜单，列表里只做编辑） */
+function goEdit(id: number) {
+  router.push({ path: '/question/create', query: { id: String(id) } })
 }
 
 async function onManualVariant() {
@@ -215,7 +244,7 @@ async function onManualVariant() {
 
 function goAiVariant() {
   if (!variantOpen.value) return
-  router.push({ path: '/question/ai', query: { variantOf: String(variantOpen.value.id) } })
+  router.push({ path: '/question/create', query: { mode: 'ai', variantOf: String(variantOpen.value.id) } })
   variantOpen.value = null
 }
 
@@ -299,9 +328,6 @@ onMounted(() => {
               <AppIcon name="file" :size="14" /> 详细
             </button>
           </div>
-          <button class="btn btn-primary btn-sm" @click="goEdit()">
-            <AppIcon name="plus" :size="15" /> 手动录题
-          </button>
         </div>
 
         <!-- 表格显示 -->
@@ -552,7 +578,7 @@ onMounted(() => {
 
 /* ===== 列表 =====
    面板撑满右栏剩余高度：工具栏、分页固定，仅题目列表区域滚动。
-   面板自带内边距：搜索框 / 显示切换 / 手动录题按钮不与面板边缘贴边 */
+   面板自带内边距：搜索框 / 表格-详细显示切换不与面板边缘贴边 */
 .table-panel { min-width: 0; flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 14px 16px 12px; }
 .list-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-shrink: 0; }
 .search-box { position: relative; width: 240px; }

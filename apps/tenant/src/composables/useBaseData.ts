@@ -40,6 +40,12 @@ function subjectsForGrade(grade: string): string[] {
   return matrix.value.find((row) => row.grade === grade)?.subjects.map((row) => row.name) ?? []
 }
 
+/** 指定年级下的可选学科：教材矩阵缺该年级时退回全量学科，避免选项为空（顶部栏与录题表单共用此规则） */
+function optionsForGrade(grade: string): string[] {
+  const list = subjectsForGrade(grade)
+  return list.length > 0 ? list : subjects.value
+}
+
 function versionsFor(grade: string, subject: string): string[] {
   return matrix.value.find((row) => row.grade === grade)?.subjects.find((row) => row.name === subject)?.versions ?? []
 }
@@ -104,6 +110,7 @@ export function useBaseData() {
     difficulties,
     examTypes,
     subjectsForGrade,
+    optionsForGrade,
     versionsFor,
     defaultTextbook,
     withCurrent,

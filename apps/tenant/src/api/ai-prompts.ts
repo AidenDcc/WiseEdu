@@ -8,7 +8,11 @@
  *
  * 「输出提示词」以 JSON Schema 形式内嵌在 SYSTEM_PROMPT 中，配合 Deepseek 的
  * JSON Output 模式（response_format=json_object）强制模型只产出符合 Schema 的 JSON。
+ *
+ * 文件末尾另有一节「AI 问答」——全局悬浮对话框的自由问答提示词，口径与出题相反：
+ * 出题要 JSON，问答要纯文本（详见该节注释）。
  */
+import { toPlainText, type OrgSearchResult } from '@aiteach/shared'
 
 /* ==================== 固定输入提示词（System） ==================== */
 
@@ -303,4 +307,129 @@ export function buildFileUserPrompt(fileName: string): string {
     '卷面上的图形若印刷不清，可在 diagram 字段用 SVG 按规则重绘，否则填 null。',
     '同时给出 is_paper（是否为完整试卷）与 paper_name（建议试卷名）。',
   ].join('\n')
+}
+
+/* ==================== 图片搜索提示词（全局搜索的以图搜资源） ==================== */
+
+export const SEARCH_IMAGE_SYSTEM_PROMPT = `你是 K12 教学资源检索助手。用户会给你一张图片（题目截图、试卷照片、教辅或课件页面、微课封面），你要判断它在机构资源库中对应什么检索意图。
+
+# 输出
+只输出 JSON 对象：{"keyword": "检索关键词", "subject": "学科", "grade": "年级"}
+
+# keyword 规则
+1. keyword 用于匹配机构已有的题目、试卷、备课资料、微课视频与文件，必须是图中最具区分度的核心概念（如「三角函数的图像与性质」「浮力」「立体几何」），不能是「题目」「练习」「资料」这类泛词；
+2. 图中若有明确题干或公式，取该题考查的知识点；若是教材、课件或讲义页面，取该页主题；
+3. 长度 2~8 个字，不带标点、书名号与解释性文字；
+4. 若图片与教学内容无关或无法辨认，keyword 返回空字符串，不要编造。
+
+# subject / grade
+按图中内容判断，无法判断时返回空字符串。`
+
+export function buildSearchImageUserPrompt(fileName: string): string {
+  return `请判断这张图片（${fileName}）的内容，输出用于机构资源库检索的关键词 JSON。`
+}
+
+/* ==================== AI 问答提示词（全局悬浮对话框） ==================== */
+
+/**
+ * 全局 AI 问答的固定输入提示词。
+ *
+ * 与上面几节的关键差异：出题 / 识别要求「只输出 JSON」，问答要求「只输出纯文本」。
+ * 原因是回答直接经 ai-normalize.ts 的 richField() 转富文本、交给 RichTextViewer 渲染，
+ * 而 RichTextViewer 只认 Tiptap 形状的公式节点，**不解析 markdown**（仓库也没有 markdown 依赖）。
+ * 模型若回 `**加粗**`「- 列表」这类 markdown，教师看到的就是一堆原样星号，所以这里把
+ * 「禁止 markdown、分点用纯文本编号」写成硬性规则。
+ */
+export const CHAT_SYSTEM_PROMPT = `你是一位 K12 教学助手，服务于机构端的教师与教务人员。你能答疑解惑、讲解知识点、分析题目、给出教学与命题建议。
+
+# 对话方式
+1. 先直接回答用户的问题，再补充必要的解释，不要寒暄、不要复述问题。
+2. 用户是教师，可用教学术语，但解释要准确、不堆砌、不空泛。
+3. 用户可能带着「当前所在页面」与「当前年级 / 学科」的上下文，回答要与之一致（如用户在高一数学下提问，默认按高一数学的口径作答）。
+4. 不确定、知识有争议、或超出你能力范围时，直接说明不确定并给出可行建议，不要编造。
+
+# 结合机构自有资源（重要）
+用户消息里若附带了系统检索到的机构资源（题目 / 试卷 / 同步备课 / 视频 / 我的文件）：
+1. 优先结合这些资源回答，并在句末用「参考：《资源名称》」的形式指出来源；
+2. 只能引用上下文中确实存在的资源，**严禁编造**不存在的题目、试卷或文件名；
+3. 上下文资源与问题无关时忽略它们，按通用知识作答，并说明这是通用建议、机构资源库里没有直接对应内容；
+4. 资源里的题干可能被截断（以「…」结尾），不要把它当作完整题目去逐字分析。
+
+# 输出格式（硬性要求）
+1. 只输出纯文本，**禁止任何 markdown 语法**：不要 # 标题、不要 **加粗**、不要 \` 代码围栏、不要 - 或 * 列表符号；
+2. 需要分点时用纯文本编号并逐点独立成行，如「1. 」「2. 」或「（1）」「（2）」；
+3. 需要强调时用「」引号或直接换行，不要用星号；
+4. 不要输出 HTML 标签。
+
+# 篇幅
+一般问题 300 字以内；知识点讲解、题目分析、分步推导可适当展开，但不要为凑长度重复。
+
+${FORMULA_RULES}`
+
+/** 资源上下文里单个题干 / 名称的字符上限（题干可能上千字，必须截断控 token） */
+const RESOURCE_TEXT_LIMIT = 80
+/** 各类资源进入上下文的条数上限（ai-chat.ts 的来源卡片沿用同一组数字，避免两处口径不一致） */
+export const CHAT_RESOURCE_LIMITS = { questions: 3, papers: 2, preparations: 2, videos: 1, files: 1 } as const
+
+/** 截断过长文本，保留「被截断」的视觉提示（配合提示词里「题干可能被截断」的约定） */
+function clip(text: string): string {
+  const plain = toPlainText(text).replace(/\s+/g, ' ').trim()
+  return plain.length > RESOURCE_TEXT_LIMIT ? `${plain.slice(0, RESOURCE_TEXT_LIMIT)}…` : plain
+}
+
+/**
+ * 把全局检索结果压成一段紧凑的资源上下文。
+ *
+ * 只取「模型用得上的字段」：题目给题干 + 知识点 + 难度，其余只给名称与学科年级 ——
+ * 整条对象塞进去既超 token 又干扰判断。返回空串表示没命中，调用方据此走「无资源」话术。
+ */
+export function buildResourceContext(result: OrgSearchResult): string {
+  const lines: string[] = []
+
+  result.questions.slice(0, CHAT_RESOURCE_LIMITS.questions).forEach((row, i) => {
+    const tags = [row.knowledge.join('/'), row.difficulty].filter(Boolean).join(' · ')
+    lines.push(`【题目${i + 1}】${clip(row.stem)}${tags ? `（${tags}）` : ''}`)
+  })
+  result.papers.slice(0, CHAT_RESOURCE_LIMITS.papers).forEach((row) => {
+    lines.push(`【试卷】${row.name}（${[row.subject, row.grade].filter(Boolean).join(' · ')}）`)
+  })
+  result.preparations.slice(0, CHAT_RESOURCE_LIMITS.preparations).forEach((row) => {
+    lines.push(`【同步备课】${row.name}（${[row.subject, row.type].filter(Boolean).join(' · ')}）`)
+  })
+  result.videos.slice(0, CHAT_RESOURCE_LIMITS.videos).forEach((row) => {
+    lines.push(`【视频】${row.name}（${row.knowledge.join('/')}）`)
+  })
+  result.files.slice(0, CHAT_RESOURCE_LIMITS.files).forEach((row) => {
+    lines.push(`【我的文件】${row.name}`)
+  })
+
+  return lines.join('\n')
+}
+
+/**
+ * 问答的用户提示词：当前上下文 + 机构资源 + 问题。
+ *
+ * 上下文与资源分块标注，便于模型分清「这是环境信息」与「这是要回答的问题」；
+ * 资源为空时明确写「未检索到」，避免模型误以为有资源可用而编造出处。
+ */
+export function buildChatUserPrompt(input: {
+  question: string
+  page?: string
+  grade?: string
+  subject?: string
+  resources?: string
+}): string {
+  const scope = [input.grade, input.subject].filter(Boolean).join(' · ')
+  const lines = [
+    '# 当前上下文',
+    `- 所在页面：${input.page || '（未知）'}`,
+    `- 年级 / 学科：${scope || '（未指定）'}`,
+    '',
+    '# 机构资源库检索结果',
+    input.resources || '（未检索到相关资源，请基于通用教学知识作答）',
+    '',
+    '# 用户问题',
+    input.question,
+  ]
+  return lines.join('\n')
 }

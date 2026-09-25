@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppIcon, PAPER_STATUS_TEXT, RichTextViewer, showToast } from '@aiteach/shared'
+import { AppIcon, PAPER_STATUS_TEXT, showToast } from '@aiteach/shared'
 import type { OrgPaper, OrgQuestion } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
-import AppDrawer from '@/components/ui/AppDrawer.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
+import PaperPreviewModal from '@/components/paper/PaperPreviewModal.vue'
 import { aiComposePaper, deletePaper, fetchPapers, fetchQuestions, generateParallels, savePaper } from '@/api/org'
 import { useBaseData } from '@/composables/useBaseData'
 
@@ -48,9 +48,6 @@ function totalScore(paper: OrgPaper) {
 }
 function totalCount(paper: OrgPaper) {
   return paper.sections.reduce((sum, s) => sum + s.questions.length, 0)
-}
-function questionOf(id: number) {
-  return questions.value.find((row) => row.id === id)
 }
 
 /* ===== 预览 ===== */
@@ -276,34 +273,12 @@ onMounted(load)
       </template>
     </AppModal>
 
-    <!-- 整卷预览 -->
-    <AppDrawer v-if="preview" :title="preview.name" :subtitle="`共 ${totalCount(preview)} 题 · ${totalScore(preview)} 分 · ${preview.duration} 分钟`" :width="620" @close="preview = null">
-      <div v-for="section in preview.sections" :key="section.id" class="pv-section">
-        <h4>{{ section.title }}（{{ section.questions.reduce((s, q) => s + q.score, 0) }} 分）</h4>
-        <div v-for="(q, qi) in section.questions" :key="qi" class="pv-q">
-          <p class="pv-q-stem">
-            {{ qi + 1 }}.（{{ q.score }} 分）
-            <RichTextViewer v-if="questionOf(q.questionId)" :content="questionOf(q.questionId)!.stem" tag="span" />
-            <template v-else>题目 #{{ q.questionId }}</template>
-          </p>
-          <ul v-if="questionOf(q.questionId)?.options.length" class="pv-q-opts">
-            <li v-for="(opt, oi) in questionOf(q.questionId)!.options" :key="oi">
-              {{ 'ABCDEF'[oi] }}. <RichTextViewer :content="opt" tag="span" />
-            </li>
-          </ul>
-        </div>
-      </div>
-    </AppDrawer>
+    <!-- 整卷预览：弹窗按真实纸张（8K/A3/16K…）自动分版排版，可切换排版样式、答题卡 -->
+    <PaperPreviewModal v-if="preview" :paper="preview" :questions="questions" @close="preview = null" />
   </div>
 </template>
 
 <style scoped>
 .struct-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.pv-section { margin-bottom: 18px; }
-.pv-section h4 { font-size: 14px; color: var(--ink); border-left: 3px solid var(--brand); padding-left: 8px; margin-bottom: 10px; }
-.pv-q { margin-bottom: 12px; }
-.pv-q-stem { font-size: 13.5px; color: var(--ink-2); line-height: 1.7; }
-.pv-q-opts { margin-top: 6px; padding-left: 18px; }
-.pv-q-opts li { font-size: 13px; color: var(--sub); line-height: 1.8; }
 </style>

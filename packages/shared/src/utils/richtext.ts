@@ -5,7 +5,7 @@
  * 存储格式约定：正文为 HTML；未被编辑器改造过的历史数据（100 道种子题为纯文本 + Unicode 数学，
  * 如 `x²`、`∁ᵤB`）原样保留，由 isRichContent 识别后走纯文本分支，因此新旧数据可共存。
  */
-import katex from 'katex'
+import katex from './katex'
 
 /**
  * 判断「这段字符串是不是 HTML」。

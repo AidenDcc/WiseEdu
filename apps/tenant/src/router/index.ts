@@ -19,7 +19,7 @@ const routes: RouteRecordRaw[] = [
         path: 'dashboard',
         name: 'dashboard',
         component: () => import('@/views/DashboardView.vue'),
-        meta: { title: '机构工作台' },
+        meta: { title: '工作台' },
       },
       /* ===== 题目管理（FR-TM） ===== */
       {
@@ -29,16 +29,20 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '题库管理' },
       },
       {
+        path: 'question/create',
+        name: 'question-create',
+        component: () => import('@/views/question/CreateView.vue'),
+        meta: { title: '录题中心' },
+      },
+      /* 旧地址兼容（书签 / 演示脚本 / 旧文档）：手动录题那条直链常带 ?id=（编辑既有题目），
+         AI 出题那条常带 ?variantOf=，故用函数式 redirect 原样带上 query —— 字符串写法会丢掉它们。 */
+      {
         path: 'question/manual',
-        name: 'question-manual',
-        component: () => import('@/views/question/ManualEditView.vue'),
-        meta: { title: '手动录题' },
+        redirect: (to) => ({ path: '/question/create', query: { ...to.query } }),
       },
       {
         path: 'question/ai',
-        name: 'question-ai',
-        component: () => import('@/views/question/AiGenerateView.vue'),
-        meta: { title: 'AI 智能出题' },
+        redirect: (to) => ({ path: '/question/create', query: { ...to.query, mode: 'ai' } }),
       },
       {
         path: 'question/photo',

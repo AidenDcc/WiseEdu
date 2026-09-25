@@ -22,6 +22,7 @@ import type {
   OrgQuestion,
   OrgPrompt,
   OrgRole,
+  OrgSearchResult,
   RecycleItem,
   SquareResource,
   StaffMember,
@@ -73,6 +74,16 @@ export function variantOf(id: number) {
   return request<OrgQuestion>('/tenant/questions/variant', { method: 'POST', data: { id } })
 }
 
+/* ===== 全局搜索（FR-GN-026） ===== */
+/** 一次检索返回题目 / 试卷 / 同步备课 / 视频 / 我的文件五个分类，搜索面板按页签展示 */
+export function fetchGlobalSearch(keyword: string) {
+  return request<OrgSearchResult>(withQuery('/tenant/search', { keyword }))
+}
+/** 图片搜索的本地演示口径（未配置视觉通道时用）：按文件名返回一个演示关键词 */
+export function recognizeSearchImage(name: string) {
+  return request<{ keyword: string }>('/tenant/search/image', { method: 'POST', data: { name } })
+}
+
 /* ===== 字典 / 知识点树（题库管理筛选） ===== */
 export interface TenantDictItem {
   id: number
@@ -82,6 +93,10 @@ export interface TenantDictItem {
 }
 export function fetchTenantDict(type: string) {
   return request<TenantDictItem[]>(withQuery('/tenant/dict', { type }))
+}
+/** 首页页脚版权信息：管理端「数据字典 → 版权信息」维护，接口仅返回启用项且已按排序 */
+export function fetchCopyrightNotices() {
+  return request<TenantDictItem[]>(withQuery('/tenant/dict', { type: 'copyright' }))
 }
 export function fetchTextbookMatrix() {
   return request<TextbookOption[]>('/tenant/knowledge/textbooks')

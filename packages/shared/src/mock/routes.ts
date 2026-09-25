@@ -186,6 +186,10 @@ const orgRoutes: MockRoute[] = [
   // 机构菜单权限
   { method: 'GET', path: '/tenant/menus', handler: () => guard(() => org.orgMenuTree) },
   { method: 'POST', path: '/tenant/menus/save', handler: ({ body }) => guard(() => { org.saveOrgMenus(body.items as never); return null }) },
+
+  // 全局搜索（FR-GN-026）：一次检索返回各资源分类，图片搜索在真实模式下走前端视觉识别
+  { method: 'GET', path: '/tenant/search', handler: ({ query }) => guard(() => org.searchAll(String(query.keyword ?? ''))) },
+  { method: 'POST', path: '/tenant/search/image', handler: ({ body }) => guard(() => org.recognizeSearchImage(String(body.name ?? ''))) },
 ]
 
 export const mockRoutes: MockRoute[] = [
@@ -651,7 +655,7 @@ export const mockRoutes: MockRoute[] = [
 function parseDictType(path: string): DictTypeKey {
   const segments = path.split('/').filter(Boolean)
   const type = segments[2]
-  const valid: DictTypeKey[] = ['subject', 'grade', 'term', 'questionType', 'difficulty', 'examType']
+  const valid: DictTypeKey[] = ['subject', 'grade', 'term', 'questionType', 'difficulty', 'examType', 'copyright']
   if (!valid.includes(type as DictTypeKey)) mockFail(404, `未知字典类型：${type}`)
   return type as DictTypeKey
 }

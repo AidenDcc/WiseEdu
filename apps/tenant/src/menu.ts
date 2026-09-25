@@ -10,15 +10,15 @@ export interface MenuItem {
 }
 
 export const menus: MenuItem[] = [
-  { path: '/dashboard', title: '机构工作台', icon: 'dashboard' },
+  { path: '/dashboard', title: '工作台', icon: 'dashboard' },
+  { path: '/file', title: '我的文件', icon: 'folder' },
   {
     path: '/question',
     title: '题目管理',
     icon: 'edit',
     children: [
       { path: '/question/bank', title: '题库管理' },
-      { path: '/question/manual', title: '手动录题' },
-      { path: '/question/ai', title: 'AI 智能出题' },
+      { path: '/question/create', title: '录题中心' },
       { path: '/question/photo', title: 'AI 拍照识题' },
       { path: '/question/review', title: '题目审核中心' },
     ],
@@ -44,7 +44,6 @@ export const menus: MenuItem[] = [
       { path: '/material/media/video', title: '视频' },
     ],
   },
-  { path: '/file', title: '我的文件', icon: 'folder' },
   {
     path: '/formula',
     title: '公式中心',
