@@ -15,7 +15,11 @@
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      /* ketcher-standalone 的 exports map 里 ./dist/binaryWasm 只有 import/require，
+         没有 types 条件，Bundler 解析拿不到类型；这里直指其 index.d.ts。
+         （用 binaryWasm 而非包根入口的原因见 draw/ReactKetcher.tsx） */
+      "ketcher-standalone/dist/binaryWasm": ["./node_modules/ketcher-standalone/dist/binaryWasm/index.d.ts"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue", "vite.config.ts"]
