@@ -10,12 +10,14 @@
  * 一套年级学科口径，避免「两个下拉框各说各话」。
  */
 import { computed, ref, watch } from 'vue'
+import type { OrgQuestion } from '@aiteach/shared'
 import { AppIcon, showToast } from '@aiteach/shared'
 import { useComposeData } from '@/composables/useComposeData'
 import { useComposeBasket } from '@/composables/useComposeBasket'
 import { useBaseData } from '@/composables/useBaseData'
 import KnowledgePicker from '@/components/compose/KnowledgePicker.vue'
 import QuestionPoolCard from '@/components/compose/QuestionPoolCard.vue'
+import SimilarQuestionsModal from '@/components/compose/SimilarQuestionsModal.vue'
 import { matchesQuestionFilter, type ComposeFilter } from '../types'
 
 const props = defineProps<{ filter: ComposeFilter }>()
@@ -27,6 +29,13 @@ const emit = defineEmits<{
 const { questions, loading, loaded, ensure } = useComposeData()
 const { grades, optionsForGrade, versionsFor, ensure: ensureBase } = useBaseData()
 const basket = useComposeBasket()
+
+/** 相似题弹窗的基准题（与试题页签共用同一个弹窗组件） */
+const similarTarget = ref<OrgQuestion | null>(null)
+function onSimilarFilter(tags: string[]) {
+  similarTarget.value = null
+  emit('findSimilar', tags)
+}
 
 /** 版本不是全工作台共用的维度（只有教材类页签需要），故留在本页签本地 */
 const version = ref('')
@@ -127,10 +136,18 @@ function addAll() {
             :in-basket="basket.has(row.id)"
             @toggle="basket.toggle($event, 'knowledge')"
             @find-similar="emit('findSimilar', $event)"
+            @similar="similarTarget = $event"
           />
         </div>
       </section>
     </div>
+
+    <SimilarQuestionsModal
+      v-if="similarTarget"
+      :row="similarTarget"
+      @close="similarTarget = null"
+      @find-similar="onSimilarFilter"
+    />
   </div>
 </template>
 

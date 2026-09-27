@@ -19,6 +19,14 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/paper/compose/ComposeView.vue'),
     meta: { title: '题库组卷' },
   },
+  /* 试卷编辑：同样要「无侧边栏全屏」，理由与题库组卷一致（见上）。
+     从「生成试卷」保存后进入，或由试卷库「编辑」进入，`?id=` 指定试卷。 */
+  {
+    path: '/paper/edit',
+    name: 'paper-edit',
+    component: () => import('@/views/paper/PaperEditView.vue'),
+    meta: { title: '试卷编辑' },
+  },
   {
     path: '/',
     component: () => import('@/layouts/AppLayout.vue'),
@@ -78,11 +86,91 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/paper/CollabView.vue'),
         meta: { title: '协同组卷' },
       },
+      /* 协同组卷的任务工作台：`?id=` 指定任务。处理人在此选题入卷、看整卷、看进度与版本。 */
+      {
+        path: 'paper/collab/task',
+        name: 'paper-collab-task',
+        component: () => import('@/views/paper/CollabTaskView.vue'),
+        meta: { title: '协同组卷任务' },
+      },
       {
         path: 'paper/review',
         name: 'paper-review',
         component: () => import('@/views/paper/ReviewView.vue'),
         meta: { title: '试卷审核中心' },
+      },
+      /* ===== 备课中心：教案 / 学案 / 讲义 / 课件 ===== */
+      {
+        path: 'teach/plan',
+        name: 'teach-plan',
+        component: () => import('@/views/teach/PlanView.vue'),
+        meta: { title: '教案' },
+      },
+      {
+        path: 'teach/guide',
+        name: 'teach-guide',
+        component: () => import('@/views/teach/GuideView.vue'),
+        meta: { title: '学案' },
+      },
+      {
+        path: 'teach/lecture',
+        name: 'teach-lecture',
+        component: () => import('@/views/teach/LectureView.vue'),
+        meta: { title: '讲义' },
+      },
+      {
+        path: 'teach/courseware',
+        name: 'teach-courseware',
+        component: () => import('@/views/teach/CoursewareView.vue'),
+        meta: { title: '课件' },
+      },
+      /* ===== 考试阅卷：在线阅卷 / 试卷分析 / 错题本 ===== */
+      {
+        path: 'exam/grading',
+        name: 'exam-grading',
+        component: () => import('@/views/exam/GradingView.vue'),
+        meta: { title: '在线阅卷' },
+      },
+      {
+        path: 'exam/analysis',
+        name: 'exam-analysis',
+        component: () => import('@/views/exam/AnalysisView.vue'),
+        meta: { title: '试卷分析' },
+      },
+      {
+        path: 'exam/mistake',
+        name: 'exam-mistake',
+        component: () => import('@/views/exam/MistakeView.vue'),
+        meta: { title: '错题本' },
+      },
+      /* ===== 集体备课（协同教研） ===== */
+      {
+        path: 'prep',
+        name: 'prep',
+        component: () => import('@/views/prep/PrepView.vue'),
+        meta: { title: '集体备课' },
+      },
+      /* ===== 校本资源：资源库 / 审批管理（同一组件两个 Tab） ===== */
+      {
+        path: 'resource/library',
+        name: 'resource-library',
+        component: () => import('@/views/resource/ResourceView.vue'),
+        props: { tab: 'library' },
+        meta: { title: '校本资源库' },
+      },
+      {
+        path: 'resource/approval',
+        name: 'resource-approval',
+        component: () => import('@/views/resource/ResourceView.vue'),
+        props: { tab: 'approval' },
+        meta: { title: '审批管理' },
+      },
+      /* ===== 作业系统 ===== */
+      {
+        path: 'homework',
+        name: 'homework',
+        component: () => import('@/views/homework/HomeworkView.vue'),
+        meta: { title: '作业系统' },
       },
       /* ===== 教辅管理（FR-JC） ===== */
       {
@@ -111,6 +199,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/material/MediaKindView.vue'),
         props: { kind: 'video' },
         meta: { title: '视频' },
+      },
+      {
+        path: 'material/media/clip',
+        name: 'material-media-clip',
+        component: () => import('@/views/material/ClipView.vue'),
+        meta: { title: '微课切片' },
       },
       /* ===== 我的文件（FR-FL） ===== */
       {

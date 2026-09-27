@@ -90,6 +90,81 @@ const orgRoutes: MockRoute[] = [
   { method: 'POST', path: '/tenant/papers/swap-question', handler: ({ body }) => guard(() => org.swapPaperQuestion(Number(body.paperId), Number(body.questionId))) },
   { method: 'POST', path: '/tenant/papers/parallels', handler: ({ body }) => guard(() => org.generateParallels(Number(body.motherId), Number(body.count ?? 1))) },
 
+  /* 协同组卷：任务（分工）+ 入卷（题型约束）+ 版本（撤销/替换）三类接口分开，
+     前端能在不重传整卷的前提下只发一个「加题」请求。 */
+  { method: 'GET', path: '/tenant/collab/tasks', handler: () => guard(() => org.listCollabTasks()) },
+  { method: 'GET', path: '/tenant/collab/task', handler: ({ query }) => guard(() => org.collabTaskDetail(Number(query.id))) },
+  { method: 'POST', path: '/tenant/collab/tasks/save', handler: ({ body }) => guard(() => org.saveCollabTask(body as never)) },
+  { method: 'POST', path: '/tenant/collab/tasks/delete', handler: ({ body }) => guard(() => { org.deleteCollabTask(Number(body.id)); return null }) },
+  { method: 'POST', path: '/tenant/collab/questions/add', handler: ({ body }) => guard(() => org.collabAddQuestions(body as never)) },
+  { method: 'POST', path: '/tenant/collab/questions/remove', handler: ({ body }) => guard(() => org.collabRemoveQuestion(body as never)) },
+  { method: 'POST', path: '/tenant/collab/ai-compose', handler: ({ body }) => guard(() => org.collabAiCompose(body as never)) },
+  { method: 'POST', path: '/tenant/collab/member/submit', handler: ({ body }) => guard(() => org.collabSubmitMember(body as never)) },
+  { method: 'POST', path: '/tenant/collab/member/reopen', handler: ({ body }) => guard(() => org.collabReopenMember(body as never)) },
+  { method: 'GET', path: '/tenant/collab/versions', handler: ({ query }) => guard(() => org.listPaperVersions(Number(query.paperId))) },
+  { method: 'POST', path: '/tenant/collab/versions/restore', handler: ({ body }) => guard(() => org.restorePaperVersion(body as never)) },
+  { method: 'POST', path: '/tenant/collab/versions/replace', handler: ({ body }) => guard(() => org.replacePaperVersion(body as never)) },
+
+  // 讲义课件（FR-JC-005 ~ 012）
+  { method: 'GET', path: '/tenant/teach/docs', handler: ({ query }) => guard(() => org.listTeachDocs(query.kind ? String(query.kind) : undefined)) },
+  { method: 'POST', path: '/tenant/teach/docs/save', handler: ({ body }) => guard(() => org.saveTeachDoc(body as never)) },
+  { method: 'POST', path: '/tenant/teach/docs/delete', handler: ({ body }) => guard(() => { org.deleteTeachDoc(Number(body.id)); return null }) },
+  { method: 'POST', path: '/tenant/teach/docs/duplicate', handler: ({ body }) => guard(() => org.duplicateTeachDoc(Number(body.id))) },
+  { method: 'POST', path: '/tenant/teach/docs/publish', handler: ({ body }) => guard(() => org.toggleTeachDocPublish(Number(body.id))) },
+
+  // 考试与在线阅卷
+  { method: 'GET', path: '/tenant/exam/sessions', handler: () => guard(() => org.listExamSessions()) },
+  { method: 'GET', path: '/tenant/exam/session', handler: ({ query }) => guard(() => org.getExamSession(Number(query.id))) },
+  { method: 'POST', path: '/tenant/exam/sessions/save', handler: ({ body }) => guard(() => org.saveExamSession(body as never)) },
+  { method: 'POST', path: '/tenant/exam/sessions/delete', handler: ({ body }) => guard(() => { org.deleteExamSession(Number(body.id)); return null }) },
+  { method: 'POST', path: '/tenant/exam/duty/assign', handler: ({ body }) => guard(() => org.assignDuty(Number(body.sessionId), Number(body.dutyId), body.graders as string[], (body.mode as 'single' | 'double') ?? 'single')) },
+  { method: 'POST', path: '/tenant/exam/answers/score', handler: ({ body }) => guard(() => org.saveAnswerScore(Number(body.sessionId), Number(body.answerId), Number(body.questionId), Number(body.score))) },
+  { method: 'POST', path: '/tenant/exam/answers/mark', handler: ({ body }) => guard(() => org.markAnswer(Number(body.sessionId), Number(body.answerId), body.status as never, body.remark ? String(body.remark) : undefined)) },
+  { method: 'POST', path: '/tenant/exam/sessions/finish', handler: ({ body }) => guard(() => org.finishSession(Number(body.id))) },
+  { method: 'GET', path: '/tenant/exam/analysis', handler: ({ query }) => guard(() => org.analyzePaper(Number(query.sessionId))) },
+
+  // 错题本
+  { method: 'GET', path: '/tenant/mistakes', handler: ({ query }) => guard(() => org.listMistakes(query.scope ? String(query.scope) : undefined)) },
+  { method: 'GET', path: '/tenant/mistakes/scopes', handler: () => guard(() => org.mistakeScopes()) },
+  { method: 'POST', path: '/tenant/mistakes/save', handler: ({ body }) => guard(() => org.saveMistake(body as never)) },
+  { method: 'POST', path: '/tenant/mistakes/delete', handler: ({ body }) => guard(() => { org.removeMistake(Number(body.id)); return null }) },
+  { method: 'POST', path: '/tenant/mistakes/mastery', handler: ({ body }) => guard(() => org.setMistakeMastery(Number(body.id), body.mastery as never)) },
+  { method: 'GET', path: '/tenant/mistakes/similar', handler: ({ query }) => guard(() => org.similarQuestions(Number(query.id), Number(query.limit ?? 4))) },
+  { method: 'POST', path: '/tenant/mistakes/drill', handler: ({ body }) => guard(() => org.buildMistakeDrill((body.ids as number[]) ?? [], body.withSimilar !== false)) },
+
+  // 集体备课
+  { method: 'GET', path: '/tenant/prep/tasks', handler: () => guard(() => org.listPrepTasks()) },
+  { method: 'GET', path: '/tenant/prep/task', handler: ({ query }) => guard(() => org.getPrepTask(Number(query.id))) },
+  { method: 'POST', path: '/tenant/prep/tasks/save', handler: ({ body }) => guard(() => org.savePrepTask(body as never)) },
+  { method: 'POST', path: '/tenant/prep/tasks/delete', handler: ({ body }) => guard(() => { org.deletePrepTask(Number(body.id)); return null }) },
+  { method: 'POST', path: '/tenant/prep/comments/add', handler: ({ body }) => guard(() => org.addPrepComment(Number(body.id), String(body.body ?? ''), String(body.target ?? ''))) },
+  { method: 'POST', path: '/tenant/prep/comments/delete', handler: ({ body }) => guard(() => org.deletePrepComment(Number(body.id), Number(body.commentId))) },
+  { method: 'POST', path: '/tenant/prep/versions/add', handler: ({ body }) => guard(() => org.addPrepVersion(Number(body.id), String(body.summary ?? ''), String(body.snapshot ?? ''))) },
+  { method: 'POST', path: '/tenant/prep/versions/revert', handler: ({ body }) => guard(() => org.revertPrepVersion(Number(body.id), Number(body.versionId))) },
+  { method: 'POST', path: '/tenant/prep/versions/replace', handler: ({ body }) => guard(() => org.replacePrepVersion(Number(body.id), Number(body.versionId))) },
+  { method: 'POST', path: '/tenant/prep/duty/submit', handler: ({ body }) => guard(() => org.submitPrepDuty(Number(body.id), String(body.name ?? org.CURRENT.name))) },
+  { method: 'POST', path: '/tenant/prep/finalize', handler: ({ body }) => guard(() => org.finalizePrepTask(Number(body.id))) },
+
+  // 校本资源审批
+  { method: 'GET', path: '/tenant/approvals', handler: ({ query }) => guard(() => org.listApprovals(query.status ? String(query.status) : undefined)) },
+  { method: 'GET', path: '/tenant/approvals/summary', handler: () => guard(() => org.approvalSummary()) },
+  { method: 'POST', path: '/tenant/approvals/submit', handler: ({ body }) => guard(() => org.submitApproval(body as never)) },
+  { method: 'POST', path: '/tenant/approvals/review', handler: ({ body }) => guard(() => org.reviewApproval(Number(body.id), Boolean(body.pass), String(body.opinion ?? ''))) },
+  { method: 'POST', path: '/tenant/approvals/revoke', handler: ({ body }) => guard(() => { org.revokeApproval(Number(body.id)); return null }) },
+
+  // 视频切片（微课）
+  { method: 'GET', path: '/tenant/clips', handler: ({ query }) => guard(() => org.listVideoClips(query.mediaId ? Number(query.mediaId) : undefined)) },
+  { method: 'POST', path: '/tenant/clips/save', handler: ({ body }) => guard(() => org.saveVideoClip(body as never)) },
+  { method: 'POST', path: '/tenant/clips/delete', handler: ({ body }) => guard(() => { org.deleteVideoClip(Number(body.id)); return null }) },
+
+  // 作业系统
+  { method: 'GET', path: '/tenant/homeworks', handler: () => guard(() => org.listHomeworks()) },
+  { method: 'POST', path: '/tenant/homeworks/save', handler: ({ body }) => guard(() => org.saveHomework(body as never)) },
+  { method: 'POST', path: '/tenant/homeworks/delete', handler: ({ body }) => guard(() => { org.deleteHomework(Number(body.id)); return null }) },
+  { method: 'POST', path: '/tenant/homeworks/close', handler: ({ body }) => guard(() => org.closeHomework(Number(body.id))) },
+  { method: 'GET', path: '/tenant/homeworks/submissions', handler: ({ query }) => guard(() => org.listSubmissions(Number(query.homeworkId))) },
+  { method: 'POST', path: '/tenant/homeworks/submissions/grade', handler: ({ body }) => guard(() => org.gradeSubmission(Number(body.id), Number(body.score), String(body.comment ?? ''))) },
+
   // 教辅
   { method: 'GET', path: '/tenant/materials', handler: () => guard(() => org.materials) },
   { method: 'POST', path: '/tenant/materials/upload', handler: ({ body }) => guard(() => org.uploadMaterial(body as never)) },

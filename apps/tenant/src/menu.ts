@@ -42,6 +42,38 @@ export const menus: MenuItem[] = [
     ],
   },
   {
+    path: '/teach',
+    title: '备课中心',
+    icon: 'layers',
+    children: [
+      { path: '/teach/plan', title: '教案' },
+      { path: '/teach/guide', title: '学案' },
+      { path: '/teach/lecture', title: '讲义' },
+      { path: '/teach/courseware', title: '课件' },
+    ],
+  },
+  {
+    path: '/exam',
+    title: '考试阅卷',
+    icon: 'clipboard',
+    children: [
+      { path: '/exam/grading', title: '在线阅卷' },
+      { path: '/exam/analysis', title: '试卷分析' },
+      { path: '/exam/mistake', title: '错题本' },
+    ],
+  },
+  { path: '/prep', title: '集体备课', icon: 'teamwork' },
+  { path: '/homework', title: '作业系统', icon: 'pen' },
+  {
+    path: '/resource',
+    title: '校本资源',
+    icon: 'shield',
+    children: [
+      { path: '/resource/library', title: '校本资源库' },
+      { path: '/resource/approval', title: '审批管理' },
+    ],
+  },
+  {
     path: '/material',
     title: '教辅管理',
     icon: 'book',
@@ -50,6 +82,7 @@ export const menus: MenuItem[] = [
       { path: '/material/media/image', title: '图片' },
       { path: '/material/media/animation', title: '小程序动画' },
       { path: '/material/media/video', title: '视频' },
+      { path: '/material/media/clip', title: '微课切片' },
     ],
   },
   {

@@ -12,11 +12,12 @@
  */
 import { computed, ref, watch } from 'vue'
 import { AppIcon, showToast } from '@aiteach/shared'
-import type { OrgMaterial } from '@aiteach/shared'
+import type { OrgMaterial, OrgQuestion } from '@aiteach/shared'
 import { useComposeData } from '@/composables/useComposeData'
 import { useComposeBasket } from '@/composables/useComposeBasket'
 import { useBaseData } from '@/composables/useBaseData'
 import QuestionPoolCard from '@/components/compose/QuestionPoolCard.vue'
+import SimilarQuestionsModal from '@/components/compose/SimilarQuestionsModal.vue'
 import { matchesQuestionFilter, type ComposeFilter } from '../types'
 
 type Chapter = OrgMaterial['chapters'][number]
@@ -30,6 +31,13 @@ const emit = defineEmits<{
 const { materials, questions, loading, loaded, ensure } = useComposeData()
 const { grades, optionsForGrade, versionsFor, defaultTextbook, ensure: ensureBase } = useBaseData()
 const basket = useComposeBasket()
+
+/** 相似题弹窗的基准题（与试题页签共用同一个弹窗组件） */
+const similarTarget = ref<OrgQuestion | null>(null)
+function onSimilarFilter(tags: string[]) {
+  similarTarget.value = null
+  emit('findSimilar', tags)
+}
 
 const version = ref('')
 const materialId = ref<number | null>(null)
@@ -230,10 +238,18 @@ const previewChapter = ref<Chapter | null>(null)
             :section-hint="previewChapter.title"
             @toggle="basket.toggle($event, 'sync')"
             @find-similar="emit('findSimilar', $event)"
+            @similar="similarTarget = $event"
           />
         </div>
       </section>
     </div>
+
+    <SimilarQuestionsModal
+      v-if="similarTarget"
+      :row="similarTarget"
+      @close="similarTarget = null"
+      @find-similar="onSimilarFilter"
+    />
   </div>
 </template>
 

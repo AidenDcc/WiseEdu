@@ -12,6 +12,7 @@
  * 零新增代码就得到 A4/8K 分版排版与答题卡——自己再排一遍版既费事又会与试卷库不一致。
  */
 import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { AppIcon, showToast } from '@aiteach/shared'
 import type { OrgPaper } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
@@ -24,6 +25,8 @@ import { objectiveScoreOfSections, scoreOfSections } from '@/views/paper/paper-s
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: []; saved: [paper: OrgPaper] }>()
+
+const router = useRouter()
 
 const { questions, questionOf, refreshPapers } = useComposeData()
 const { subjects, grades, ensure, pick } = useBaseData()
@@ -110,6 +113,37 @@ async function save(submit: boolean) {
   }
 }
 
+/**
+ * 「生成试卷」= 存草稿 + 直接进试卷编辑页。
+ *
+ * 为什么不是「存完就结束」：组卷车只解决了「选哪些题」，而卷面还要调大题顺序、改分值、
+ * 加材料、换版式、打印——这些只能在纸面编辑页做。停在弹窗里等于让老师自己再找一次入口。
+ * 组卷车是模块级单例且已持久化，跳到编辑页不会丢，返回工作台后车里的题还在。
+ */
+async function generate() {
+  if (!validate()) return
+  saving.value = true
+  try {
+    const saved = await savePaper({
+      name: form.value.name.trim(),
+      subject: form.value.subject,
+      grade: form.value.grade,
+      duration: form.value.duration,
+      sections: JSON.parse(JSON.stringify(built.value.sections)),
+      submit: false,
+    })
+    basket.markSaved(saved.id)
+    await refreshPapers()
+    emit('saved', saved)
+    emit('close')
+    router.push(`/paper/edit?id=${saved.id}`)
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '生成失败', 'error')
+  } finally {
+    saving.value = false
+  }
+}
+
 /** 预览用的合成试卷：不落库，只借 PaperPreviewModal 的排版能力 */
 const draftPaper = computed<OrgPaper>(() => ({
   id: 0,
@@ -170,8 +204,10 @@ const draftPaper = computed<OrgPaper>(() => ({
         试卷预览
       </button>
       <button class="btn btn-ghost" type="button" :disabled="saving" @click="save(false)">存为草稿</button>
-      <button class="btn btn-primary" type="button" :disabled="saving" @click="save(true)">
-        {{ saving ? '保存中…' : '保存并提交审核' }}
+      <!-- 主按钮就是「生成试卷」：存草稿 + 进卷面编辑页。提交审核放到编辑页，
+           老师总要先把卷面调好再审，弹窗里直接提交等于逼他跳过排版这一步 -->
+      <button class="btn btn-primary" type="button" :disabled="saving" @click="generate()">
+        {{ saving ? '生成中…' : '生成试卷' }}
       </button>
     </template>
   </AppModal>

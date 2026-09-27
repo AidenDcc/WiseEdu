@@ -4,14 +4,27 @@
  */
 import { request } from '@aiteach/shared'
 import type {
+  AnswerStatus,
+  ApprovalKind,
+  ApprovalStatus,
   Campus,
+  CollabMember,
+  CollabRequirement,
   ComposeSearchIntent,
   DrawEditorType,
+  ExamAnswer,
+  ExamSession,
   FileFolder,
   GeneratedQuestion,
+  GradingDuty,
+  Homework,
+  HomeworkSubmission,
   MaterialExample,
+  MistakeEntry,
+  MistakeMastery,
   NotifyMatrixRow,
   OrgCategory,
+  OrgCollabTask,
   OrgFile,
   OrgFormula,
   OrgKnowledgeNode,
@@ -24,11 +37,19 @@ import type {
   OrgPrompt,
   OrgRole,
   OrgSearchResult,
+  PaperAnalysis,
+  PaperVersion,
+  PrepTask,
   RecycleItem,
+  ResourceApproval,
+  ResourceScope,
   SquareResource,
   StaffMember,
   StandardFormula,
+  TeachDoc,
+  TeachDocKind,
   TextbookOption,
+  VideoClip,
 } from '@aiteach/shared'
 import type { PhotoTask, RecognizedImportQuestion } from '@aiteach/shared'
 
@@ -170,6 +191,91 @@ export function swapPaperQuestion(paperId: number, questionId: number) {
 }
 export function generateParallels(motherId: number, count: number) {
   return request<OrgPaper[]>('/tenant/papers/parallels', { method: 'POST', data: { motherId, count } })
+}
+
+/* ===== 协同组卷（FR-PP-004 ~ 007 / 017 ~ 021） =====
+   接口按「任务 / 入卷 / 版本」三类拆分，与 mock 路由一一对应：
+   加一道题不必回传整张试卷，冲突面因此小得多。 */
+
+export function fetchCollabTasks() {
+  return request<OrgCollabTask[]>('/tenant/collab/tasks')
+}
+export function fetchCollabTask(id: number) {
+  return request<{ task: OrgCollabTask; paper: OrgPaper }>(withQuery('/tenant/collab/task', { id }))
+}
+export function saveCollabTask(data: {
+  id?: number
+  name: string
+  requirement: CollabRequirement
+  members: Array<Pick<CollabMember, 'name' | 'questionTypes' | 'perms'>>
+  /** 卷面来源：把这份已有试卷的卷面复制过来当起始卷（从「试卷编辑 → 协同组卷」进来时带） */
+  sourcePaperId?: number
+}) {
+  return request<{ task: OrgCollabTask; paper: OrgPaper }>('/tenant/collab/tasks/save', { method: 'POST', data })
+}
+export function deleteCollabTask(id: number) {
+  return request<null>('/tenant/collab/tasks/delete', { method: 'POST', data: { id } })
+}
+export function collabAddQuestions(data: {
+  taskId: number
+  memberName: string
+  questions: Array<{ questionId: number; score?: number }>
+}) {
+  return request<{ paper: OrgPaper; added: number }>('/tenant/collab/questions/add', { method: 'POST', data })
+}
+export function collabRemoveQuestion(data: { taskId: number; memberName: string; questionId: number }) {
+  return request<OrgPaper>('/tenant/collab/questions/remove', { method: 'POST', data })
+}
+export function collabAiCompose(data: {
+  taskId: number
+  memberName: string
+  type: string
+  count?: number
+  difficulty?: string
+  allowGenerate?: boolean
+}) {
+  return request<{ paper: OrgPaper; picked: number[]; generated: number }>('/tenant/collab/ai-compose', {
+    method: 'POST',
+    data,
+  })
+}
+export function collabSubmitMember(data: { taskId: number; memberName: string }) {
+  return request<OrgCollabTask>('/tenant/collab/member/submit', { method: 'POST', data })
+}
+export function collabReopenMember(data: { taskId: number; memberName: string }) {
+  return request<OrgCollabTask>('/tenant/collab/member/reopen', { method: 'POST', data })
+}
+export function fetchPaperVersions(paperId: number) {
+  return request<PaperVersion[]>(withQuery('/tenant/collab/versions', { paperId }))
+}
+export function restorePaperVersion(data: { paperId: number; versionId: number }) {
+  return request<{ paper: OrgPaper; versions: PaperVersion[] }>('/tenant/collab/versions/restore', {
+    method: 'POST',
+    data,
+  })
+}
+export function replacePaperVersion(data: { paperId: number; versionId: number; note?: string }) {
+  return request<{ paper: OrgPaper; versions: PaperVersion[] }>('/tenant/collab/versions/replace', {
+    method: 'POST',
+    data,
+  })
+}
+
+/* ===== 讲义课件（FR-JC-005 ~ 012） ===== */
+export function fetchTeachDocs(kind?: TeachDocKind) {
+  return request<TeachDoc[]>(withQuery('/tenant/teach/docs', { kind }))
+}
+export function saveTeachDoc(data: Partial<TeachDoc> & { kind: TeachDocKind; name: string }) {
+  return request<TeachDoc>('/tenant/teach/docs/save', { method: 'POST', data })
+}
+export function deleteTeachDoc(id: number) {
+  return request<null>('/tenant/teach/docs/delete', { method: 'POST', data: { id } })
+}
+export function duplicateTeachDoc(id: number) {
+  return request<TeachDoc>('/tenant/teach/docs/duplicate', { method: 'POST', data: { id } })
+}
+export function toggleTeachDocPublish(id: number) {
+  return request<TeachDoc>('/tenant/teach/docs/publish', { method: 'POST', data: { id } })
 }
 
 /* ===== 教辅 ===== */
@@ -423,6 +529,179 @@ export function markAllOrgMessagesRead(tab: string) {
 }
 export function deleteOrgMessage(id: number) {
   return request<null>('/tenant/messages/delete', { method: 'POST', data: { id } })
+}
+
+/* ===== 考试与在线阅卷 ===== */
+export function fetchExamSessions() {
+  return request<ExamSession[]>('/tenant/exam/sessions')
+}
+export function fetchExamSession(id: number) {
+  return request<{ session: ExamSession; paper: OrgPaper; answers: ExamAnswer[] }>(withQuery('/tenant/exam/session', { id }))
+}
+export function saveExamSession(data: {
+  id?: number
+  name: string
+  paperId: number
+  classes: string[]
+  examAt?: string
+}) {
+  return request<ExamSession>('/tenant/exam/sessions/save', { method: 'POST', data })
+}
+export function deleteExamSession(id: number) {
+  return request<null>('/tenant/exam/sessions/delete', { method: 'POST', data: { id } })
+}
+export function assignDuty(sessionId: number, dutyId: number, graders: string[], mode: GradingDuty['mode']) {
+  return request<ExamSession>('/tenant/exam/duty/assign', { method: 'POST', data: { sessionId, dutyId, graders, mode } })
+}
+export function saveAnswerScore(sessionId: number, answerId: number, questionId: number, score: number) {
+  return request<ExamAnswer>('/tenant/exam/answers/score', { method: 'POST', data: { sessionId, answerId, questionId, score } })
+}
+export function markAnswer(sessionId: number, answerId: number, status: AnswerStatus, remark?: string) {
+  return request<ExamAnswer>('/tenant/exam/answers/mark', { method: 'POST', data: { sessionId, answerId, status, remark } })
+}
+export function finishExamSession(id: number) {
+  return request<ExamSession>('/tenant/exam/sessions/finish', { method: 'POST', data: { id } })
+}
+
+/* ===== 试卷分析 ===== */
+export function fetchPaperAnalysis(sessionId: number) {
+  return request<PaperAnalysis>(withQuery('/tenant/exam/analysis', { sessionId }))
+}
+
+/* ===== 错题本 ===== */
+export function fetchMistakes(scope?: string) {
+  return request<MistakeEntry[]>(withQuery('/tenant/mistakes', { scope }))
+}
+export function fetchMistakeScopes() {
+  return request<string[]>('/tenant/mistakes/scopes')
+}
+export function saveMistake(data: Partial<MistakeEntry> & { questionId: number; scope: string }) {
+  return request<MistakeEntry>('/tenant/mistakes/save', { method: 'POST', data })
+}
+export function deleteMistake(id: number) {
+  return request<null>('/tenant/mistakes/delete', { method: 'POST', data: { id } })
+}
+export function setMistakeMastery(id: number, mastery: MistakeMastery) {
+  return request<MistakeEntry>('/tenant/mistakes/mastery', { method: 'POST', data: { id, mastery } })
+}
+export function fetchSimilarQuestions(mistakeId: number, limit = 4) {
+  return request<OrgQuestion[]>(withQuery('/tenant/mistakes/similar', { id: mistakeId, limit }))
+}
+export function buildMistakeDrill(ids: number[], withSimilar = true) {
+  return request<{ name: string; questionIds: number[] }>('/tenant/mistakes/drill', { method: 'POST', data: { ids, withSimilar } })
+}
+
+/* ===== 集体备课 ===== */
+export function fetchPrepTasks() {
+  return request<PrepTask[]>('/tenant/prep/tasks')
+}
+export function fetchPrepTask(id: number) {
+  return request<PrepTask>(withQuery('/tenant/prep/task', { id }))
+}
+export function savePrepTask(data: {
+  id?: number
+  name: string
+  subject: string
+  grade: string
+  docKind?: TeachDocKind
+  docId?: number
+  docName: string
+  requirement: PrepTask['requirement']
+  members: Array<Partial<PrepTask['members'][number]> & { name: string }>
+}) {
+  return request<PrepTask>('/tenant/prep/tasks/save', { method: 'POST', data })
+}
+export function deletePrepTask(id: number) {
+  return request<null>('/tenant/prep/tasks/delete', { method: 'POST', data: { id } })
+}
+export function addPrepComment(id: number, body: string, target: string) {
+  return request<PrepTask>('/tenant/prep/comments/add', { method: 'POST', data: { id, body, target } })
+}
+export function deletePrepComment(id: number, commentId: number) {
+  return request<PrepTask>('/tenant/prep/comments/delete', { method: 'POST', data: { id, commentId } })
+}
+export function addPrepVersion(id: number, summary: string, snapshot: string) {
+  return request<PrepTask>('/tenant/prep/versions/add', { method: 'POST', data: { id, summary, snapshot } })
+}
+export function revertPrepVersion(id: number, versionId: number) {
+  return request<{ task: PrepTask; snapshot: string }>('/tenant/prep/versions/revert', { method: 'POST', data: { id, versionId } })
+}
+export function replacePrepVersion(id: number, versionId: number) {
+  return request<{ task: PrepTask; snapshot: string; versions: PrepTask['versions'] }>('/tenant/prep/versions/replace', {
+    method: 'POST',
+    data: { id, versionId },
+  })
+}
+export function submitPrepDuty(id: number, name: string) {
+  return request<PrepTask>('/tenant/prep/duty/submit', { method: 'POST', data: { id, name } })
+}
+export function finalizePrepTask(id: number) {
+  return request<PrepTask>('/tenant/prep/finalize', { method: 'POST', data: { id } })
+}
+
+/* ===== 校本资源审批 ===== */
+export function fetchApprovals(status?: string) {
+  return request<ResourceApproval[]>(withQuery('/tenant/approvals', { status }))
+}
+export function fetchApprovalSummary() {
+  return request<{ pending: number; approved: number; rejected: number }>('/tenant/approvals/summary')
+}
+export function submitApproval(data: {
+  kind: ApprovalKind
+  name: string
+  subject: string
+  grade: string
+  scope: ResourceScope
+  note?: string
+}) {
+  return request<ResourceApproval>('/tenant/approvals/submit', { method: 'POST', data })
+}
+export function reviewApproval(id: number, pass: boolean, opinion: string) {
+  return request<ResourceApproval>('/tenant/approvals/review', { method: 'POST', data: { id, pass, opinion } })
+}
+export function revokeApproval(id: number) {
+  return request<null>('/tenant/approvals/revoke', { method: 'POST', data: { id } })
+}
+
+/* ===== 视频切片（微课） ===== */
+export function fetchVideoClips(mediaId?: number) {
+  return request<VideoClip[]>(withQuery('/tenant/clips', { mediaId }))
+}
+export function saveVideoClip(data: Partial<VideoClip> & { mediaId: number; title: string; start: number; end: number }) {
+  return request<VideoClip>('/tenant/clips/save', { method: 'POST', data })
+}
+export function deleteVideoClip(id: number) {
+  return request<null>('/tenant/clips/delete', { method: 'POST', data: { id } })
+}
+
+/* ===== 作业系统 ===== */
+export function fetchHomeworks() {
+  return request<Homework[]>('/tenant/homeworks')
+}
+export function saveHomework(data: {
+  id?: number
+  name: string
+  subject: string
+  grade: string
+  paperId?: number
+  questionIds: number[]
+  classes: string[]
+  deadline: string
+  require: string
+}) {
+  return request<Homework>('/tenant/homeworks/save', { method: 'POST', data })
+}
+export function deleteHomework(id: number) {
+  return request<null>('/tenant/homeworks/delete', { method: 'POST', data: { id } })
+}
+export function closeHomework(id: number) {
+  return request<Homework>('/tenant/homeworks/close', { method: 'POST', data: { id } })
+}
+export function fetchSubmissions(homeworkId: number) {
+  return request<HomeworkSubmission[]>(withQuery('/tenant/homeworks/submissions', { homeworkId }))
+}
+export function gradeSubmission(id: number, score: number, comment: string) {
+  return request<HomeworkSubmission>('/tenant/homeworks/submissions/grade', { method: 'POST', data: { id, score, comment } })
 }
 
 /* ===== 机构菜单权限 ===== */

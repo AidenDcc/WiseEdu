@@ -4,15 +4,32 @@
  */
 import type {
   AiCheckResult,
+  AnalysisQuestionStat,
+  AnswerItem,
+  AnswerStatus,
+  ApprovalKind,
+  ApprovalStatus,
   Campus,
+  CollabMember,
+  CollabRequirement,
   ComposeSearchIntent,
+  CoursewareSlide,
   DrawEditorType,
+  ExamAnswer,
+  ExamSession,
   FileFolder,
   GeneratedQuestion,
+  GradingDuty,
+  Homework,
+  HomeworkSubmission,
+  LectureBlock,
   MaterialExample,
   MaterialStatus,
+  MistakeEntry,
+  MistakeMastery,
   NotifyMatrixRow,
   OrgCategory,
+  OrgCollabTask,
   OrgFile,
   OrgKnowledgeNode,
   TextbookOption,
@@ -26,13 +43,35 @@ import type {
   OrgQuestion,
   OrgRole,
   OrgSearchResult,
+  PaperAnalysis,
   PaperSection,
+  PaperVersion,
+  PlanDetail,
+  PlanStepKind,
+  PrepComment,
+  PrepMember,
+  PrepTask,
+  PrepVersion,
   QuestionLibrary,
   QuestionStatus,
   RecycleItem,
+  ResourceApproval,
+  ResourceScope,
   SquareResource,
   StaffMember,
   StandardFormula,
+  TeachDoc,
+  TeachDocKind,
+  VideoClip,
+} from '../api/models'
+/* 常量与类型分开导入：这几个字典既要参与类型推导，也要作为值再导出给前端 */
+import {
+  COLLAB_STATUS_TEXT,
+  COLLAB_MEMBER_TEXT,
+  TEACH_KIND_TEXT,
+  LECTURE_BLOCK_TEXT,
+  SLIDE_LAYOUT_TEXT,
+  MISTAKE_REASONS,
 } from '../api/models'
 import { registerMediaSrc, unregisterMediaSrc } from '../utils/media-ref'
 /* 相对导入而非 '@aiteach/shared'：从 shared 内部引自己的桶文件会形成循环依赖 */
@@ -3230,6 +3269,11 @@ export const papers: OrgPaper[] = [
   ...EXAM_PAPERS,
 ]
 
+/* 种子试卷写死了 301 开头的一段 id，而自增起点是 300 —— 新建的卷会撞上已有 id，
+   表现为「生成试卷」后按 id 打开编辑页，打开的却是同 id 的那份种子卷（名字、题目全不对），
+   列表里也会出现两条一样的数据。这里把起点顶到现有最大 id 之上。 */
+paperSeq = Math.max(paperSeq, ...papers.map((row) => row.id))
+
 export function paperTotalScore(paper: OrgPaper): number {
   return paper.sections.reduce((sum, section) => sum + section.questions.reduce((s, q) => s + q.score, 0), 0)
 }
@@ -3387,6 +3431,890 @@ export function generateParallels(motherId: number, count: number): OrgPaper[] {
     papers.unshift(paper)
     return paper
   })
+}
+
+/* ================= 协同组卷（FR-PP-004 ~ 007 / 017 ~ 021） =================
+
+   设计要点：任务不另存一份卷面，`paperId` 直接指向 `papers` 里的那张试卷。
+   理由是「任务处理人看到的整张试卷」与「最后打印的试卷」必须**是同一份数据**，
+   各存一份迟早会出现「任务里显示 18 题、导出只有 15 题」这种对不上的事故。
+   任务只额外持有两样东西：分工（members）与版本（versions）。
+*/
+
+let collabSeq = 600
+let versionSeq = 950
+
+export const COLLAB_TASK_STATUS_TEXT = COLLAB_STATUS_TEXT
+export const COLLAB_MEMBER_STATUS_TEXT = COLLAB_MEMBER_TEXT
+
+/** 题型默认分值（与前端 paper-sections.ts 同一口径，避免两边算出不同总分） */
+function collabDefaultScore(type: string): number {
+  return type === '解答题' ? 12 : 5
+}
+
+function collabRequirementOf(input: Partial<CollabRequirement>): CollabRequirement {
+  return {
+    subject: input.subject ?? '数学',
+    grade: input.grade ?? '高一',
+    duration: input.duration ?? 120,
+    structure: input.structure ?? [
+      { type: '单选题', count: 8, score: 5 },
+      { type: '填空题', count: 4, score: 5 },
+      { type: '解答题', count: 3, score: 12 },
+    ],
+    difficulty: input.difficulty ?? [
+      { level: '容易', ratio: 30 },
+      { level: '中等', ratio: 50 },
+      { level: '困难', ratio: 20 },
+    ],
+    knowledge: input.knowledge ?? [],
+    remark: input.remark ?? '',
+  }
+}
+
+function collabMemberOf(input: Partial<CollabMember> & { name: string }, requirement: CollabRequirement): CollabMember {
+  const types = input.questionTypes ?? []
+  return {
+    name: input.name,
+    questionTypes: types,
+    perms: input.perms ?? ['选题'],
+    quota: types.reduce(
+      (sum, type) => sum + (requirement.structure.find((row) => row.type === type)?.count ?? 0),
+      0,
+    ),
+    status: input.status ?? 'invited',
+    online: input.online ?? false,
+    lastActiveAt: input.lastActiveAt ?? nowStr(-2),
+  }
+}
+
+/** 生成一个版本快照（深拷贝 sections，见 PaperVersion 注释） */
+function snapVersion(paper: OrgPaper, actor: string, summary: string, note?: string): PaperVersion {
+  const versions = versionsOf(paper.id)
+  const no = versions.reduce((max, row) => Math.max(max, row.no), 0) + 1
+  return {
+    id: ++versionSeq,
+    no,
+    time: nowStr(),
+    actor,
+    summary,
+    questionCount: paperQuestionCount(paper),
+    totalScore: paperTotalScore(paper),
+    sections: JSON.parse(JSON.stringify(paper.sections)) as PaperSection[],
+    note,
+  }
+}
+
+/** 覆盖式写回：撤销 / 替换都走它，保证 sections 的 id 与标题一并还原 */
+function applyVersion(paper: OrgPaper, version: PaperVersion): void {
+  paper.sections = JSON.parse(JSON.stringify(version.sections)) as PaperSection[]
+  paper.updatedAt = nowStr()
+}
+
+function versionsOf(paperId: number): PaperVersion[] {
+  const task = collabTasks.find((row) => row.paperId === paperId)
+  return task?.versions ?? []
+}
+
+function taskOf(id: number): OrgCollabTask {
+  const task = collabTasks.find((row) => row.id === id)
+  if (!task) throw new Error('协同组卷任务不存在')
+  return task
+}
+
+function paperOfTask(task: OrgCollabTask): OrgPaper {
+  const paper = papers.find((row) => row.id === task.paperId)
+  if (!paper) throw new Error('任务关联的试卷已被删除')
+  return paper
+}
+
+/** 某个成员负责的题型（用于入卷时的权限判定；未匹配到成员时视为「不在任务中」） */
+export function collabAllowedTypes(taskId: number, memberName: string): string[] {
+  const member = taskOf(taskId).members.find((row) => row.name === memberName)
+  return member?.questionTypes ?? []
+}
+
+export const collabTasks: OrgCollabTask[] = [
+  (() => {
+    const requirement = collabRequirementOf({
+      subject: '数学',
+      grade: '高一',
+      duration: 120,
+      structure: [
+        { type: '单选题', count: 8, score: 5 },
+        { type: '填空题', count: 4, score: 5 },
+        { type: '解答题', count: 3, score: 12 },
+      ],
+      knowledge: ['函数与导数', '二次函数', '集合'],
+      remark: '命题范围：必修一第一至三章。难度按易 3 : 中 5 : 难 2 配比，解答题须给出完整解析与评分点。',
+    })
+    const paper = seedPaper({
+      id: 320,
+      name: '2026 级高一数学第三次月考卷（协同）',
+      status: 'draft',
+      owner: '陈明远',
+      sections: [
+        { id: ++sectionSeq, title: '一、单项选择题', questions: [{ questionId: 9001, score: 5 }, { questionId: 9004, score: 5 }] },
+        { id: ++sectionSeq, title: '二、填空题', questions: [{ questionId: 9002, score: 5 }] },
+        { id: ++sectionSeq, title: '三、解答题', questions: [] },
+      ],
+    })
+    papers.unshift(paper)
+    const task: OrgCollabTask = {
+      id: 601,
+      paperId: paper.id,
+      name: paper.name,
+      requirement,
+      members: [
+        collabMemberOf({ name: '陈明远', questionTypes: ['单选题'], perms: ['选题', '改分值', '编辑卷头'], status: 'working', online: true }, requirement),
+        collabMemberOf({ name: '李文博', questionTypes: ['填空题'], perms: ['选题', '改分值'], status: 'working', online: true }, requirement),
+        collabMemberOf({ name: '沈丽华', questionTypes: ['解答题'], perms: ['选题'], status: 'submitted', lastActiveAt: nowStr(-20) }, requirement),
+        collabMemberOf({ name: '王静', questionTypes: ['多选题'], perms: ['选题'], status: 'invited', lastActiveAt: nowStr(-40) }, requirement),
+      ],
+      versions: [],
+      status: 'collecting',
+      createdAt: nowStr(-50),
+      owner: '陈明远',
+    }
+    task.versions = [
+      {
+        id: ++versionSeq,
+        no: 1,
+        time: nowStr(-50),
+        actor: '陈明远',
+        summary: '创建协同组卷任务，按题型分工（单选 8 / 填空 4 / 解答 3）',
+        questionCount: paperQuestionCount(paper),
+        totalScore: paperTotalScore(paper),
+        sections: JSON.parse(JSON.stringify(paper.sections)) as PaperSection[],
+      },
+      {
+        id: ++versionSeq,
+        no: 2,
+        time: nowStr(-30),
+        actor: '陈明远',
+        summary: '加入 2 道单项选择题（第 1、3 题）',
+        questionCount: paperQuestionCount(paper),
+        totalScore: paperTotalScore(paper),
+        sections: JSON.parse(JSON.stringify(paper.sections)) as PaperSection[],
+      },
+      {
+        id: ++versionSeq,
+        no: 3,
+        time: nowStr(-20),
+        actor: '沈丽华',
+        summary: '提交 1 道解答题并调整模块分值',
+        questionCount: paperQuestionCount(paper),
+        totalScore: paperTotalScore(paper),
+        sections: JSON.parse(JSON.stringify(paper.sections)) as PaperSection[],
+      },
+    ]
+    return task
+  })(),
+  (() => {
+    const requirement = collabRequirementOf({
+      subject: '语文',
+      grade: '高一',
+      duration: 150,
+      structure: [
+        { type: '单选题', count: 6, score: 3 },
+        { type: '解答题', count: 4, score: 8 },
+      ],
+      knowledge: ['现代文阅读', '古诗文默写'],
+      remark: '现代文阅读请选用 2025 年后发表的文章；文言文选自《史记》。',
+    })
+    const paper = seedPaper({
+      id: 321,
+      name: '高一语文期末联合命题卷',
+      subject: '语文',
+      status: 'draft',
+      owner: '沈丽华',
+      sections: [{ id: ++sectionSeq, title: '一、单项选择题', questions: [] }],
+    })
+    papers.unshift(paper)
+    const task: OrgCollabTask = {
+      id: 602,
+      paperId: paper.id,
+      name: paper.name,
+      requirement,
+      members: [
+        collabMemberOf({ name: '沈丽华', questionTypes: ['单选题'], perms: ['选题', '改分值', '编辑卷头'], status: 'working', online: true }, requirement),
+        collabMemberOf({ name: '孙悦', questionTypes: ['解答题'], perms: ['选题', '改分值'], status: 'working' }, requirement),
+      ],
+      versions: [],
+      status: 'collecting',
+      createdAt: nowStr(-8),
+      owner: '沈丽华',
+    }
+    task.versions = [
+      {
+        id: ++versionSeq,
+        no: 1,
+        time: nowStr(-8),
+        actor: '沈丽华',
+        summary: '创建协同组卷任务，邀请孙悦负责解答题',
+        questionCount: 0,
+        totalScore: 0,
+        sections: JSON.parse(JSON.stringify(paper.sections)) as PaperSection[],
+      },
+    ]
+    return task
+  })(),
+]
+
+export function listCollabTasks(): OrgCollabTask[] {
+  return collabTasks
+}
+
+/** 任务的卷面（含成员看到的整卷）与统计一起返回，省掉前端再拼一次 */
+export function collabTaskDetail(id: number): { task: OrgCollabTask; paper: OrgPaper } {
+  const task = taskOf(id)
+  return { task, paper: paperOfTask(task) }
+}
+
+/**
+ * 新建 / 更新协同组卷任务。
+ * 卷头（名称 / 学科 / 年级 / 时长）写在 paper 上，题型要求写在 requirement 上，
+ * 二者必须一起落库 —— 只有结构没有卷头的任务，处理人看到的卷面是残缺的。
+ */
+export function saveCollabTask(input: {
+  id?: number
+  name: string
+  requirement: Partial<CollabRequirement> & { subject: string; grade: string }
+  members: Array<Partial<CollabMember> & { name: string }>
+  /** 卷面来源：把这份已有试卷的卷面复制过来当起始卷（「试卷编辑 → 协同组卷」时带过来） */
+  sourcePaperId?: number
+}): { task: OrgCollabTask; paper: OrgPaper } {
+  if (input.name.trim().length < 2 || input.name.trim().length > 50) throw new Error('试卷名称须为 2-50 字')
+  if (!input.members.length) throw new Error('至少邀请 1 位任务处理人')
+  const assigned = input.members.flatMap((row) => row.questionTypes ?? [])
+  const duplicated = assigned.find((type, i) => assigned.indexOf(type) !== i)
+  if (duplicated) throw new Error(`题型「${duplicated}」被分配给了多人，请改为一人负责一个题型`)
+  const unassigned = input.requirement.structure?.filter((row) => !assigned.includes(row.type)) ?? []
+  if (unassigned.length) throw new Error(`题型「${unassigned.map((row) => row.type).join('、')}」还没有分配处理人`)
+
+  const requirement = collabRequirementOf({ ...input.requirement })
+  const isEdit = input.id != null
+  const task = isEdit ? taskOf(input.id as number) : undefined
+
+  if (!task) {
+    /* 卷面有两个来源：
+       - 带 sourcePaperId（试卷编辑页发起）→ 复制那份卷的卷面当起点。老师的心智是
+         「把这张卷拆给大家分头补」，不是「另起一张空卷」，丢掉已选的题会让人以为出 bug。
+       - 不带 → 按题型要求建一套空大题，从零组。 */
+    const source = input.sourcePaperId ? papers.find((row) => row.id === input.sourcePaperId) : undefined
+    const paper = seedPaper({
+      id: ++paperSeq,
+      name: input.name.trim(),
+      subject: requirement.subject,
+      grade: requirement.grade,
+      duration: requirement.duration,
+      status: 'draft',
+      sections: source
+        ? (JSON.parse(JSON.stringify(source.sections)) as PaperSection[]).map((row) => ({
+            ...row,
+            id: ++sectionSeq,
+          }))
+        : requirement.structure.map((row, i) => ({
+            id: ++sectionSeq,
+            title: `${'一二三四五六七八'[i]}、${sectionLabelOfType(row.type)}`,
+            questions: [],
+          })),
+      owner: CURRENT.name,
+    })
+    papers.unshift(paper)
+    const created: OrgCollabTask = {
+      id: ++collabSeq,
+      paperId: paper.id,
+      name: paper.name,
+      requirement,
+      members: input.members.map((row) => collabMemberOf(row, requirement)),
+      versions: [],
+      status: 'collecting',
+      createdAt: nowStr(),
+      owner: CURRENT.name,
+    }
+    created.versions = [snapVersion(paper, CURRENT.name, '创建协同组卷任务并完成题型分工')]
+    collabTasks.unshift(created)
+    pushMessage({
+      tab: 'collab',
+      title: `协同组卷任务《${paper.name}》已创建`,
+      summary: `已邀请 ${created.members.map((row) => row.name).join('、')}，按题型分工组卷`,
+      module: '协同组卷',
+      link: `/paper/collab/task?id=${created.id}`,
+    })
+    return { task: created, paper }
+  }
+
+  const paper = paperOfTask(task)
+  Object.assign(task, {
+    name: input.name.trim(),
+    requirement,
+    members: input.members.map((row) => {
+      const before = task.members.find((m) => m.name === row.name)
+      return collabMemberOf({ ...row, status: row.status ?? before?.status ?? 'invited' }, requirement)
+    }),
+  })
+  Object.assign(paper, {
+    name: task.name,
+    subject: requirement.subject,
+    grade: requirement.grade,
+    duration: requirement.duration,
+    updatedAt: nowStr(),
+  })
+  /* 题型要求变化时补建缺失的大题，保证「结构里有的题型，卷面上都有位置放」 */
+  requirement.structure.forEach((row) => {
+    const label = sectionLabelOfType(row.type)
+    if (!paper.sections.some((section) => section.title.includes(label.replace('题', '')))) {
+      paper.sections.push({ id: ++sectionSeq, title: `${'一二三四五六七八'[paper.sections.length]}、${label}`, questions: [] })
+    }
+  })
+  task.versions.push(snapVersion(paper, CURRENT.name, '更新任务要求与分工'))
+  return { task, paper }
+}
+
+export function deleteCollabTask(id: number): void {
+  const task = taskOf(id)
+  toRecycle('协同组卷任务', task.name)
+  collabTasks.splice(collabTasks.indexOf(task), 1)
+}
+
+/** 题型 → 大题标准名（与前端同一口径） */
+function sectionLabelOfType(type: string): string {
+  const map: Record<string, string> = {
+    单选题: '单项选择题',
+    多选题: '多项选择题',
+    判断题: '判断题',
+    填空题: '填空题',
+    解答题: '解答题',
+  }
+  return map[type] ?? `${type}大题`
+}
+
+/** 找到容纳该题型的大题下标，没有则新建（协同组卷里试卷结构由 requirement 决定，一般不新建） */
+function sectionIndexForType(paper: OrgPaper, type: string): number {
+  const label = sectionLabelOfType(type).replace(/题$/, '')
+  const hit = paper.sections.findIndex((section) => section.title.includes(label))
+  if (hit >= 0) return hit
+  paper.sections.push({ id: ++sectionSeq, title: `${'一二三四五六七八'[paper.sections.length]}、${sectionLabelOfType(type)}`, questions: [] })
+  return paper.sections.length - 1
+}
+
+/**
+ * 任务处理人加入题目（协同组卷的核心约束在这里落地）。
+ *
+ * 三重校验缺一不可：
+ * 1. 只有 `questionTypes` 里列出的题型能入卷 —— 否则「分工」形同虚设；
+ * 2. 已在卷中的题不能重复加入；
+ * 3. 单题型超编时给出**明确提示**而不是静默丢弃，否则处理人会以为题已经加进去了。
+ */
+export function collabAddQuestions(input: {
+  taskId: number
+  memberName: string
+  questions: Array<{ questionId: number; score?: number }>
+}): { paper: OrgPaper; added: number } {
+  const task = taskOf(input.taskId)
+  const paper = paperOfTask(task)
+  const member = task.members.find((row) => row.name === input.memberName)
+  if (!member) throw new Error('当前用户不在该任务的处理人名单中')
+  if (member.perms.includes('只读') && member.perms.length === 1) throw new Error('该任务对你是只读权限，无法加入题目')
+
+  const inPaper = new Set(paper.sections.flatMap((section) => section.questions.map((row) => row.questionId)))
+  let added = 0
+  input.questions.forEach((entry) => {
+    const question = questions.find((row) => row.id === entry.questionId)
+    if (!question) throw new Error(`题目 #${entry.questionId} 不存在`)
+    if (!member.questionTypes.includes(question.type)) {
+      throw new Error(`你只负责「${member.questionTypes.join('、')}」，不能把「${question.type}」加入试卷`)
+    }
+    if (inPaper.has(question.id)) return
+    const index = sectionIndexForType(paper, question.type)
+    paper.sections[index].questions.push({
+      questionId: question.id,
+      score: entry.score ?? collabDefaultScore(question.type),
+    })
+    inPaper.add(question.id)
+    added += 1
+  })
+  if (!added) throw new Error('所选题目均已在卷中')
+  paper.updatedAt = nowStr()
+  member.status = 'working'
+  member.online = true
+  member.lastActiveAt = nowStr()
+  task.versions.push(snapVersion(paper, input.memberName, `${input.memberName} 加入 ${added} 道${member.questionTypes.join('/')}题`))
+  return { paper, added }
+}
+
+/** 任务处理人移除题目：只能移除自己负责题型的题，避免误删他人的成果 */
+export function collabRemoveQuestion(input: { taskId: number; memberName: string; questionId: number }): OrgPaper {
+  const task = taskOf(input.taskId)
+  const paper = paperOfTask(task)
+  const member = task.members.find((row) => row.name === input.memberName)
+  const question = questions.find((row) => row.id === input.questionId)
+  if (!member || !question) throw new Error('任务成员或题目不存在')
+  if (!member.questionTypes.includes(question.type)) {
+    throw new Error(`「${question.type}」由其他成员负责，你无权移除`)
+  }
+  let removed = false
+  paper.sections.forEach((section) => {
+    const index = section.questions.findIndex((row) => row.questionId === input.questionId)
+    if (index >= 0) {
+      section.questions.splice(index, 1)
+      removed = true
+    }
+  })
+  if (!removed) throw new Error('该题不在卷中')
+  paper.updatedAt = nowStr()
+  task.versions.push(snapVersion(paper, input.memberName, `${input.memberName} 移除 1 道${question.type}`))
+  return paper
+}
+
+/**
+ * AI 辅助组卷（协同场景）：按试卷基本要求 + 本题型已有题目 + 题库，抽题补齐。
+ *
+ * 抽题口径与 `aiComposePaper` 保持一致（同学科同年级优先），但多两条协同专属的约束：
+ * - 只抽该成员负责的题型；
+ * - 该题型已达标就不再补（`need` 由题数缺口算出），避免 AI 把卷子撑爆。
+ */
+export function collabAiCompose(input: {
+  taskId: number
+  memberName: string
+  type: string
+  /** 指定补几道；不传则按题数缺口补 */
+  count?: number
+  /** 难度偏好，来自 requirement.difficulty */
+  difficulty?: string
+  /** 是否允许 AI 新生成题目补足（题库不足时） */
+  allowGenerate?: boolean
+}): { paper: OrgPaper; picked: number[]; generated: number } {
+  const task = taskOf(input.taskId)
+  const paper = paperOfTask(task)
+  const member = task.members.find((row) => row.name === input.memberName)
+  if (!member) throw new Error('当前用户不在该任务的处理人名单中')
+  if (!member.questionTypes.includes(input.type)) {
+    throw new Error(`你只负责「${member.questionTypes.join('、')}」，不能为「${input.type}」抽题`)
+  }
+  const wanted = task.requirement.structure.find((row) => row.type === input.type)
+  if (!wanted) throw new Error('试卷题型要求中没有该题型')
+
+  const index = sectionIndexForType(paper, input.type)
+  const section = paper.sections[index]
+  const need = input.count ?? Math.max(0, wanted.count - section.questions.length)
+  if (need <= 0) throw new Error(`「${input.type}」已按题型要求收满 ${wanted.count} 题`)
+
+  const inPaper = new Set(paper.sections.flatMap((row) => row.questions.map((q) => q.questionId)))
+  const knowledge = task.requirement.knowledge
+  const base = questions.filter((row) => row.type === input.type && row.status === 'approved' && !inPaper.has(row.id))
+  const sameSubject = base.filter((row) => row.subject === task.requirement.subject)
+  const sameGrade = sameSubject.filter((row) => row.grade === task.requirement.grade)
+  /* 难度偏好优先，但绝不因此把可选题量压到 0：命中不足时回退到同年级同科 */
+  const prefer = (rows: OrgQuestion[]) =>
+    input.difficulty ? rows.filter((row) => row.difficulty === input.difficulty) : rows
+  const ranked = [
+    ...prefer(sameGrade.filter((row) => row.knowledge.some((k) => knowledge.includes(k)))),
+    ...prefer(sameGrade.filter((row) => !row.knowledge.some((k) => knowledge.includes(k)))),
+    ...prefer(sameSubject.filter((row) => !sameGrade.includes(row))),
+    ...base.filter((row) => !sameSubject.includes(row)),
+  ]
+
+  consumeQuota(1)
+  const picked: number[] = []
+  for (const row of ranked) {
+    if (picked.length >= need) break
+    if (picked.includes(row.id) || inPaper.has(row.id)) continue
+    picked.push(row.id)
+  }
+
+  picked.forEach((id) => {
+    const question = questions.find((row) => row.id === id) as OrgQuestion
+    section.questions.push({ questionId: id, score: wanted.score })
+    question.useCount += 1
+  })
+
+  let generated = 0
+  const shortfall = need - picked.length
+  if (shortfall > 0) {
+    if (!input.allowGenerate) {
+      throw new Error(`题库中「${input.type}」可选题不足（还差 ${shortfall} 道），请补充题库或允许 AI 新生成`)
+    }
+    for (let i = 0; i < shortfall; i += 1) {
+      const created = adoptGenerated(
+        {
+          id: `collab-${input.taskId}-${Date.now()}-${i}`,
+          stem: `【AI 生成·${input.type}】考查${knowledge[0] ?? task.requirement.subject}的综合应用（第 ${section.questions.length + 1} 题）。`,
+          options: [],
+          answer: '见解析',
+          analysis: '由 AI 依据试卷基本要求生成，请命题人复核后定稿。',
+          knowledge: knowledge.slice(0, 2),
+          difficulty: input.difficulty || task.requirement.difficulty[1]?.level || '中等',
+        },
+        task.requirement.subject,
+        task.requirement.grade,
+        input.type,
+      )
+      section.questions.push({ questionId: created.id, score: wanted.score })
+      generated += 1
+    }
+  }
+
+  paper.updatedAt = nowStr()
+  member.status = 'working'
+  member.online = true
+  member.lastActiveAt = nowStr()
+  task.versions.push(
+    snapVersion(
+      paper,
+      input.memberName,
+      `AI 为「${input.type}」抽取 ${picked.length} 题${generated ? `、新生成 ${generated} 题` : ''}`,
+    ),
+  )
+  return { paper, picked, generated }
+}
+
+/** 任务处理人提交自己的部分 */
+export function collabSubmitMember(input: { taskId: number; memberName: string }): OrgCollabTask {
+  const task = taskOf(input.taskId)
+  const paper = paperOfTask(task)
+  const member = task.members.find((row) => row.name === input.memberName)
+  if (!member) throw new Error('当前用户不在该任务的处理人名单中')
+  const done = member.questionTypes.reduce((sum, type) => {
+    const want = task.requirement.structure.find((row) => row.type === type)?.count ?? 0
+    const label = sectionLabelOfType(type).replace(/题$/, '')
+    const have = paper.sections
+      .filter((section) => section.title.includes(label))
+      .reduce(
+        (count, section) =>
+          count + section.questions.filter((row) => questions.find((q) => q.id === row.questionId)?.type === type).length,
+        0,
+      )
+    return sum + Math.min(want, have)
+  }, 0)
+  const quota = member.quota || 1
+  if (done < quota) throw new Error(`还差 ${quota - done} 道题未完成（已交 ${done}/${quota}）`)
+  member.status = 'submitted'
+  member.lastActiveAt = nowStr()
+  if (task.members.every((row) => row.status === 'submitted')) task.status = 'reviewing'
+  task.versions.push(snapVersion(paper, input.memberName, `${input.memberName} 提交了负责的题型`))
+  pushMessage({
+    tab: 'collab',
+    title: `${input.memberName} 提交了《${task.name}》的分工内容`,
+    summary: `负责题型：${member.questionTypes.join('、')} · 共 ${done} 题`,
+    module: '协同组卷',
+    link: `/paper/collab/task?id=${task.id}`,
+  })
+  return task
+}
+
+/** 把成员状态回退为「组卷中」（用于撤销提交 / 继续修改） */
+export function collabReopenMember(input: { taskId: number; memberName: string }): OrgCollabTask {
+  const task = taskOf(input.taskId)
+  const member = task.members.find((row) => row.name === input.memberName)
+  if (!member) throw new Error('当前用户不在该任务的处理人名单中')
+  member.status = 'working'
+  member.lastActiveAt = nowStr()
+  if (task.status !== 'collecting') task.status = 'collecting'
+  return task
+}
+
+export function listPaperVersions(paperId: number): PaperVersion[] {
+  return versionsOf(paperId)
+}
+
+/** 撤销：把卷面恢复到所选版本，并追加一条「已撤销至 vX」的记录（不是删除历史） */
+export function restorePaperVersion(input: { paperId: number; versionId: number; actor?: string }): { paper: OrgPaper; versions: PaperVersion[] } {
+  const task = collabTasks.find((row) => row.paperId === input.paperId)
+  if (!task) throw new Error('该试卷没有版本记录（仅协同组卷的试卷保留版本）')
+  const paper = paperOfTask(task)
+  const version = task.versions.find((row) => row.id === input.versionId)
+  if (!version) throw new Error('版本不存在')
+  applyVersion(paper, version)
+  const actor = input.actor ?? CURRENT.name
+  task.versions.push(snapVersion(paper, actor, `撤销至 v${version.no}（${version.summary}）`))
+  return { paper, versions: task.versions }
+}
+
+/**
+ * 替换：用所选版本的内容覆盖当前卷面，并把**被替换掉的那个版本**标记为 replaced。
+ * 与「撤销」的区别在于留痕对象不同 —— 撤销记的是「我退回了历史」，替换记的是「这一版被废弃了」。
+ */
+export function replacePaperVersion(input: { paperId: number; versionId: number; note?: string; actor?: string }): {
+  paper: OrgPaper
+  versions: PaperVersion[]
+} {
+  const task = collabTasks.find((row) => row.paperId === input.paperId)
+  if (!task) throw new Error('该试卷没有版本记录（仅协同组卷的试卷保留版本）')
+  const paper = paperOfTask(task)
+  const version = task.versions.find((row) => row.id === input.versionId)
+  if (!version) throw new Error('版本不存在')
+  const latest = task.versions.reduce((max, row) => (row.no > max.no ? row : max), task.versions[0])
+  applyVersion(paper, version)
+  const actor = input.actor ?? CURRENT.name
+  const next = snapVersion(paper, actor, `以 v${version.no} 替换当前卷面`, input.note)
+  /* 被替换掉的是「替换前的最新版」，不是被采用的那一版 */
+  if (latest && latest.id !== version.id) latest.replaced = true
+  task.versions.push(next)
+  return { paper, versions: task.versions }
+}
+
+/* ================= 讲义课件（FR-JC-005 ~ 012） ================= */
+
+let teachSeq = 520
+let lectureBlockSeq = 1400
+let slideSeq = 1600
+let planStepSeq = 1800
+
+export const TEACH_DOC_STATUS_TEXT: Record<TeachDoc['status'], string> = {
+  draft: '草稿',
+  published: '已发布',
+}
+
+/** 讲义默认骨架：与教研云 / 菁优网的讲义模板一致（目标 → 讲解 → 例题 → 练习 → 小结 → 作业） */
+function defaultLectureBlocks(): LectureBlock[] {
+  return [
+    { id: ++lectureBlockSeq, kind: 'goal', title: '学习目标', body: '<p>1. 理解并掌握本节核心概念；<br>2. 能运用本节方法解决基础与中档问题。</p>', questionIds: [] },
+    { id: ++lectureBlockSeq, kind: 'explain', title: '知识点讲解', body: '<p>（在此编辑知识点的讲解内容，可插入公式与配图）</p>', questionIds: [] },
+    { id: ++lectureBlockSeq, kind: 'example', title: '典型例题', body: '<p>选取 1～2 道典型题目讲透方法。</p>', questionIds: [] },
+    { id: ++lectureBlockSeq, kind: 'practice', title: '随堂练习', body: '<p>学生当堂完成，教师巡视指导。</p>', questionIds: [] },
+    { id: ++lectureBlockSeq, kind: 'summary', title: '课堂小结', body: '<p>回顾本节知识结构与易错点。</p>', questionIds: [] },
+    { id: ++lectureBlockSeq, kind: 'homework', title: '课后作业', body: '<p>布置分层作业：基础必做 + 提升选做。</p>', questionIds: [] },
+  ]
+}
+
+function defaultSlides(name: string): CoursewareSlide[] {
+  return [
+    { id: ++slideSeq, layout: 'cover', title: name, subtitle: 'AI 教学云 · 课堂教学课件', bullets: [], note: '' },
+    { id: ++slideSeq, layout: 'bullets', title: '本节课学习目标', bullets: ['理解核心概念', '掌握基本方法', '能解决中档问题'], note: '' },
+    { id: ++slideSeq, layout: 'section', title: '一、知识点精讲', bullets: [], note: '' },
+    { id: ++slideSeq, layout: 'bullets', title: '核心概念', bullets: ['定义与表示', '关键性质', '常见变形'], note: '' },
+    { id: ++slideSeq, layout: 'question', title: '典型例题', bullets: ['先独立完成，再对照解析'], note: '请学生上台板演。', questionId: undefined },
+    { id: ++slideSeq, layout: 'bullets', title: '课堂小结', bullets: ['知识结构回顾', '易错点提醒', '作业布置'], note: '' },
+    { id: ++slideSeq, layout: 'end', title: '谢谢观看', bullets: [], note: '' },
+  ]
+}
+
+/** 学案默认骨架：预习 → 探究 → 检测 → 拓展（学生用，留空作答） */
+function defaultGuideBlocks(): LectureBlock[] {
+  return [
+    { id: ++lectureBlockSeq, kind: 'preview', title: '预习导学', body: '<p>阅读教材第 __ 页，完成下列预习任务。</p>', questionIds: [] },
+    { id: ++lectureBlockSeq, kind: 'explore', title: '课堂探究', body: '<p>探究任务一：观察下列实例，归纳共同特征。</p>', questionIds: [] },
+    { id: ++lectureBlockSeq, kind: 'check', title: '达标检测', body: '<p>当堂完成，检验本节课掌握情况。</p>', questionIds: [] },
+    { id: ++lectureBlockSeq, kind: 'extend', title: '拓展提升', body: '<p>选做：综合运用本节方法解决实际问题。</p>', questionIds: [] },
+  ]
+}
+
+/** 教案默认骨架：三维目标 + 重难点 + 五个教学环节 + 板书 + 反思 */
+function defaultPlan(): PlanDetail {
+  const step = (kind: PlanStepKind, title: string, minutes: number) => ({
+    id: ++planStepSeq,
+    kind,
+    title,
+    teacher: '',
+    student: '',
+    intent: '',
+    minutes,
+    questionIds: [],
+  })
+  return {
+    objectives: {
+      knowledge: '（知识与技能：学生能什么）',
+      process: '（过程与方法：通过什么活动获得）',
+      emotion: '（情感态度价值观：体会什么）',
+    },
+    keyPoints: '',
+    hardPoints: '',
+    methods: ['讲授法', '探究式学习'],
+    aids: ['多媒体课件'],
+    periods: 1,
+    steps: [
+      step('lead', '情境导入', 5),
+      step('teach', '新知探究', 20),
+      step('consolidate', '巩固应用', 12),
+      step('summary', '课堂小结', 5),
+      step('homework', '作业布置', 3),
+    ],
+    blackboard: '',
+    reflection: '',
+  }
+}
+
+function seedTeachDoc(input: Partial<TeachDoc> & { id: number; kind: TeachDocKind; name: string }): TeachDoc {
+  return {
+    subject: '数学',
+    grade: '高一',
+    textbook: '人教 A 版 必修一',
+    knowledge: [],
+    status: 'draft',
+    blocks: input.kind === 'lecture' ? defaultLectureBlocks() : input.kind === 'guide' ? defaultGuideBlocks() : [],
+    slides: input.kind === 'courseware' ? defaultSlides(input.name) : [],
+    plan: input.kind === 'plan' ? defaultPlan() : undefined,
+    owner: CURRENT.name,
+    updatedAt: nowStr(-12),
+    views: 0,
+    sharedSquare: false,
+    ...input,
+  } as TeachDoc
+}
+
+export const teachDocs: TeachDoc[] = [
+  seedTeachDoc({
+    id: ++teachSeq,
+    kind: 'lecture',
+    name: '集合与常用逻辑用语 · 概念讲义',
+    knowledge: ['集合', '充分必要条件'],
+    status: 'published',
+    views: 128,
+    sharedSquare: true,
+    owner: '李文博',
+    updatedAt: nowStr(-30),
+  }),
+  seedTeachDoc({
+    id: ++teachSeq,
+    kind: 'lecture',
+    name: '函数的单调性与最值 · 培优讲义',
+    knowledge: ['单调性', '函数与导数'],
+    status: 'published',
+    views: 86,
+    owner: '陈明远',
+    updatedAt: nowStr(-72),
+  }),
+  seedTeachDoc({
+    id: ++teachSeq,
+    kind: 'lecture',
+    name: '三角函数图像变换 · 基础讲义',
+    subject: '数学',
+    grade: '高一',
+    knowledge: ['三角函数'],
+    owner: '孙悦',
+    updatedAt: nowStr(-140),
+  }),
+  seedTeachDoc({
+    id: ++teachSeq,
+    kind: 'courseware',
+    name: '函数的奇偶性 · 授课课件',
+    knowledge: ['奇偶性'],
+    status: 'published',
+    views: 214,
+    sharedSquare: true,
+    owner: '陈明远',
+    updatedAt: nowStr(-18),
+  }),
+  seedTeachDoc({
+    id: ++teachSeq,
+    kind: 'courseware',
+    name: '牛顿第二定律 · 实验探究课件',
+    subject: '物理',
+    grade: '高一',
+    knowledge: ['牛顿运动定律'],
+    owner: '王静',
+    updatedAt: nowStr(-58),
+  }),
+  seedTeachDoc({
+    id: ++teachSeq,
+    kind: 'courseware',
+    name: '文言文阅读方法 · 专题课件',
+    subject: '语文',
+    grade: '高一',
+    knowledge: ['文言文阅读'],
+    owner: '沈丽华',
+    updatedAt: nowStr(-205),
+  }),
+  seedTeachDoc({
+    id: ++teachSeq,
+    kind: 'plan',
+    name: '函数的单调性 · 教学设计（1 课时）',
+    knowledge: ['单调性', '函数性质'],
+    status: 'published',
+    views: 96,
+    owner: '陈明远',
+    updatedAt: nowStr(-26),
+  }),
+  seedTeachDoc({
+    id: ++teachSeq,
+    kind: 'plan',
+    name: '集合的运算 · 教学设计（2 课时）',
+    knowledge: ['集合'],
+    owner: '李文博',
+    updatedAt: nowStr(-96),
+  }),
+  seedTeachDoc({
+    id: ++teachSeq,
+    kind: 'guide',
+    name: '函数的单调性 · 导学案',
+    knowledge: ['单调性'],
+    status: 'published',
+    views: 154,
+    sharedSquare: true,
+    owner: '陈明远',
+    updatedAt: nowStr(-22),
+  }),
+  seedTeachDoc({
+    id: ++teachSeq,
+    kind: 'guide',
+    name: '集合与常用逻辑用语 · 导学案',
+    knowledge: ['集合', '充分必要条件'],
+    owner: '孙悦',
+    updatedAt: nowStr(-64),
+  }),
+]
+
+export function listTeachDocs(kind?: string): TeachDoc[] {
+  return kind ? teachDocs.filter((row) => row.kind === kind) : teachDocs
+}
+
+export function saveTeachDoc(input: Partial<TeachDoc> & { kind: TeachDocKind; name: string }): TeachDoc {
+  if (input.name.trim().length < 2 || input.name.trim().length > 50) throw new Error('名称须为 2-50 字')
+  const isEdit = input.id != null
+  const item = isEdit ? teachDocs.find((row) => row.id === input.id) : undefined
+  if (isEdit && !item) throw new Error('资源不存在')
+  const target = item ?? seedTeachDoc({ id: ++teachSeq, kind: input.kind, name: input.name.trim() })
+  Object.assign(target, {
+    name: input.name.trim(),
+    kind: input.kind,
+    subject: input.subject ?? target.subject,
+    grade: input.grade ?? target.grade,
+    textbook: input.textbook ?? target.textbook,
+    knowledge: input.knowledge ?? target.knowledge,
+    status: input.status ?? target.status,
+    blocks: input.blocks ?? target.blocks,
+    slides: input.slides ?? target.slides,
+    plan: input.plan ?? target.plan,
+    updatedAt: nowStr(),
+  })
+  if (!isEdit) teachDocs.unshift(target)
+  return target
+}
+
+export function deleteTeachDoc(id: number): void {
+  const item = teachDocs.find((row) => row.id === id)
+  if (!item) throw new Error('资源不存在')
+  toRecycle(TEACH_KIND_TEXT[item.kind] as RecycleItem['kind'], item.name)
+  teachDocs.splice(teachDocs.indexOf(item), 1)
+}
+
+/** 复制一份（教研云 / 菁优网的「另存为」）：深拷贝正文，题目引用保持原样 */
+export function duplicateTeachDoc(id: number): TeachDoc {
+  const item = teachDocs.find((row) => row.id === id)
+  if (!item) throw new Error('资源不存在')
+  const copy: TeachDoc = JSON.parse(JSON.stringify(item)) as TeachDoc
+  copy.id = ++teachSeq
+  copy.name = `${item.name}（副本）`.slice(0, 50)
+  copy.status = 'draft'
+  copy.views = 0
+  copy.owner = CURRENT.name
+  copy.updatedAt = nowStr()
+  copy.blocks = copy.blocks.map((row) => ({ ...row, id: ++lectureBlockSeq }))
+  copy.slides = copy.slides.map((row) => ({ ...row, id: ++slideSeq }))
+  copy.plan = copy.plan ? { ...copy.plan, steps: copy.plan.steps.map((row) => ({ ...row, id: ++planStepSeq })) } : undefined
+  teachDocs.unshift(copy)
+  return copy
+}
+
+/** 发布 / 下架：发布后进入机构共享，教师可直接取用 */
+export function toggleTeachDocPublish(id: number): TeachDoc {
+  const item = teachDocs.find((row) => row.id === id)
+  if (!item) throw new Error('资源不存在')
+  item.status = item.status === 'published' ? 'draft' : 'published'
+  item.updatedAt = nowStr()
+  return item
 }
 
 /* ================= 教辅（FR-JC-001 ~ 004） ================= */
@@ -4722,6 +5650,38 @@ export const orgMenuTree: OrgMenuNode[] = [
     ],
   },
   {
+    key: 'teach',
+    title: '备课中心',
+    enabled: true,
+    children: [
+      { key: 'teach/plan', title: '教案', enabled: true },
+      { key: 'teach/guide', title: '学案', enabled: true },
+      { key: 'teach/lecture', title: '讲义', enabled: true },
+      { key: 'teach/courseware', title: '课件', enabled: true },
+    ],
+  },
+  {
+    key: 'exam',
+    title: '考试阅卷',
+    enabled: true,
+    children: [
+      { key: 'exam/grading', title: '在线阅卷', enabled: true },
+      { key: 'exam/analysis', title: '试卷分析', enabled: true },
+      { key: 'exam/mistake', title: '错题本', enabled: true },
+    ],
+  },
+  { key: 'prep', title: '集体备课', enabled: true },
+  { key: 'homework', title: '作业系统', enabled: true },
+  {
+    key: 'resource',
+    title: '校本资源',
+    enabled: true,
+    children: [
+      { key: 'resource/library', title: '校本资源库', enabled: true },
+      { key: 'resource/approval', title: '审批管理', enabled: true },
+    ],
+  },
+  {
     key: 'material',
     title: '教辅管理',
     enabled: true,
@@ -4730,6 +5690,7 @@ export const orgMenuTree: OrgMenuNode[] = [
       { key: 'material/media/image', title: '图片', enabled: true },
       { key: 'material/media/animation', title: '小程序动画', enabled: true },
       { key: 'material/media/video', title: '视频', enabled: true },
+      { key: 'material/media/clip', title: '微课切片', enabled: true },
     ],
   },
   { key: 'file', title: '我的文件', enabled: true },
@@ -4927,4 +5888,1251 @@ function interpretComposeText(seeded: string): ComposeSearchIntent {
     knowledge,
     reason: `${parts.join(' · ')}（本地演示解读）`.slice(0, 60),
   }
+}
+
+/* ================= 考试与在线阅卷 ================= */
+
+let sessionSeq = 700
+let dutySeq = 900
+let answerSeq = 2000
+let mistakeSeq = 800
+
+/** 演示用班级花名册（真实场景来自教务系统的班级学生表） */
+const ROSTER: Array<{ className: string; names: string[] }> = [
+  { className: '高一(1)班', names: ['张一鸣', '李思远', '王梓涵', '陈亦帆', '刘梦琪', '赵子谦', '孙嘉悦', '周浩然', '吴欣怡', '郑天宇', '冯语彤', '蒋泽楷', '韩雨薇', '杨博文', '何佳宁'] },
+  { className: '高一(2)班', names: ['曹峻熙', '彭思睿', '董一诺', '袁子墨', '于书瑶', '余泽楷', '叶知秋', '程思远', '苏子航', '魏灵犀', '吕明轩', '丁若曦', '任嘉树', '沈亦舟', '姚静姝'] },
+  { className: '高一(3)班', names: ['卢俊熙', '傅诗涵', '钟子昂', '姜雨泽', '崔艺萌', '谭博衍', '陆思彤', '汪子睿', '范晓萱', '金昊然', '石佳怡', '廖晨曦', '贾一凡', '韦思远', '樊悦然'] },
+]
+
+export const CLASS_NAMES = ROSTER.map((row) => row.className)
+
+/** 难度 → 预期得分率系数：越难的题，同样水平的学生拿分越少 */
+const DIFF_FACTOR: Record<string, number> = { 容易: 0.92, 较易: 0.8, 中等: 0.62, 较难: 0.44, 难: 0.3 }
+
+/**
+ * 确定性伪随机（线性同余）。
+ * 答題数据必须可重现：否则每刷新一次页面，同一场考试的成绩、分析、错题全变了，
+ * 老师会以为数据丢了。
+ */
+function seeded(seed: number): () => number {
+  let s = seed % 2147483647
+  if (s <= 0) s += 2147483646
+  return () => (s = (s * 16807) % 2147483647) / 2147483647
+}
+
+const round1 = (n: number) => Math.round(n * 10) / 10
+
+/** 客观题：机器阅卷直接判对错；主观题：按步给分，错也有部分分 */
+const OBJECTIVE_TYPES = ['单选题', '多选题', '判断题']
+
+/**
+ * 按试卷生成答卷（模拟答题卡扫描 + 客观题机阅）。
+ * 学生能力值固定（由 seed 决定），再叠加题目难度与随机扰动，使分数呈合理分布。
+ */
+function buildAnswers(session: ExamSession, paper: OrgPaper): ExamAnswer[] {
+  const rand = seeded(session.id * 97 + 13)
+  const flat = paper.sections.flatMap((sec) => sec.questions.map((row) => ({ ...row, sectionTitle: sec.title })))
+  const gradedRatio = session.status === 'finished' ? 1 : 0.72
+  const out: ExamAnswer[] = []
+
+  for (const cls of ROSTER) {
+    if (!session.classes.includes(cls.className)) continue
+    for (const student of cls.names) {
+      const ability = 0.4 + rand() * 0.55
+      const items: AnswerItem[] = flat.map((row, i) => {
+        const q = questions.find((item) => item.id === row.questionId)
+        const factor = DIFF_FACTOR[q?.difficulty ?? '中等'] ?? 0.6
+        const p = Math.max(0.04, Math.min(0.97, ability * factor * (0.86 + rand() * 0.28)))
+        const hit = rand() < p
+        const objective = !!q && OBJECTIVE_TYPES.includes(q.type)
+        const score = hit ? row.score : objective ? 0 : round1(row.score * rand() * 0.65)
+        return {
+          questionId: row.questionId,
+          qIndex: i + 1,
+          sectionTitle: row.sectionTitle,
+          type: q?.type ?? '解答题',
+          knowledge: q?.knowledge ?? [],
+          full: row.score,
+          score,
+          answer: hit ? '（作答正确）' : objective ? '（错误选项）' : '（部分作答）',
+          correct: hit,
+        }
+      })
+
+      const roll = rand()
+      const status: AnswerStatus = roll < 0.035 ? 'absent' : roll < 0.055 ? 'cheat' : rand() < gradedRatio ? 'graded' : 'pending'
+      const total = status === 'absent' || status === 'cheat' ? 0 : round1(items.reduce((sum, row) => sum + row.score, 0))
+      out.push({
+        id: ++answerSeq,
+        sessionId: session.id,
+        student,
+        className: cls.className,
+        items: status === 'absent' ? items.map((row) => ({ ...row, score: 0, correct: false, answer: '（未作答）' })) : items,
+        total,
+        status,
+        remark: status === 'cheat' ? '雷同卷，需复核' : status === 'absent' ? '缺考' : undefined,
+      })
+    }
+  }
+  return out
+}
+
+function refreshDuty(session: ExamSession): void {
+  const answers = examAnswers.filter((row) => row.sessionId === session.id)
+  for (const duty of session.duties) {
+    duty.total = answers.length
+    duty.done = answers.filter(
+      (row) => row.status === 'graded' || row.status === 'absent' || row.status === 'cheat',
+    ).length
+  }
+  session.studentCount = answers.length
+}
+
+export const examSessions: ExamSession[] = []
+export const examAnswers: ExamAnswer[] = []
+
+function seedSession(input: {
+  id: number
+  name: string
+  paperId: number
+  classes: string[]
+  status: ExamSession['status']
+  examAtOffset?: number
+  graders?: string[]
+}): void {
+  const paper = papers.find((row) => row.id === input.paperId)
+  if (!paper) return
+  const session: ExamSession = {
+    id: input.id,
+    name: input.name,
+    paperId: paper.id,
+    paperName: paper.name,
+    subject: paper.subject,
+    grade: paper.grade,
+    classes: input.classes,
+    studentCount: 0,
+    examAt: nowStr(input.examAtOffset ?? -48).slice(0, 10),
+    status: input.status,
+    fullScore: paperTotalScore(paper),
+    duties: paper.sections.map((sec) => ({
+      id: ++dutySeq,
+      sectionTitle: sec.title,
+      questionIds: sec.questions.map((row) => row.questionId),
+      graders: input.graders ?? [CURRENT.name],
+      mode: 'single',
+      done: 0,
+      total: 0,
+    })),
+    createdBy: CURRENT.name,
+    updatedAt: nowStr(input.examAtOffset ?? -48),
+  }
+  examSessions.unshift(session)
+  examAnswers.push(...buildAnswers(session, paper))
+  refreshDuty(session)
+}
+
+/**
+ * 挑一份「有题目」的试卷做演示考试。
+ * 不能按 `papers[0]` 取：协同组卷的种子任务会把草稿空卷 unshift 进 papers，
+ * 索引 0 可能是一份 0 题 0 分的空卷，考试就会变成「满分 0 分、全班 0 分」。
+ */
+function demoPaper(index: number): OrgPaper {
+  const pool = papers.filter((row) => row.sections.some((sec) => sec.questions.length > 0))
+  return pool[index] ?? pool[0] ?? papers[0]
+}
+
+seedSession({ id: ++sessionSeq, name: '2026 秋季高一数学期中考试', paperId: demoPaper(0).id, classes: CLASS_NAMES, status: 'grading', examAtOffset: -60 })
+seedSession({ id: ++sessionSeq, name: '高一数学 9 月月考', paperId: demoPaper(1).id, classes: CLASS_NAMES, status: 'finished', examAtOffset: -320 })
+seedSession({
+  id: ++sessionSeq,
+  name: '高一(1)班 第三章周测',
+  paperId: demoPaper(2).id,
+  classes: [CLASS_NAMES[0]],
+  status: 'finished',
+  examAtOffset: -140,
+  graders: ['李文博', '孙悦'],
+})
+
+export function listExamSessions(): ExamSession[] {
+  return [...examSessions]
+}
+
+export function getExamSession(id: number): { session: ExamSession; paper: OrgPaper; answers: ExamAnswer[] } {
+  const session = examSessions.find((row) => row.id === id)
+  if (!session) throw new Error('考试不存在')
+  const paper = papers.find((row) => row.id === session.paperId)
+  if (!paper) throw new Error('试卷已被删除')
+  return { session, paper, answers: examAnswers.filter((row) => row.sessionId === id) }
+}
+
+/** 新建 / 编辑考试。新建时按试卷自动生成答卷（相当于答题卡扫描完成、待阅卷） */
+export function saveExamSession(input: {
+  id?: number
+  name: string
+  paperId: number
+  classes: string[]
+  examAt?: string
+}): ExamSession {
+  if (input.name.trim().length < 2 || input.name.trim().length > 50) throw new Error('考试名称须为 2-50 字')
+  if (!input.classes.length) throw new Error('请至少选择一个参考班级')
+  const paper = papers.find((row) => row.id === input.paperId)
+  if (!paper) throw new Error('试卷不存在')
+
+  if (input.id != null) {
+    const session = examSessions.find((row) => row.id === input.id)
+    if (!session) throw new Error('考试不存在')
+    session.name = input.name.trim()
+    session.classes = [...input.classes]
+    session.examAt = input.examAt ?? session.examAt
+    session.updatedAt = nowStr()
+    /* 班级变了：旧答卷要按新班级重建，否则会留下不在参考范围内的学生 */
+    examAnswers.splice(
+      0,
+      examAnswers.length,
+      ...examAnswers.filter((row) => row.sessionId !== session.id),
+    )
+    examAnswers.push(...buildAnswers(session, paper))
+    refreshDuty(session)
+    return session
+  }
+
+  const session: ExamSession = {
+    id: ++sessionSeq,
+    name: input.name.trim(),
+    paperId: paper.id,
+    paperName: paper.name,
+    subject: paper.subject,
+    grade: paper.grade,
+    classes: [...input.classes],
+    studentCount: 0,
+    examAt: input.examAt ?? nowStr().slice(0, 10),
+    status: 'grading',
+    fullScore: paperTotalScore(paper),
+    duties: paper.sections.map((sec) => ({
+      id: ++dutySeq,
+      sectionTitle: sec.title,
+      questionIds: sec.questions.map((row) => row.questionId),
+      graders: [CURRENT.name],
+      mode: 'single',
+      done: 0,
+      total: 0,
+    })),
+    createdBy: CURRENT.name,
+    updatedAt: nowStr(),
+  }
+  examSessions.unshift(session)
+  examAnswers.push(...buildAnswers(session, paper))
+  refreshDuty(session)
+  return session
+}
+
+export function deleteExamSession(id: number): void {
+  const index = examSessions.findIndex((row) => row.id === id)
+  if (index < 0) throw new Error('考试不存在')
+  toRecycle('试卷', examSessions[index].name)
+  examSessions.splice(index, 1)
+  const rest = examAnswers.filter((row) => row.sessionId !== id)
+  examAnswers.splice(0, examAnswers.length, ...rest)
+}
+
+/** 分配阅卷任务：指定大题的阅卷人与评卷方式 */
+export function assignDuty(sessionId: number, dutyId: number, graders: string[], mode: GradingDuty['mode']): ExamSession {
+  const session = examSessions.find((row) => row.id === sessionId)
+  if (!session) throw new Error('考试不存在')
+  const duty = session.duties.find((row) => row.id === dutyId)
+  if (!duty) throw new Error('阅卷任务不存在')
+  if (!graders.length) throw new Error('请至少指定一位阅卷人')
+  duty.graders = [...graders]
+  duty.mode = mode
+  session.updatedAt = nowStr()
+  return session
+}
+
+/** 单题给分：超出满分或为负直接拒绝，避免录出 120 分的题 */
+export function saveAnswerScore(sessionId: number, answerId: number, questionId: number, score: number): ExamAnswer {
+  const answer = examAnswers.find((row) => row.id === answerId && row.sessionId === sessionId)
+  if (!answer) throw new Error('答卷不存在')
+  if (answer.status === 'absent') throw new Error('缺考卷不能给分')
+  const item = answer.items.find((row) => row.questionId === questionId)
+  if (!item) throw new Error('该卷没有这道题')
+  if (score < 0 || score > item.full) throw new Error(`分值须在 0 ~ ${item.full} 之间`)
+  item.score = score
+  item.correct = score >= item.full
+  answer.total = round1(answer.items.reduce((sum, row) => sum + row.score, 0))
+  if (answer.status !== 'cheat') answer.status = 'graded'
+  const session = examSessions.find((row) => row.id === sessionId)
+  if (session) refreshDuty(session)
+  return answer
+}
+
+/** 标记缺考 / 违纪：违纪卷成绩作废，但不占用阅卷进度之外的统计 */
+export function markAnswer(sessionId: number, answerId: number, status: AnswerStatus, remark?: string): ExamAnswer {
+  const answer = examAnswers.find((row) => row.id === answerId && row.sessionId === sessionId)
+  if (!answer) throw new Error('答卷不存在')
+  answer.status = status
+  answer.remark = remark
+  if (status === 'absent') {
+    answer.items = answer.items.map((row) => ({ ...row, score: 0, correct: false, answer: '（未作答）' }))
+    answer.total = 0
+  }
+  if (status === 'cheat') answer.total = 0
+  const session = examSessions.find((row) => row.id === sessionId)
+  if (session) refreshDuty(session)
+  return answer
+}
+
+/** 结束阅卷：全部已阅才允许结束，否则老师会漏掉没批完的卷 */
+export function finishSession(id: number): ExamSession {
+  const session = examSessions.find((row) => row.id === id)
+  if (!session) throw new Error('考试不存在')
+  const pending = examAnswers.filter((row) => row.sessionId === id && row.status === 'pending')
+  if (pending.length) throw new Error(`还有 ${pending.length} 份答卷未批阅`)
+  session.status = 'finished'
+  session.updatedAt = nowStr()
+  return session
+}
+
+/* ================= 试卷分析 / 学情反馈 ================= */
+
+/**
+ * 统计分析。
+ * 有效卷 = 排除缺考与违纪；客观题已由机器判完，主观题以当前已批分数为准，
+ * 所以未批完时给出的结论会偏低——这与真实考后分析一致，故提示「阅卷未完成时结果仅供参考」。
+ */
+export function analyzePaper(sessionId: number): PaperAnalysis {
+  const session = examSessions.find((row) => row.id === sessionId)
+  if (!session) throw new Error('考试不存在')
+  const answers = examAnswers.filter((row) => row.sessionId === sessionId)
+  const valid = answers.filter((row) => row.status !== 'absent' && row.status !== 'cheat')
+  const full = session.fullScore || 1
+  const totals = valid.map((row) => row.total).sort((a, b) => a - b)
+  const count = totals.length
+  const sum = totals.reduce((a, b) => a + b, 0)
+  const avg = count ? round1(sum / count) : 0
+  const median = count ? (count % 2 ? totals[(count - 1) / 2] : round1((totals[count / 2 - 1] + totals[count / 2]) / 2)) : 0
+  const variance = count ? totals.reduce((acc, n) => acc + (n - avg) ** 2, 0) / count : 0
+
+  const passRate = count ? Math.round((totals.filter((n) => n >= full * 0.6).length / count) * 100) : 0
+  const excellentRate = count ? Math.round((totals.filter((n) => n >= full * 0.85).length / count) * 100) : 0
+
+  /* 区分度：高分组（前 27%）与低分组（后 27%）的难度差 */
+  const band = Math.max(1, Math.floor(count * 0.27))
+  const high = totals.slice(count - band)
+  const low = totals.slice(0, band)
+  const avgOf = (rows: number[]) => (rows.length ? rows.reduce((a, b) => a + b, 0) / rows.length : 0)
+  const discrimination = count > 2 ? Math.round(((avgOf(high) - avgOf(low)) / full) * 100) / 100 : 0
+
+  const bands: PaperAnalysis['bands'] = [
+    { label: '0-59', min: 0, max: 59, count: 0 },
+    { label: '60-69', min: 60, max: 69, count: 0 },
+    { label: '70-79', min: 70, max: 79, count: 0 },
+    { label: '80-89', min: 80, max: 89, count: 0 },
+    { label: '90-100', min: 90, max: 100, count: 0 },
+  ]
+  for (const n of totals) {
+    const percent = (n / full) * 100
+    const row = bands.find((b) => percent >= b.min && (percent < b.max + 1 || b.max === 100)) ?? bands[bands.length - 1]
+    row.count += 1
+  }
+
+  /* 小题分析：按卷面全局题号聚合 */
+  const map = new Map<number, AnalysisQuestionStat>()
+  for (const answer of valid) {
+    for (const item of answer.items) {
+      const row = map.get(item.questionId) ?? {
+        questionId: item.questionId,
+        qIndex: item.qIndex,
+        sectionTitle: item.sectionTitle,
+        type: item.type,
+        knowledge: item.knowledge,
+        full: item.full,
+        avg: 0,
+        scoreRate: 0,
+        difficulty: 0,
+        discrimination: 0,
+        correctRate: 0,
+      }
+      row.avg += item.score
+      if (item.correct) row.correctRate += 1
+      map.set(item.questionId, row)
+    }
+  }
+  /* 每题的高 / 低分组得分率差：用同一批有效卷的总分区分高低分组 */
+  const highSet = new Set(valid.filter((row) => row.total >= avgOf(high)).map((row) => row.id))
+  const lowSet = new Set(valid.filter((row) => row.total <= avgOf(low)).map((row) => row.id))
+  for (const answer of valid) {
+    for (const item of answer.items) {
+      const row = map.get(item.questionId)
+      if (!row) continue
+      const delta = (highSet.has(answer.id) ? 1 : 0) - (lowSet.has(answer.id) ? 1 : 0)
+      row.discrimination += (item.score / (item.full || 1)) * delta * 0.5
+    }
+  }
+  const questionsStat = [...map.values()]
+    .map((row) => {
+      const avgScore = count ? round1(row.avg / count) : 0
+      const scoreRate = row.full ? avgScore / row.full : 0
+      return {
+        ...row,
+        avg: avgScore,
+        scoreRate: Math.round(scoreRate * 1000) / 1000,
+        difficulty: Math.round(scoreRate * 100) / 100,
+        discrimination: Math.round(row.discrimination * 100) / 100,
+        correctRate: count ? Math.round((row.correctRate / count) * 100) / 100 : 0,
+      }
+    })
+    .sort((a, b) => a.qIndex - b.qIndex)
+
+  /* 知识点得分率：一题多知识点时按题计入 */
+  const kMap = new Map<string, { sum: number; full: number; count: number }>()
+  for (const row of questionsStat) {
+    for (const k of row.knowledge.length ? row.knowledge : ['未标注知识点']) {
+      const cur = kMap.get(k) ?? { sum: 0, full: 0, count: 0 }
+      cur.sum += row.avg
+      cur.full += row.full
+      cur.count += 1
+      kMap.set(k, cur)
+    }
+  }
+  const knowledge = [...kMap.entries()]
+    .map(([name, cur]) => ({ name, scoreRate: cur.full ? Math.round((cur.sum / cur.full) * 1000) / 1000 : 0, count: cur.count }))
+    .sort((a, b) => a.scoreRate - b.scoreRate)
+
+  /* 班级对比 */
+  const classMap = new Map<string, number[]>()
+  for (const row of valid) {
+    classMap.set(row.className, [...(classMap.get(row.className) ?? []), row.total])
+  }
+  const classes = [...classMap.entries()].map(([name, list]) => ({
+    name,
+    count: list.length,
+    avg: round1(list.reduce((a, b) => a + b, 0) / list.length),
+    passRate: Math.round((list.filter((n) => n >= full * 0.6).length / list.length) * 100),
+    excellentRate: Math.round((list.filter((n) => n >= full * 0.85).length / list.length) * 100),
+  }))
+
+  const suggestions: string[] = []
+  const weak = questionsStat.filter((row) => row.scoreRate < 0.5).sort((a, b) => a.scoreRate - b.scoreRate)
+  if (weak.length) {
+    suggestions.push(
+      `得分率低于 50% 的题目共 ${weak.length} 道（第 ${weak.slice(0, 5).map((row) => row.qIndex).join('、')} 题），建议讲评时优先处理。`,
+    )
+  }
+  if (knowledge[0]) suggestions.push(`知识点「${knowledge[0].name}」得分率仅 ${Math.round(knowledge[0].scoreRate * 100)}%，建议安排专项巩固。`)
+  if (discrimination < 0.2) suggestions.push('整卷区分度偏低（<0.2），中高分段拉不开，下次命题建议增加中档题的梯度。')
+  else if (discrimination > 0.45) suggestions.push('整卷区分度较高，试卷偏难，注意照顾基础薄弱学生。')
+  const badDiscrimination = questionsStat.filter((row) => row.discrimination <= 0)
+  if (badDiscrimination.length) {
+    suggestions.push(`第 ${badDiscrimination.map((row) => row.qIndex).join('、')} 题区分度为 0 或负，需复核题目表述与答案。`)
+  }
+  const best = classes.slice().sort((a, b) => b.avg - a.avg)
+  if (best.length > 1) suggestions.push(`${best[0].name} 平均分最高（${best[0].avg}），${best[best.length - 1].name} 最低（${best[best.length - 1].avg}），差距 ${round1(best[0].avg - best[best.length - 1].avg)} 分，建议开展集体备课研讨。`)
+  if (!suggestions.length) suggestions.push('本次考试各项指标正常，可按原计划推进教学。')
+
+  return {
+    sessionId: session.id,
+    paperId: session.paperId,
+    paperName: session.paperName,
+    subject: session.subject,
+    grade: session.grade,
+    studentCount: count,
+    fullScore: full,
+    avg,
+    max: totals.length ? totals[totals.length - 1] : 0,
+    min: totals.length ? totals[0] : 0,
+    median,
+    stdDev: round1(Math.sqrt(variance)),
+    passRate,
+    excellentRate,
+    difficulty: Math.round((avg / full) * 100) / 100,
+    discrimination,
+    bands,
+    questions: questionsStat,
+    knowledge,
+    classes,
+    suggestions,
+  }
+}
+
+/* ================= 错题本 ================= */
+
+export const mistakes: MistakeEntry[] = []
+
+/** 从一场考试的错误率较高的题目里沉淀出错题（真实场景由阅卷结果自动入库） */
+function seedMistakes(): void {
+  const session = examSessions.find((row) => row.id === examSessions[0]?.id)
+  if (!session) return
+  const analysis = analyzePaper(session.id)
+  const answers = examAnswers.filter((row) => row.sessionId === session.id && row.status !== 'absent' && row.status !== 'cheat')
+  const reasons = MISTAKE_REASONS
+  for (const stat of analysis.questions.filter((row) => row.scoreRate < 0.72).slice(0, 8)) {
+    const wrong = answers.filter((row) => row.items.find((item) => item.questionId === stat.questionId)?.correct === false)
+    const sample = wrong[0]?.items.find((item) => item.questionId === stat.questionId)
+    const student = wrong[0]?.student ?? '班级共性'
+    mistakes.push({
+      id: ++mistakeSeq,
+      questionId: stat.questionId,
+      scope: wrong[0]?.className ?? CLASS_NAMES[0],
+      source: session.name,
+      student,
+      wrongAnswer: sample?.answer ?? '（错误选项）',
+      wrongCount: wrong.length,
+      reason: reasons[stat.qIndex % reasons.length],
+      mastery: stat.scoreRate < 0.45 ? 'weak' : 'improving',
+      practiced: 0,
+      note: '',
+      addedAt: nowStr(-20),
+      lastWrongAt: nowStr(-20),
+    })
+  }
+}
+seedMistakes()
+
+export function listMistakes(scope?: string): MistakeEntry[] {
+  return scope ? mistakes.filter((row) => row.scope === scope) : [...mistakes]
+}
+
+/** 错题涉及的班级 / 个人范围（列表筛选用） */
+export function mistakeScopes(): string[] {
+  return [...new Set(mistakes.map((row) => row.scope))]
+}
+
+export function saveMistake(input: Partial<MistakeEntry> & { questionId: number; scope: string }): MistakeEntry {
+  const question = questions.find((row) => row.id === input.questionId)
+  if (!question) throw new Error('题目不存在')
+  const isEdit = input.id != null
+  const item = isEdit ? mistakes.find((row) => row.id === input.id) : undefined
+  if (isEdit && !item) throw new Error('错题不存在')
+  const target =
+    item ??
+    ({
+      id: ++mistakeSeq,
+      questionId: input.questionId,
+      scope: input.scope,
+      source: input.source ?? '手动添加',
+      student: input.student,
+      wrongAnswer: '',
+      wrongCount: 1,
+      reason: '概念不清',
+      mastery: 'weak',
+      practiced: 0,
+      note: '',
+      addedAt: nowStr(),
+      lastWrongAt: nowStr(),
+    } as MistakeEntry)
+  Object.assign(target, {
+    scope: input.scope ?? target.scope,
+    source: input.source ?? target.source,
+    student: input.student ?? target.student,
+    wrongAnswer: input.wrongAnswer ?? target.wrongAnswer,
+    wrongCount: input.wrongCount ?? target.wrongCount,
+    reason: input.reason ?? target.reason,
+    mastery: input.mastery ?? target.mastery,
+    practiced: input.practiced ?? target.practiced,
+    note: input.note ?? target.note,
+    lastWrongAt: nowStr(),
+  })
+  if (!isEdit) mistakes.unshift(target)
+  return target
+}
+
+export function removeMistake(id: number): void {
+  const index = mistakes.findIndex((row) => row.id === id)
+  if (index < 0) throw new Error('错题不存在')
+  mistakes.splice(index, 1)
+}
+
+/** 掌握度：已掌握的错题从重练清单里移出，但保留在错题本里（便于复习） */
+export function setMistakeMastery(id: number, mastery: MistakeMastery): MistakeEntry {
+  const item = mistakes.find((row) => row.id === id)
+  if (!item) throw new Error('错题不存在')
+  item.mastery = mastery
+  if (mastery === 'mastered') item.practiced += 1
+  return item
+}
+
+/** 举一反三：同知识点、同题型的题目，排除原错题本身 */
+export function similarQuestions(mistakeId: number, limit = 4): OrgQuestion[] {
+  const item = mistakes.find((row) => row.id === mistakeId)
+  if (!item) throw new Error('错题不存在')
+  const base = questions.find((row) => row.id === item.questionId)
+  if (!base) return []
+  const pool = questions.filter(
+    (row) =>
+      row.id !== base.id &&
+      row.status === 'approved' &&
+      row.type === base.type &&
+      row.knowledge.some((k) => base.knowledge.includes(k)),
+  )
+  const byDifficulty = pool.filter((row) => row.difficulty === base.difficulty)
+  return [...byDifficulty, ...pool.filter((row) => !byDifficulty.includes(row))].slice(0, limit)
+}
+
+/**
+ * 生成错题重练：把勾选的错题原题 + 每道错题的同类题组成一份练习。
+ * 返回题目 id 列表，前端可直接送进组卷车或布置成作业。
+ */
+export function buildMistakeDrill(ids: number[], withSimilar = true): { name: string; questionIds: number[] } {
+  if (!ids.length) throw new Error('请先选择错题')
+  const picked = new Set<number>()
+  for (const id of ids) {
+    const item = mistakes.find((row) => row.id === id)
+    if (!item) continue
+    picked.add(item.questionId)
+    if (withSimilar) for (const row of similarQuestions(id, 2)) picked.add(row.id)
+    item.practiced += 1
+    if (item.mastery === 'weak') item.mastery = 'improving'
+  }
+  return { name: `错题重练 ${nowStr().slice(5, 16)}`, questionIds: [...picked] }
+}
+
+/* ================= 集体备课（协同教研） ================= */
+
+let prepSeq = 730
+let prepCommentSeq = 950
+let prepVersionSeq = 970
+
+export const prepTasks: PrepTask[] = []
+
+function seedPrep(input: Partial<PrepTask> & { id: number; name: string; docName: string }): PrepTask {
+  return {
+    subject: '数学',
+    grade: '高一',
+    requirement: { topic: '', goal: '', keyPoints: '', hardPoints: '', deadline: '', note: '' },
+    members: [],
+    comments: [],
+    versions: [],
+    status: 'ongoing',
+    owner: CURRENT.name,
+    updatedAt: nowStr(-10),
+    ...input,
+  } as PrepTask
+}
+
+prepTasks.push(
+  seedPrep({
+    id: ++prepSeq,
+    name: '函数的单调性 · 集体备课',
+    docKind: 'plan',
+    docName: '函数的单调性 · 教学设计（1 课时）',
+    subject: '数学',
+    grade: '高一',
+    status: 'review',
+    updatedAt: nowStr(-6),
+    requirement: {
+      topic: '函数的单调性（人教 A 版 必修一 第三章）',
+      goal: '学生会用定义与图像判断单调性，能求简单函数的单调区间',
+      keyPoints: '单调性的定义与图像特征',
+      hardPoints: '用定义证明单调性的书写规范',
+      deadline: nowStr(72).slice(0, 10),
+      note: '下周一组内试讲，请提前把过程设计发群里',
+    },
+    members: [
+      { name: '陈明远', duty: '教学目标与重难点', status: 'submitted', online: true, lastActive: nowStr(-1) },
+      { name: '李文博', duty: '教学过程设计', status: 'submitted', online: true, lastActive: nowStr(-3) },
+      { name: '孙悦', duty: '例题与作业选取', status: 'working', online: false, lastActive: nowStr(-26) },
+      { name: '王静', duty: '研讨与评课', status: 'pending', online: false, lastActive: nowStr(-70) },
+    ],
+    comments: [
+      { id: ++prepCommentSeq, author: '李文博', at: nowStr(-5), body: '导入建议用气温变化曲线，比课本的例子更直观。', target: '情境导入' },
+      { id: ++prepCommentSeq, author: '陈明远', at: nowStr(-4), body: '同意，另外定义证明那一步要给学生一个书写模板，否则会丢步骤分。', target: '新知探究' },
+      { id: ++prepCommentSeq, author: '孙悦', at: nowStr(-2), body: '例题我选了两道，一道基础一道变式，已经关联到教案里。', target: '巩固应用' },
+    ],
+    versions: [
+      { id: ++prepVersionSeq, no: 1, author: '陈明远', at: nowStr(-30), summary: '初稿：搭好三维目标与五个环节', snapshot: '' },
+      { id: ++prepVersionSeq, no: 2, author: '李文博', at: nowStr(-12), summary: '补充导入情境与探究问题链', snapshot: '' },
+      { id: ++prepVersionSeq, no: 3, author: '孙悦', at: nowStr(-5), summary: '替换例题，加入分层作业', snapshot: '' },
+    ],
+  }),
+  seedPrep({
+    id: ++prepSeq,
+    name: '集合的运算 · 集体备课',
+    docKind: 'guide',
+    docName: '集合与常用逻辑用语 · 导学案',
+    status: 'ongoing',
+    updatedAt: nowStr(-18),
+    requirement: {
+      topic: '集合的交、并、补运算',
+      goal: '学生能熟练进行集合运算并借助 Venn 图分析',
+      keyPoints: '交集、并集、补集的定义',
+      hardPoints: '含参数的集合运算',
+      deadline: nowStr(120).slice(0, 10),
+      note: '本次重点打磨导学案的预习任务',
+    },
+    members: [
+      { name: '孙悦', duty: '预习任务设计', status: 'working', online: false, lastActive: nowStr(-20) },
+      { name: '沈丽华', duty: '达标检测选题', status: 'pending', online: false, lastActive: nowStr(-90) },
+    ],
+    comments: [],
+    versions: [{ id: ++prepVersionSeq, no: 1, author: '孙悦', at: nowStr(-18), summary: '预习任务初稿', snapshot: '' }],
+  }),
+)
+
+export function listPrepTasks(): PrepTask[] {
+  return [...prepTasks]
+}
+
+export function getPrepTask(id: number): PrepTask {
+  const task = prepTasks.find((row) => row.id === id)
+  if (!task) throw new Error('备课任务不存在')
+  return task
+}
+
+export function savePrepTask(input: {
+  id?: number
+  name: string
+  subject: string
+  grade: string
+  docKind?: TeachDocKind
+  docId?: number
+  docName: string
+  requirement: PrepTask['requirement']
+  members: Array<Partial<PrepMember> & { name: string }>
+}): PrepTask {
+  if (input.name.trim().length < 2 || input.name.trim().length > 50) throw new Error('任务名称须为 2-50 字')
+  if (!input.members.length) throw new Error('请至少邀请一位参与教师')
+  const duties = input.members.map((row) => row.duty?.trim() ?? '')
+  if (duties.some((row) => !row)) throw new Error('每位参与教师都要写明分工')
+  if (new Set(duties).size !== duties.length) throw new Error('分工不能重复，一位教师负责一项')
+
+  const isEdit = input.id != null
+  const task = isEdit ? prepTasks.find((row) => row.id === input.id) : undefined
+  if (isEdit && !task) throw new Error('备课任务不存在')
+  const target =
+    task ??
+    seedPrep({
+      id: ++prepSeq,
+      name: input.name.trim(),
+      docName: input.docName,
+      versions: [{ id: ++prepVersionSeq, no: 1, author: CURRENT.name, at: nowStr(), summary: '创建任务（初稿）', snapshot: '' }],
+    })
+  Object.assign(target, {
+    name: input.name.trim(),
+    subject: input.subject,
+    grade: input.grade,
+    docKind: input.docKind,
+    docId: input.docId,
+    docName: input.docName,
+    requirement: { ...input.requirement },
+    members: input.members.map((row) => {
+      const old = task?.members.find((m) => m.name === row.name)
+      return {
+        name: row.name,
+        duty: (row.duty ?? '').trim(),
+        status: old?.status ?? 'pending',
+        online: old?.online ?? false,
+        lastActive: old?.lastActive ?? nowStr(),
+      } as PrepMember
+    }),
+    updatedAt: nowStr(),
+  })
+  if (!isEdit) {
+    prepTasks.unshift(target)
+    for (const member of target.members) {
+      if (member.name === CURRENT.name) continue
+      pushMessage({
+        tab: 'collab',
+        title: '集体备课邀请',
+        summary: `${CURRENT.name} 邀请你参与「${target.name}」，分工：${member.duty}`,
+        module: '集体备课',
+        link: `/prep?id=${target.id}`,
+      })
+    }
+  }
+  return target
+}
+
+export function addPrepComment(id: number, body: string, target: string): PrepTask {
+  const task = getPrepTask(id)
+  if (!body.trim()) throw new Error('研讨内容不能为空')
+  task.comments.push({ id: ++prepCommentSeq, author: CURRENT.name, at: nowStr(), body: body.trim(), target: target || '整体' })
+  task.updatedAt = nowStr()
+  if (task.status === 'draft' || task.status === 'ongoing') task.status = 'review'
+  return task
+}
+
+export function deletePrepComment(id: number, commentId: number): PrepTask {
+  const task = getPrepTask(id)
+  const index = task.comments.findIndex((row) => row.id === commentId)
+  if (index < 0) throw new Error('记录不存在')
+  task.comments.splice(index, 1)
+  return task
+}
+
+/** 提交一版：把当前正文快照存下来，便于后续对比与回退 */
+export function addPrepVersion(id: number, summary: string, snapshot: string): PrepTask {
+  const task = getPrepTask(id)
+  task.versions.push({
+    id: ++prepVersionSeq,
+    no: task.versions.length + 1,
+    author: CURRENT.name,
+    at: nowStr(),
+    summary: summary.trim() || '更新一版',
+    snapshot,
+  })
+  task.updatedAt = nowStr()
+  return task
+}
+
+/** 撤销到此版：把该版内容重新写回任务（版本线保留，可再撤销回来） */
+export function revertPrepVersion(id: number, versionId: number): { task: PrepTask; snapshot: string } {
+  const task = getPrepTask(id)
+  const version = task.versions.find((row) => row.id === versionId)
+  if (!version) throw new Error('版本不存在')
+  task.updatedAt = nowStr()
+  return { task, snapshot: version.snapshot }
+}
+
+/** 以所选版本替换当前内容：原版本标记为「已被替换」，仍可撤销回来 */
+export function replacePrepVersion(id: number, versionId: number): { task: PrepTask; snapshot: string; versions: PrepVersion[] } {
+  const task = getPrepTask(id)
+  const version = task.versions.find((row) => row.id === versionId)
+  if (!version) throw new Error('版本不存在')
+  const current = task.versions.filter((row) => !row.replaced).slice(-1)[0]
+  if (current && current.id !== version.id) current.replaced = true
+  task.updatedAt = nowStr()
+  return { task, snapshot: version.snapshot, versions: task.versions }
+}
+
+/** 我的分工提交 */
+export function submitPrepDuty(id: number, name: string): PrepTask {
+  const task = getPrepTask(id)
+  const member = task.members.find((row) => row.name === name)
+  if (!member) throw new Error('你不在本次备课任务中')
+  member.status = 'submitted'
+  member.lastActive = nowStr()
+  task.updatedAt = nowStr()
+  if (task.members.every((row) => row.status === 'submitted')) task.status = 'review'
+  return task
+}
+
+/** 定稿：发布到校内，任务关闭 */
+export function finalizePrepTask(id: number): PrepTask {
+  const task = getPrepTask(id)
+  const pending = task.members.filter((row) => row.status !== 'submitted')
+  if (pending.length) throw new Error(`还有 ${pending.length} 位教师未提交：${pending.map((row) => row.name).join('、')}`)
+  task.status = 'done'
+  task.updatedAt = nowStr()
+  return task
+}
+
+export function deletePrepTask(id: number): void {
+  const index = prepTasks.findIndex((row) => row.id === id)
+  if (index < 0) throw new Error('备课任务不存在')
+  toRecycle('讲义', prepTasks[index].name)
+  prepTasks.splice(index, 1)
+}
+
+/* ================= 校本资源库与审批流 ================= */
+
+let approvalSeq = 760
+
+export const approvals: ResourceApproval[] = [
+  {
+    id: ++approvalSeq,
+    kind: '教案',
+    name: '函数的单调性 · 教学设计（1 课时）',
+    subject: '数学',
+    grade: '高一',
+    scope: 'school',
+    applicant: '陈明远',
+    submittedAt: nowStr(-26),
+    status: 'approved',
+    reviewer: '沈丽华',
+    reviewedAt: nowStr(-25),
+    opinion: '环节完整，建议补充分层作业',
+    logs: [
+      { at: nowStr(-26), by: '陈明远', action: '提交审批', note: '申请进入校本资源库' },
+      { at: nowStr(-25), by: '沈丽华', action: '审批通过', note: '环节完整，建议补充分层作业' },
+    ],
+  },
+  {
+    id: ++approvalSeq,
+    kind: '课件',
+    name: '函数的奇偶性 · 授课课件',
+    subject: '数学',
+    grade: '高一',
+    scope: 'public',
+    applicant: '陈明远',
+    submittedAt: nowStr(-14),
+    status: 'pending',
+    logs: [{ at: nowStr(-14), by: '陈明远', action: '提交审批', note: '申请公开到知识广场' }],
+  },
+  {
+    id: ++approvalSeq,
+    kind: '试卷',
+    name: '2026 级高一数学期中测试卷',
+    subject: '数学',
+    grade: '高一',
+    scope: 'school',
+    applicant: '李文博',
+    submittedAt: nowStr(-9),
+    status: 'pending',
+    logs: [{ at: nowStr(-9), by: '李文博', action: '提交审批', note: '组内已校对，申请校本入库' }],
+  },
+  {
+    id: ++approvalSeq,
+    kind: '讲义',
+    name: '三角函数图像变换 · 基础讲义',
+    subject: '数学',
+    grade: '高一',
+    scope: 'school',
+    applicant: '孙悦',
+    submittedAt: nowStr(-40),
+    status: 'rejected',
+    reviewer: '沈丽华',
+    reviewedAt: nowStr(-39),
+    opinion: '例题解析过简，请补充分步解析后再提交',
+    logs: [
+      { at: nowStr(-40), by: '孙悦', action: '提交审批' },
+      { at: nowStr(-39), by: '沈丽华', action: '审批驳回', note: '例题解析过简，请补充分步解析后再提交' },
+    ],
+  },
+]
+
+export function listApprovals(status?: string): ResourceApproval[] {
+  return status ? approvals.filter((row) => row.status === status) : [...approvals]
+}
+
+/** 待我审批的数量（演示以当前用户为审批人） */
+export function approvalSummary(): { pending: number; approved: number; rejected: number } {
+  return {
+    pending: approvals.filter((row) => row.status === 'pending').length,
+    approved: approvals.filter((row) => row.status === 'approved').length,
+    rejected: approvals.filter((row) => row.status === 'rejected').length,
+  }
+}
+
+export function submitApproval(input: {
+  kind: ApprovalKind
+  name: string
+  subject: string
+  grade: string
+  scope: ResourceScope
+  note?: string
+}): ResourceApproval {
+  if (!input.name.trim()) throw new Error('请选择要提审的资源')
+  const item: ResourceApproval = {
+    id: ++approvalSeq,
+    kind: input.kind,
+    name: input.name.trim(),
+    subject: input.subject,
+    grade: input.grade,
+    scope: input.scope,
+    applicant: CURRENT.name,
+    submittedAt: nowStr(),
+    status: 'pending',
+    logs: [{ at: nowStr(), by: CURRENT.name, action: '提交审批', note: input.note }],
+  }
+  approvals.unshift(item)
+  return item
+}
+
+export function reviewApproval(id: number, pass: boolean, opinion: string): ResourceApproval {
+  const item = approvals.find((row) => row.id === id)
+  if (!item) throw new Error('审批单不存在')
+  if (item.status !== 'pending') throw new Error('该审批单已处理')
+  if (!pass && !opinion.trim()) throw new Error('驳回必须填写意见')
+  item.status = pass ? 'approved' : 'rejected'
+  item.reviewer = CURRENT.name
+  item.reviewedAt = nowStr()
+  item.opinion = opinion.trim()
+  item.logs.push({ at: nowStr(), by: CURRENT.name, action: pass ? '审批通过' : '审批驳回', note: opinion.trim() })
+  return item
+}
+
+/** 撤回：仅本人可撤回自己的待审单 */
+export function revokeApproval(id: number): void {
+  const index = approvals.findIndex((row) => row.id === id)
+  if (index < 0) throw new Error('审批单不存在')
+  if (approvals[index].status !== 'pending') throw new Error('已处理的审批单不能撤回')
+  approvals.splice(index, 1)
+}
+
+/* ================= 微课与视频切片 ================= */
+
+let clipSeq = 790
+
+export const videoClips: VideoClip[] = [
+  {
+    id: ++clipSeq,
+    mediaId: 609,
+    mediaName: '高一数学：函数的单调性与最值',
+    title: '单调性的定义解读',
+    start: 0,
+    end: 96,
+    knowledge: ['单调性', '函数性质'],
+    questionIds: [],
+    note: '对应教材 P27 定义，可作为课前预习素材',
+    createdBy: '陈明远',
+    createdAt: nowStr(-40),
+  },
+  {
+    id: ++clipSeq,
+    mediaId: 609,
+    mediaName: '高一数学：函数的单调性与最值',
+    title: '用定义证明单调性（例题）',
+    start: 96,
+    end: 268,
+    knowledge: ['单调性'],
+    questionIds: [],
+    note: '板书规范，建议截取进课件',
+    createdBy: '李文博',
+    createdAt: nowStr(-32),
+  },
+  {
+    id: ++clipSeq,
+    mediaId: 611,
+    mediaName: '立体几何：空间向量法求二面角',
+    title: '建系与坐标求解',
+    start: 120,
+    end: 340,
+    knowledge: ['空间向量', '二面角'],
+    questionIds: [],
+    note: '配合例题讲解效果最好',
+    createdBy: '陈明远',
+    createdAt: nowStr(-120),
+  },
+]
+
+export function listVideoClips(mediaId?: number): VideoClip[] {
+  return mediaId ? videoClips.filter((row) => row.mediaId === mediaId) : [...videoClips]
+}
+
+export function saveVideoClip(input: Partial<VideoClip> & { mediaId: number; title: string; start: number; end: number }): VideoClip {
+  if (!input.title.trim()) throw new Error('切片标题不能为空')
+  if (input.end <= input.start) throw new Error('结束时间须大于开始时间')
+  const media = mediaResources.find((row) => row.id === input.mediaId)
+  if (!media) throw new Error('视频不存在')
+  if (media.durationSec && input.end > media.durationSec) throw new Error(`超出视频总长（${Math.round(media.durationSec)} 秒）`)
+
+  const isEdit = input.id != null
+  const item = isEdit ? videoClips.find((row) => row.id === input.id) : undefined
+  if (isEdit && !item) throw new Error('切片不存在')
+  const target =
+    item ??
+    ({
+      id: ++clipSeq,
+      mediaId: input.mediaId,
+      mediaName: media.name,
+      title: input.title.trim(),
+      start: input.start,
+      end: input.end,
+      knowledge: [],
+      questionIds: [],
+      note: '',
+      createdBy: CURRENT.name,
+      createdAt: nowStr(),
+    } as VideoClip)
+  Object.assign(target, {
+    title: input.title.trim(),
+    start: input.start,
+    end: input.end,
+    knowledge: input.knowledge ?? target.knowledge,
+    questionIds: input.questionIds ?? target.questionIds,
+    note: input.note ?? target.note,
+  })
+  if (!isEdit) videoClips.unshift(target)
+  return target
+}
+
+export function deleteVideoClip(id: number): void {
+  const index = videoClips.findIndex((row) => row.id === id)
+  if (index < 0) throw new Error('切片不存在')
+  videoClips.splice(index, 1)
+}
+
+/* ================= 作业系统 ================= */
+
+let homeworkSeq = 830
+let submissionSeq = 4000
+
+export const homeworks: Homework[] = []
+export const submissions: HomeworkSubmission[] = []
+
+/** 生成提交记录：大部分按时提交，少量迟交与未交；错题自动进错题本 */
+function buildSubmissions(homework: Homework): void {
+  const rand = seeded(homework.id * 31 + 7)
+  const pool = questions.filter((row) => homework.questionIds.includes(row.id))
+  const full = pool.length || 1
+  for (const cls of ROSTER) {
+    if (!homework.classes.includes(cls.className)) continue
+    for (const student of cls.names) {
+      const roll = rand()
+      const status: HomeworkSubmission['status'] = roll < 0.08 ? 'missing' : roll < 0.18 ? 'late' : 'submitted'
+      if (status === 'missing') {
+        submissions.push({ id: ++submissionSeq, homeworkId: homework.id, student, className: cls.className, submittedAt: '—', status, wrongQuestionIds: [] })
+        continue
+      }
+      const ability = 0.45 + rand() * 0.5
+      const wrong: number[] = []
+      for (const q of pool) {
+        const factor = DIFF_FACTOR[q.difficulty] ?? 0.6
+        if (rand() > ability * factor * 1.15) wrong.push(q.id)
+      }
+      const correctRate = Math.round(((full - wrong.length) / full) * 100)
+      submissions.push({
+        id: ++submissionSeq,
+        homeworkId: homework.id,
+        student,
+        className: cls.className,
+        submittedAt: nowStr(status === 'late' ? -2 : -20 - Math.floor(rand() * 10)),
+        status,
+        score: correctRate,
+        correctRate,
+        wrongQuestionIds: wrong,
+      })
+    }
+  }
+  homework.total = submissions.filter((row) => row.homeworkId === homework.id).length
+  homework.submitted = submissions.filter((row) => row.homeworkId === homework.id && row.status !== 'missing').length
+}
+
+function seedHomework(input: Partial<Homework> & { id: number; name: string; questionIds: number[]; classes: string[] }): Homework {
+  const item: Homework = {
+    subject: '数学',
+    grade: '高一',
+    assignAt: nowStr(-48),
+    deadline: nowStr(-24),
+    require: '独立完成，写出关键步骤；错题订正后拍照上传',
+    status: 'closed',
+    submitted: 0,
+    total: 0,
+    owner: CURRENT.name,
+    updatedAt: nowStr(-24),
+    ...input,
+  } as Homework
+  homeworks.unshift(item)
+  buildSubmissions(item)
+  return item
+}
+
+/* 取一批已审核题目作为作业内容 */
+const homeworkPool = questions.filter((row) => row.status === 'approved').slice(0, 40).map((row) => row.id)
+seedHomework({
+  id: ++homeworkSeq,
+  name: '集合与函数 · 课后作业（第 3 次）',
+  questionIds: homeworkPool.slice(0, 8),
+  classes: [CLASS_NAMES[0], CLASS_NAMES[1]],
+  status: 'closed',
+  updatedAt: nowStr(-24),
+})
+seedHomework({
+  id: ++homeworkSeq,
+  name: '三角函数 · 当堂检测',
+  questionIds: homeworkPool.slice(8, 14),
+  classes: [CLASS_NAMES[0]],
+  status: 'ongoing',
+  assignAt: nowStr(-6),
+  deadline: nowStr(18),
+  updatedAt: nowStr(-6),
+})
+
+export function listHomeworks(): Homework[] {
+  return [...homeworks]
+}
+
+export function saveHomework(input: {
+  id?: number
+  name: string
+  subject: string
+  grade: string
+  paperId?: number
+  questionIds: number[]
+  classes: string[]
+  deadline: string
+  require: string
+}): Homework {
+  if (input.name.trim().length < 2 || input.name.trim().length > 50) throw new Error('作业名称须为 2-50 字')
+  if (!input.questionIds.length) throw new Error('请至少选择一道题目')
+  if (!input.classes.length) throw new Error('请至少选择一个班级')
+  if (!input.deadline) throw new Error('请选择截止时间')
+
+  const isEdit = input.id != null
+  const item = isEdit ? homeworks.find((row) => row.id === input.id) : undefined
+  if (isEdit && !item) throw new Error('作业不存在')
+  const target =
+    item ??
+    ({
+      id: ++homeworkSeq,
+      assignAt: nowStr(),
+      status: 'ongoing',
+      submitted: 0,
+      total: 0,
+      owner: CURRENT.name,
+    } as Homework)
+  Object.assign(target, {
+    name: input.name.trim(),
+    subject: input.subject,
+    grade: input.grade,
+    paperId: input.paperId,
+    paperName: input.paperId ? papers.find((row) => row.id === input.paperId)?.name : undefined,
+    questionIds: [...input.questionIds],
+    classes: [...input.classes],
+    deadline: input.deadline,
+    require: input.require,
+    updatedAt: nowStr(),
+  })
+  if (!isEdit) {
+    homeworks.unshift(target)
+    buildSubmissions(target)
+    /* 有学生交了才算「进行中」，一次都没交就还是「已布置」 */
+    target.status = target.submitted > 0 ? 'ongoing' : 'assigned'
+  } else {
+    target.submitted = submissions.filter((row) => row.homeworkId === target.id && row.status !== 'missing').length
+    target.total = submissions.filter((row) => row.homeworkId === target.id).length
+  }
+  return target
+}
+
+export function listSubmissions(homeworkId: number): HomeworkSubmission[] {
+  return submissions.filter((row) => row.homeworkId === homeworkId)
+}
+
+/** 批阅：打分 + 评语；同时把本份作业的错题沉淀进错题本 */
+export function gradeSubmission(id: number, score: number, comment: string): HomeworkSubmission {
+  const item = submissions.find((row) => row.id === id)
+  if (!item) throw new Error('提交记录不存在')
+  if (score < 0 || score > 100) throw new Error('分数须在 0 ~ 100 之间')
+  item.score = score
+  item.comment = comment
+  const homework = homeworks.find((row) => row.id === item.homeworkId)
+  if (homework) homework.updatedAt = nowStr()
+
+  for (const qid of item.wrongQuestionIds) {
+    if (mistakes.some((row) => row.questionId === qid && row.scope === item.className)) continue
+    mistakes.unshift({
+      id: ++mistakeSeq,
+      questionId: qid,
+      scope: item.className,
+      source: homework?.name ?? '课后作业',
+      student: item.student,
+      wrongAnswer: '',
+      wrongCount: 1,
+      reason: '概念不清',
+      mastery: 'weak',
+      practiced: 0,
+      note: '',
+      addedAt: nowStr(),
+      lastWrongAt: nowStr(),
+    })
+  }
+  return item
+}
+
+export function closeHomework(id: number): Homework {
+  const item = homeworks.find((row) => row.id === id)
+  if (!item) throw new Error('作业不存在')
+  item.status = 'closed'
+  item.updatedAt = nowStr()
+  return item
+}
+
+export function deleteHomework(id: number): void {
+  const index = homeworks.findIndex((row) => row.id === id)
+  if (index < 0) throw new Error('作业不存在')
+  toRecycle('作业', homeworks[index].name)
+  homeworks.splice(index, 1)
+  const rest = submissions.filter((row) => row.homeworkId !== id)
+  submissions.splice(0, submissions.length, ...rest)
 }

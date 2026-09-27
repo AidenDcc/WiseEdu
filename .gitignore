@@ -8,3 +8,7 @@ dist/
 .idea/
 coverage/
 *.tsbuildinfo
+doc/_build/*
+# Office 临时锁文件
+~$*
+.~*

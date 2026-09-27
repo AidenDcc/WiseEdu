@@ -19,7 +19,7 @@ const STORAGE_KEY = 'aiteach.compose-basket'
 const SAVED_KEY = 'aiteach.compose-basket-saved'
 
 /** 加车来源：决定抽屉里怎么分组说明，也便于排查「这题从哪来的」 */
-export type BasketSource = 'search' | 'pool' | 'knowledge' | 'sync' | 'paper'
+export type BasketSource = 'search' | 'pool' | 'knowledge' | 'sync' | 'paper' | 'blueprint'
 
 export interface BasketEntry {
   questionId: number
@@ -27,7 +27,16 @@ export interface BasketEntry {
   source: BasketSource
   /** 指定大题名（同步练习按课时组卷）；缺省时生成试卷即按题型自动归类 */
   sectionTitle?: string
+  /**
+   * 加入顺序（单调递增）。排序功能会重排数组，而「恢复加入顺序」需要知道最初的先后，
+   * 数组下标做不到这件事——排序后再按下标排只会得到当前的顺序。
+   * 老数据没有这个字段，恢复顺序时按「无 seq 的排在前面、保持相对次序」处理。
+   */
+  seq?: number
 }
+
+/** 加入顺序计数器：只增不减，删题也不回收，避免复用同一个 seq */
+let seqCursor = 1
 
 function read(): BasketEntry[] {
   try {
@@ -57,6 +66,10 @@ function readSaved(): number[] {
 const entries = ref<BasketEntry[]>(read())
 /** 已保存过的试卷 id：避免同一车题反复生成重复试卷，仅作提示用 */
 const savedPaperIds = ref<number[]>(readSaved())
+
+/* 历史数据里可能已有 seq（本页刷新），把游标推到最大值之后，
+   否则新加的题会从 1 重新开始编号，与旧题撞号，「恢复加入顺序」就排不出真正的先后。 */
+seqCursor = entries.value.reduce((max, row) => Math.max(max, row.seq ?? 0), 0) + 1
 
 watch(
   entries,
@@ -102,6 +115,7 @@ export function useComposeBasket() {
       score: score ?? defaultScore(row.type),
       source,
       sectionTitle,
+      seq: seqCursor++,
     })
     return true
   }
@@ -121,6 +135,7 @@ export function useComposeBasket() {
         score: score ?? defaultScore(row.type),
         source,
         sectionTitle,
+        seq: seqCursor++,
       })
       added += 1
     }
@@ -141,6 +156,7 @@ export function useComposeBasket() {
           score: Number(item.score) || 0,
           source: 'paper',
           sectionTitle: section.title,
+          seq: seqCursor++,
         })
         added += 1
       }
@@ -162,6 +178,59 @@ export function useComposeBasket() {
   function setScore(questionId: number, score: number) {
     const target = entries.value.find((row) => row.questionId === questionId)
     if (target) target.score = score
+  }
+
+  /** 批量改分：只动传入的这批题，其余分值不动 */
+  function setScoreMany(questionIds: number[], score: number) {
+    const targets = new Set(questionIds)
+    entries.value.forEach((row) => {
+      if (targets.has(row.questionId)) row.score = score
+    })
+  }
+
+  /**
+   * 把某题挪到指定下标（拖拽排序）。
+   * 用的是**整表重排**而不是交换相邻两项：组卷车最终由 `buildSections` 按题型归大题，
+   * 大题内的题序 = 条目在表中的相对次序，所以只要改相对次序就等价于改卷面顺序，
+   * 不需要理解「跨大题拖动」这种概念。
+   */
+  function move(fromIndex: number, toIndex: number) {
+    const rows = [...entries.value]
+    if (fromIndex < 0 || fromIndex >= rows.length) return
+    const [row] = rows.splice(fromIndex, 1)
+    const target = Math.max(0, Math.min(rows.length, toIndex))
+    rows.splice(target, 0, row)
+    entries.value = rows
+  }
+
+  /** 按题目 id 版本（拖拽时手上只有 id） */
+  function moveById(questionId: number, toIndex: number) {
+    move(entries.value.findIndex((row) => row.questionId === questionId), toIndex)
+  }
+
+  /**
+   * 按给定题目顺序重排（自动排序）。
+   * order 里没出现的题（理论上不会，防御用）保持原相对次序追加在末尾，绝不静默丢题。
+   */
+  function applyOrder(order: number[]) {
+    const remaining = new Map(entries.value.map((row) => [row.questionId, row]))
+    const next: BasketEntry[] = []
+    order.forEach((id) => {
+      const row = remaining.get(id)
+      if (row) {
+        next.push(row)
+        remaining.delete(id)
+      }
+    })
+    remaining.forEach((row) => next.push(row))
+    entries.value = next
+  }
+
+  /** 恢复加入顺序：按 seq 升序，没有 seq 的历史数据视为最早加入 */
+  function orderByAdded(): number[] {
+    return [...entries.value]
+      .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))
+      .map((row) => row.questionId)
   }
 
   function clear() {
@@ -200,6 +269,11 @@ export function useComposeBasket() {
     remove,
     toggle,
     setScore,
+    setScoreMany,
+    move,
+    moveById,
+    applyOrder,
+    orderByAdded,
     clear,
     toSections,
     toSessionBasket,

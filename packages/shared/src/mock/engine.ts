@@ -63,10 +63,31 @@ export async function dispatchMock<T>(
     query,
     path: path.split('?')[0],
   })
-  /* 列表响应做浅拷贝：直接返回 store 的数组时，视图里 `list.value = await fetch()` 前后是
-     同一个引用，Vue 判定未变化而不触发更新 —— 表现为「新增/上传/组卷成功但列表不刷新」。
-     浅拷贝只换数组身份、保留元素引用，既能触发更新又不改变既有的写穿语义。 */
-  return (Array.isArray(result) ? [...result] : result) as T
+  return detach(result) as T
+}
+
+/**
+ * 把响应与 store 里的活对象脱钩。
+ *
+ * 直接返回 store 里的数组 / 对象时，视图里 `x.value = await fetch()` 前后是同一个引用，
+ * Vue 判定「未变化」而不触发更新 —— 轻则表现为「新增/上传/组卷成功但列表不刷新」，
+ * 重则更隐蔽：对象身份没变 → 依赖它的 computed（卷面题数、总分…）缓存不失效，于是
+ * 同一屏里「模板函数重算」的部分已经刷新、「computed 缓存」的部分还是旧值，
+ * 出现自相矛盾的两个数字（协同组卷抽题后就遇到过：题型进度 7/8，头部却仍写「共 3 题」）。
+ *
+ * 数组浅拷贝（换身份、保留元素引用）够用；对象必须**深**拷贝 —— 像 `{ task, paper }`
+ * 这种包装响应，浅拷贝只换了最外层，里面的 `paper` 仍是 store 里的同一个活对象，
+ * 视图 `paper.value = res.paper` 依旧触发不了更新。
+ */
+function detach<T>(result: unknown): T {
+  if (Array.isArray(result)) return [...result] as T
+  if (result === null || typeof result !== 'object') return result as T
+  try {
+    return structuredClone(result) as T
+  } catch {
+    /* 响应里混入了不可结构化克隆的值（函数 / 类实例）时退回浅拷贝，至少保住引用刷新 */
+    return { ...(result as Record<string, unknown>) } as T
+  }
 }
 
 function parseQuery(path: string): Record<string, string> {

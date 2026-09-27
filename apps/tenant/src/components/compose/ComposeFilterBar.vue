@@ -66,7 +66,12 @@ function pickSubject(subject: string) {
 const hasAny = computed(
   () =>
     Boolean(props.filter.grade || props.filter.subject || props.filter.difficulty) ||
-    props.filter.types.length > 0,
+    props.filter.types.length > 0 ||
+    /* 来源 / 只看收藏 / 排除已选在试题页签的工具行里，重置按钮也要认它们，
+       否则勾了「只看收藏」却找不到「重置筛选」，只能手动一项项取消 */
+    Boolean(props.filter.source) ||
+    props.filter.onlyFavorites ||
+    props.filter.excludePicked,
 )
 </script>
 

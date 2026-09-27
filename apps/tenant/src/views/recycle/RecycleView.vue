@@ -10,6 +10,13 @@ type TabKey = RecycleItem['kind']
 const TABS: Array<{ key: TabKey; label: string }> = [
   { key: '题目', label: '题目' },
   { key: '试卷', label: '试卷' },
+  { key: '协同组卷任务', label: '协同组卷' },
+  { key: '讲义', label: '讲义' },
+  { key: '课件', label: '课件' },
+  { key: '教案', label: '教案' },
+  { key: '学案', label: '学案' },
+  { key: '集体备课', label: '集体备课' },
+  { key: '作业', label: '作业' },
   { key: '教辅', label: '教辅' },
   { key: '文件', label: '文件' },
 ]

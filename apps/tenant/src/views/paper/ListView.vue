@@ -8,6 +8,7 @@ import AppPagination from '@/components/ui/AppPagination.vue'
 import PaperPreviewModal from '@/components/paper/PaperPreviewModal.vue'
 import { aiComposePaper, deletePaper, fetchPapers, fetchQuestions, generateParallels, savePaper } from '@/api/org'
 import { useBaseData } from '@/composables/useBaseData'
+import { exportPaperDoc, exportPaperPdf, type ExportVersion } from '@/utils/paper-export'
 
 const router = useRouter()
 
@@ -124,8 +125,41 @@ async function onSubmit(row: OrgPaper) {
   }
 }
 
-function onExport(row: OrgPaper) {
-  showToast(`《${row.name}》导出任务已创建（Word/PDF），稍后到消息中心下载`, 'success')
+/* ===== 导出 =====
+ * 不再走「创建导出任务」的占位：试卷数据本来就在前端，直接生成文档即可。
+ * 版本（学生版 / 教师版 / 纯答案）必须让老师选——把带答案的教师版误发给学生是实打实的教学事故，
+ * 所以不做「默认给最全的」这种省事的决定。
+ */
+const exportTarget = ref<OrgPaper | null>(null)
+const exportVersion = ref<ExportVersion>('student')
+const exportWithCard = ref(true)
+
+function openExport(row: OrgPaper) {
+  exportTarget.value = row
+  exportVersion.value = 'student'
+  exportWithCard.value = row.sections.some((section) => section.questions.length > 0)
+}
+
+function doExport(kind: 'doc' | 'pdf') {
+  const paper = exportTarget.value
+  if (!paper) return
+  if (totalCount(paper) === 0) {
+    showToast('该试卷还没有题目，无法导出', 'error')
+    return
+  }
+  const options = { version: exportVersion.value, withInfo: true, withAnswerCard: exportWithCard.value }
+  try {
+    if (kind === 'doc') {
+      const fileName = exportPaperDoc(paper, questions.value, options)
+      showToast(`已导出 ${fileName}`, 'success')
+    } else {
+      exportPaperPdf(paper, questions.value, options)
+      showToast('已在新窗口打开，选择「另存为 PDF」即可', 'success')
+    }
+    exportTarget.value = null
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '导出失败', 'error')
+  }
 }
 
 async function onDelete(row: OrgPaper) {
@@ -149,7 +183,7 @@ onMounted(load)
         <button class="btn btn-ghost" @click="aiOpen = true">
           <AppIcon name="sparkles" :size="15" /> AI 智能组卷
         </button>
-        <button class="btn btn-ghost" @click="showToast('细目表组卷（双向细目表模式）开发中，敬请期待')">
+        <button class="btn btn-ghost" @click="router.push('/paper/compose?tab=blueprint')">
           <AppIcon name="grid" :size="15" /> 细目表组卷
         </button>
       </div>
@@ -198,11 +232,11 @@ onMounted(load)
               <td>{{ row.updatedAt }}</td>
               <td>
                 <div class="op-group">
-                  <button v-if="row.status === 'draft' || row.status === 'rejected'" class="mini-btn" @click="router.push(`/paper/collab?id=${row.id}`)">编辑</button>
+                  <button v-if="row.status === 'draft' || row.status === 'rejected'" class="mini-btn" @click="router.push(`/paper/edit?id=${row.id}`)">编辑</button>
                   <button class="mini-btn" @click="preview = row">预览</button>
                   <button v-if="row.status === 'draft' || row.status === 'rejected'" class="mini-btn success" @click="onSubmit(row)">提交审核</button>
                   <button v-if="row.status === 'approved'" class="mini-btn" @click="openParallel(row)">平行卷</button>
-                  <button class="mini-btn" @click="onExport(row)">导出</button>
+                  <button class="mini-btn" @click="openExport(row)">导出</button>
                   <button class="mini-btn danger" @click="onDelete(row)">删除</button>
                 </div>
               </td>
@@ -273,6 +307,34 @@ onMounted(load)
       </template>
     </AppModal>
 
+    <!-- 导出弹窗：版本必须显式选，避免把带答案的教师版误发给学生 -->
+    <AppModal v-if="exportTarget" title="导出试卷" :width="460" @close="exportTarget = null">
+      <p style="font-size: 13.5px; color: var(--ink-2); margin-bottom: 12px">
+        《{{ exportTarget.name }}》· {{ totalCount(exportTarget) }} 题 · {{ totalScore(exportTarget) }} 分
+      </p>
+      <div class="f-field">
+        <label class="f-label">卷面版本</label>
+        <select v-model="exportVersion" class="f-select">
+          <option value="student">学生版（只有题目，解答题留作答空白）</option>
+          <option value="teacher">教师版（附答案与解析）</option>
+          <option value="answer">纯答案页</option>
+        </select>
+      </div>
+      <label class="f-check">
+        <input v-model="exportWithCard" type="checkbox" />
+        附带答题卡参考答案
+      </label>
+      <template #footer>
+        <button class="btn btn-ghost" @click="exportTarget = null">取消</button>
+        <button class="btn btn-ghost" @click="doExport('doc')">
+          <AppIcon name="download" :size="14" /> 导出 Word
+        </button>
+        <button class="btn btn-primary" @click="doExport('pdf')">
+          <AppIcon name="print" :size="14" /> 导出 PDF
+        </button>
+      </template>
+    </AppModal>
+
     <!-- 整卷预览：弹窗按真实纸张（8K/A3/16K…）自动分版排版，可切换排版样式、答题卡 -->
     <PaperPreviewModal v-if="preview" :paper="preview" :questions="questions" @close="preview = null" />
   </div>
@@ -281,4 +343,14 @@ onMounted(load)
 <style scoped>
 .struct-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.f-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+  user-select: none;
+}
+.f-check input { accent-color: var(--brand); }
 </style>

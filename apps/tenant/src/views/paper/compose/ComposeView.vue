@@ -11,9 +11,11 @@
  * 组卷车是模块级单例（`useComposeBasket`），页签、抽屉、本页 FAB 共享同一份计数。
  */
 import { computed, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { AppIcon, showToast } from '@aiteach/shared'
 import { useComposeBasket } from '@/composables/useComposeBasket'
 import { useComposeData } from '@/composables/useComposeData'
+import { useQuestionFavorites } from '@/composables/useQuestionFavorites'
 import { useBaseData } from '@/composables/useBaseData'
 import ComposeSearchBar from '@/components/compose/ComposeSearchBar.vue'
 import ComposeBasketPanel from '@/components/compose/ComposeBasketPanel.vue'
@@ -24,6 +26,7 @@ import MaterialsTab from './tabs/MaterialsTab.vue'
 import MediaGridTab from './tabs/MediaGridTab.vue'
 import KnowledgeTab from './tabs/KnowledgeTab.vue'
 import SyncTab from './tabs/SyncTab.vue'
+import BlueprintTab from './tabs/BlueprintTab.vue'
 import {
   COMPOSE_TABS,
   defaultComposeFilter,
@@ -32,6 +35,7 @@ import {
   matchesPaperFilter,
   matchesQuestionFilter,
   type ComposeFilter,
+  type QuestionFilterContext,
   type TabKey,
 } from './types'
 
@@ -40,9 +44,24 @@ const basket = useComposeBasket()
    页签直接取用自己那一份，不必各自过滤。 */
 const { questions, papers, materials, videos, animations, images, questionOf, ensure } = useComposeData()
 const { ensure: ensureBase, defaultTextbook } = useBaseData()
+const favorites = useQuestionFavorites()
 
+/**
+ * 页签角标必须与页签列表**同一口径**，否则「页签写着 8 条、点进去只有 3 条」会被当成丢数据。
+ * 「只看收藏 / 排除已选」依赖 id 集合，故这里也要带上同一份 context。
+ */
+const filterCtx = computed<QuestionFilterContext>(() => ({
+  favorites: favorites.set.value,
+  picked: basket.ids.value,
+}))
+
+const route = useRoute()
 const filter = ref<ComposeFilter>(defaultComposeFilter())
-const activeTab = ref<TabKey>('questions')
+/** 允许从别处直达某个页签（试卷库的「细目表组卷」按钮带 `?tab=blueprint`）。
+ *  只认 COMPOSE_TABS 里存在的 key：拼错的 query 不该落到空白页。 */
+const activeTab = ref<TabKey>(
+  COMPOSE_TABS.find((tab) => tab.key === route.query.tab)?.key ?? 'questions',
+)
 const basketOpen = ref(false)
 const paperOpen = ref(false)
 
@@ -79,7 +98,15 @@ function countFor(key: TabKey): number {
   switch (key) {
     case 'questions':
     case 'knowledge':
-      return questions.value.filter((row) => matchesQuestionFilter(row, current)).length
+      return questions.value.filter((row) => matchesQuestionFilter(row, current, filterCtx.value)).length
+    /* 细目表角标 = 当前年级学科下**可抽的题池大小**：这一页的产出取决于池子有多大，
+       而不是「当前关键词命中几道」——细目表是按知识点抽题，不读关键词。
+       但「只看收藏 / 排除已选」仍要尊重，否则角标会与页签里的可选池对不上。 */
+    case 'blueprint':
+      return questions.value.filter(
+        (row) =>
+          matchesQuestionFilter(row, { ...current, keyword: '', types: [], knowledge: [] }, filterCtx.value),
+      ).length
     case 'papers':
       return papers.value.filter((row) => matchesPaperFilter(row, current, questionOf)).length
     case 'materials':
@@ -198,6 +225,7 @@ function onPaperSaved() {
       <MediaGridTab v-else-if="activeTab === 'images'" :filter="filter" kind="image" @patch="patch" @find-similar="findSimilar" />
       <KnowledgeTab v-else-if="activeTab === 'knowledge'" :filter="filter" @patch="patch" @find-similar="findSimilar" />
       <SyncTab v-else-if="activeTab === 'sync'" :filter="filter" @patch="patch" @find-similar="findSimilar" />
+      <BlueprintTab v-else-if="activeTab === 'blueprint'" :filter="filter" />
     </main>
 
     <!-- 组卷车浮动按钮：抽屉关着时的常驻入口 -->

@@ -18,7 +18,23 @@ export interface ComposeFilter {
   knowledge: string[]
   /** 是否包含未入库（待审/驳回）题目。默认关，与协同组卷选题池「仅已入库可入卷」口径一致 */
   includeUnapproved: boolean
+  /** 题目来源（手动录入 / AI 出题 / 拍照识别…），空 = 不限 */
+  source: string
+  /** 只看收藏：教师长期积累的好题，跨卷复用 */
+  onlyFavorites: boolean
+  /** 排除已在组卷车中的题目：避免同一道题被加两次（加车时会拦，但列表里先藏掉更省事） */
+  excludePicked: boolean
 }
+
+/** 题目来源候选，与 `QuestionSource` 同值域（此处不引类型，避免筛选模型绑死后端枚举） */
+export const QUESTION_SOURCES = [
+  '手动录入',
+  'AI 出题',
+  'AI 变式',
+  '拍照识别',
+  '文档导入',
+  '教辅导入',
+] as const
 
 export type TabKey =
   | 'questions'
@@ -29,6 +45,7 @@ export type TabKey =
   | 'images'
   | 'knowledge'
   | 'sync'
+  | 'blueprint'
 
 export interface ComposeTab {
   key: TabKey
@@ -51,6 +68,7 @@ export const COMPOSE_TABS: ComposeTab[] = [
   { key: 'images', label: '图片', icon: 'image', group: 'resource' },
   { key: 'knowledge', label: '知识点组卷', icon: 'branch', group: 'compose' },
   { key: 'sync', label: '同步练习组卷', icon: 'list-ol', group: 'compose' },
+  { key: 'blueprint', label: '细目表组卷', icon: 'grid', group: 'compose' },
 ]
 
 export function defaultComposeFilter(): ComposeFilter {
@@ -62,6 +80,9 @@ export function defaultComposeFilter(): ComposeFilter {
     types: [],
     knowledge: [],
     includeUnapproved: false,
+    source: '',
+    onlyFavorites: false,
+    excludePicked: false,
   }
 }
 
@@ -75,17 +96,35 @@ export function hitKeyword(keyword: string, ...fields: Array<string | string[] |
 }
 
 /**
+ * 「只看收藏」与「排除已选」依赖题目 id 集合，而集合来自组卷车 / 收藏夹这类单例状态，
+ * 不属于筛选条件本身，故作为**可选上下文**传入而不是塞进 `ComposeFilter`——
+ * 否则筛选条件里会出现一组与「搜什么」无关的 id，重置筛选时还得记得清它。
+ */
+export interface QuestionFilterContext {
+  favorites?: ReadonlySet<number>
+  picked?: ReadonlySet<number>
+}
+
+/**
  * 题目是否命中当前筛选。
  *
  * 题干是富文本（公式、配图），比对前必须转纯文本 —— 否则搜「函数」会漏掉带公式的题干。
  */
-export function matchesQuestionFilter(row: OrgQuestion, filter: ComposeFilter): boolean {
+export function matchesQuestionFilter(
+  row: OrgQuestion,
+  filter: ComposeFilter,
+  ctx?: QuestionFilterContext,
+): boolean {
   if (!filter.includeUnapproved && row.status !== 'approved') return false
   if (filter.subject && row.subject !== filter.subject) return false
   if (filter.grade && row.grade !== filter.grade) return false
   if (filter.difficulty && row.difficulty !== filter.difficulty) return false
   if (filter.types.length && !filter.types.includes(row.type)) return false
   if (filter.knowledge.length && !row.knowledge.some((tag) => filter.knowledge.includes(tag))) return false
+  if (filter.source && row.source !== filter.source) return false
+  /* 上下文缺失时（如某些只读场景）这两条直接放行，而不是把题全滤掉 */
+  if (filter.onlyFavorites && ctx?.favorites && !ctx.favorites.has(row.id)) return false
+  if (filter.excludePicked && ctx?.picked?.has(row.id)) return false
   return hitKeyword(filter.keyword, toPlainText(row.stem), row.knowledge, row.type, row.answer)
 }
 

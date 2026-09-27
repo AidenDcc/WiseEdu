@@ -32,8 +32,21 @@ import {
   type PaperSizeKey,
 } from './paper-layouts'
 import { paginateBlocks, type PaperPage } from './paginate'
+import { exportPaperDoc, exportPaperPdf, type ExportOptions, type ExportVersion } from '@/utils/paper-export'
 
-const props = defineProps<{ paper: OrgPaper; questions: OrgQuestion[] }>()
+const props = defineProps<{
+  paper: OrgPaper
+  questions: OrgQuestion[]
+  /**
+   * 从「试卷编辑」页带过来的初始版式：编辑页的全文设置里已经选好了纸张/样式/内容，
+   * 点预览时若仍回到默认值，用户就得再选一遍，且看到的版式与刚才编辑的不是一回事。
+   */
+  initialSize?: PaperSizeKey
+  initialLayout?: string
+  initialMode?: PaperMode
+  initialOrientation?: PaperOrientation
+  initialPanels?: number
+}>()
 const emit = defineEmits<{ close: [] }>()
 
 /* ===== 排版设置 ===== */
@@ -41,12 +54,12 @@ const emit = defineEmits<{ close: [] }>()
 /** 卷面内容：只印试卷 / 只印答题卡 / 两者都印 */
 type PaperMode = 'paper' | 'card' | 'both'
 
-const layoutKey = ref(PAPER_LAYOUTS[0].key)
-const sizeKey = ref<PaperSizeKey>('A4')
-const orientation = ref<PaperOrientation>('portrait')
+const layoutKey = ref(props.initialLayout ?? PAPER_LAYOUTS[0].key)
+const sizeKey = ref<PaperSizeKey>(props.initialSize ?? 'A4')
+const orientation = ref<PaperOrientation>(props.initialOrientation ?? 'portrait')
 /** 版数覆盖：0 = 按纸张习惯版数（8K / A3 一面两版） */
-const panelPick = ref(0)
-const mode = ref<PaperMode>('paper')
+const panelPick = ref(props.initialPanels ?? 0)
+const mode = ref<PaperMode>(props.initialMode ?? 'paper')
 /** 教师版：题目后附答案与解析、答题卡标出正确选项（打印前记得关掉） */
 const teacher = ref(false)
 const zoom = ref(1)
@@ -385,6 +398,47 @@ function onPrint() {
   window.print()
 }
 
+/* ===== 导出（Word / PDF） =====
+ * 预览里的「打印」打的是**当前这个按真实纸面分好版的 DOM**，适合所见即所得地印出来；
+ * 而「导出」是从试卷数据重新生成一份干净的打印文档，适合拿去二次编辑或发给别人。
+ * 两者不是一回事，所以按钮并列而不是互相替代。
+ */
+
+const exportVersion = ref<ExportVersion>('student')
+
+/** 「教师版」开关与导出版本联动：开着就默认导出教师版。用户手动改过之后以手动为准，
+ *  故用 watch 而不是让两者共用一个 state —— 共用的话关掉开关会把纯答案版一起切走。 */
+watch(teacher, (value) => {
+  exportVersion.value = value ? 'teacher' : 'student'
+})
+
+function buildExportOptions(): ExportOptions {
+  return {
+    version: exportVersion.value,
+    withInfo: true,
+    /* 预览里选了「含答题卡」就一起导出，避免预览有、导出没有 */
+    withAnswerCard: mode.value !== 'paper',
+  }
+}
+
+function onExport(kind: 'doc' | 'pdf') {
+  if (totalCount.value === 0) {
+    showToast('该试卷还没有题目，无法导出', 'error')
+    return
+  }
+  try {
+    if (kind === 'doc') {
+      const fileName = exportPaperDoc(props.paper, props.questions, buildExportOptions())
+      showToast(`已导出 ${fileName}`)
+    } else {
+      exportPaperPdf(props.paper, props.questions, buildExportOptions())
+      showToast('已在新窗口打开，选择「另存为 PDF」即可')
+    }
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '导出失败', 'error')
+  }
+}
+
 onMounted(async () => {
   document.addEventListener('keydown', onKeydown)
   /* 预览期间锁背景滚动 */
@@ -437,7 +491,20 @@ onBeforeUnmount(() => {
             <span class="pp-chip">
               <AppIcon name="file" :size="14" /> {{ size.name }} · 一面 {{ geo.panels }} 版 · 共 {{ sheets.length }} 页
             </span>
-            <button class="btn btn-primary btn-sm" @click="onPrint"><AppIcon name="print" :size="15" /> 打印 / 导出 PDF</button>
+            <select v-model="exportVersion" class="pp-exp" title="导出的卷面版本">
+              <option value="student">学生版</option>
+              <option value="teacher">教师版</option>
+              <option value="answer">纯答案</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" type="button" @click="onExport('doc')">
+              <AppIcon name="download" :size="14" /> 导出 Word
+            </button>
+            <button class="btn btn-primary btn-sm" type="button" @click="onExport('pdf')">
+              <AppIcon name="print" :size="14" /> 导出 PDF
+            </button>
+            <button class="btn btn-ghost btn-sm" type="button" title="按当前分好的版式直接打印" @click="onPrint">
+              <AppIcon name="print" :size="14" /> 打印版式
+            </button>
             <button class="pp-x" type="button" @click="emit('close')"><AppIcon name="close" :size="16" /></button>
           </div>
         </header>
@@ -654,6 +721,17 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   padding: 4px 11px;
 }
+/* 导出版本选择：比按钮矮一号，避免顶栏按钮多到换行 */
+.pp-exp {
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  padding: 0 6px;
+}
+.pp-exp:focus { border-color: var(--brand); outline: none; }
 .pp-x {
   width: 30px;
   height: 30px;

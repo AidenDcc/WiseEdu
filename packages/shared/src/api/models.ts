@@ -486,6 +486,95 @@ export interface OrgPaper {
   dynamics?: Array<{ time: string; actor: string; action: string }>
 }
 
+/* ================ 协同组卷（FR-PP-004 ~ 007 / 017 ~ 021） ================ */
+
+/** 任务状态：收题中 → 待审校 → 已完成 */
+export type CollabTaskStatus = 'collecting' | 'reviewing' | 'done'
+
+export const COLLAB_STATUS_TEXT: Record<CollabTaskStatus, string> = {
+  collecting: '收题中',
+  reviewing: '待审校',
+  done: '已完成',
+}
+
+/** 任务处理人的状态 */
+export type CollabMemberStatus = 'invited' | 'working' | 'submitted'
+
+export const COLLAB_MEMBER_TEXT: Record<CollabMemberStatus, string> = {
+  invited: '待接受',
+  working: '组卷中',
+  submitted: '已提交',
+}
+
+/**
+ * 任务成员：一位老师承担哪几个题型、要交几道题、交了多少。
+ *
+ * `questionTypes` 是本模块最关键的约束 —— 任务处理人在组卷界面**只能**把这里的题型加进试卷，
+ * 但可以查看整张试卷（含他人负责的题型），否则「分工」就退化成一句口头约定。
+ */
+export interface CollabMember {
+  name: string
+  /** 负责的题型；该成员只能为这些题型选题入卷 */
+  questionTypes: string[]
+  /** 授权范围：选题 / 改分值 / 编辑卷头 / 只读 */
+  perms: string[]
+  /** 分配的题数（按题型题数之和得出） */
+  quota: number
+  status: CollabMemberStatus
+  online: boolean
+  lastActiveAt: string
+}
+
+/**
+ * 版本快照：撤销与替换都基于它。
+ *
+ * 必须存**完整 sections 深拷贝**而不是 diff —— 撤销要求「点一下就回到那一刻」，
+ * 用 diff 回放一旦有一版漏记就会回滚出一个从未存在过的卷面。
+ */
+export interface PaperVersion {
+  id: number
+  no: number
+  time: string
+  actor: string
+  summary: string
+  questionCount: number
+  totalScore: number
+  sections: PaperSection[]
+  /** 已被后续版本替换（替换时留痕，不删除记录） */
+  replaced?: boolean
+  /** 替换说明 */
+  note?: string
+}
+
+/** 试卷基本要求：所有任务处理人共享同一份约束，AI 抽题也读它 */
+export interface CollabRequirement {
+  subject: string
+  grade: string
+  duration: number
+  /** 题型要求：题型 → 题数 / 单题分值 */
+  structure: Array<{ type: string; count: number; score: number }>
+  /** 难点要求：难度档 → 占比（%） */
+  difficulty: Array<{ level: string; ratio: number }>
+  /** 考察知识点要求 */
+  knowledge: string[]
+  /** 命题说明（命题范围 / 风格 / 注意事项） */
+  remark: string
+}
+
+export interface OrgCollabTask {
+  id: number
+  /** 关联的试卷 id：任务与试卷是一对一，任务只是「分工 + 版本」这层壳 */
+  paperId: number
+  name: string
+  requirement: CollabRequirement
+  members: CollabMember[]
+  versions: PaperVersion[]
+  status: CollabTaskStatus
+  createdAt: string
+  /** 发起人 */
+  owner: string
+}
+
 export interface MaterialExample {
   id: number
   stem: string
@@ -554,6 +643,489 @@ export interface OrgFile {
   recognize: 'none' | 'recognizing' | 'done' | 'failed'
   owner: string
   uploadedAt: string
+}
+
+/* ================ 讲义课件（FR-JC-005 ~ 012） ================ */
+
+export type TeachDocKind = 'lecture' | 'courseware' | 'plan' | 'guide'
+
+export const TEACH_KIND_TEXT: Record<TeachDocKind, string> = {
+  lecture: '讲义',
+  courseware: '课件',
+  plan: '教案',
+  guide: '学案',
+}
+
+/** 讲义的段落类型：与教研云 / 菁优网的「教辅模板」对齐 */
+export type LectureBlockKind = 'goal' | 'explain' | 'example' | 'practice' | 'summary' | 'homework' | 'text'
+
+export const LECTURE_BLOCK_TEXT: Record<LectureBlockKind, string> = {
+  goal: '学习目标',
+  explain: '知识点讲解',
+  example: '典型例题',
+  practice: '随堂练习',
+  summary: '课堂小结',
+  homework: '课后作业',
+  text: '自由段落',
+}
+
+/** 学案专属段落：学生用，强调「先学后教」，与讲义的段落类型互不干扰 */
+export type GuideBlockKind = 'preview' | 'explore' | 'check' | 'extend' | 'text'
+
+export const GUIDE_BLOCK_TEXT: Record<GuideBlockKind, string> = {
+  preview: '预习导学',
+  explore: '课堂探究',
+  check: '达标检测',
+  extend: '拓展提升',
+  text: '自由段落',
+}
+
+/** 段落类型的全集：`TeachDoc.blocks` 用它，讲义 / 学案各取自己那份字典渲染 */
+export type BlockKind = LectureBlockKind | GuideBlockKind
+
+/** 段落类型全集字典：列表 / 预览要按任意段落类型取名称，用各自的字典会漏 */
+export const BLOCK_KIND_TEXT: Record<BlockKind, string> = {
+  ...LECTURE_BLOCK_TEXT,
+  preview: '预习导学',
+  explore: '课堂探究',
+  check: '达标检测',
+  extend: '拓展提升',
+}
+
+export interface LectureBlock {
+  id: number
+  kind: BlockKind
+  title: string
+  /** 富文本正文（与题目题干同一套富文本格式，支持公式 / 图片） */
+  body: string
+  /** 例题 / 随堂练习引用的题库题目 */
+  questionIds: number[]
+}
+
+/* ================ 教案（教学设计） ================ */
+
+/** 教学过程的环节类型 */
+export type PlanStepKind = 'lead' | 'teach' | 'consolidate' | 'summary' | 'homework' | 'free'
+
+export const PLAN_STEP_TEXT: Record<PlanStepKind, string> = {
+  lead: '情境导入',
+  teach: '新知探究',
+  consolidate: '巩固应用',
+  summary: '课堂小结',
+  homework: '作业布置',
+  free: '自定义环节',
+}
+
+/**
+ * 教案的教学过程是以「环节」为单位的，每个环节都要写清教师活动 / 学生活动 / 设计意图
+ * —— 这是教案与讲义的本质区别：讲义写「讲什么」，教案写「怎么教、为什么这么教」。
+ */
+export interface PlanStep {
+  id: number
+  kind: PlanStepKind
+  title: string
+  /** 教师活动 */
+  teacher: string
+  /** 学生活动 */
+  student: string
+  /** 设计意图 */
+  intent: string
+  /** 时间分配（分钟） */
+  minutes: number
+  /** 本环节用到的题目（例题 / 巩固练习） */
+  questionIds: number[]
+}
+
+/** 教案专属结构：三维目标 + 重难点 + 教学过程 + 板书 + 反思 */
+export interface PlanDetail {
+  /** 三维教学目标 */
+  objectives: { knowledge: string; process: string; emotion: string }
+  /** 教学重点 */
+  keyPoints: string
+  /** 教学难点 */
+  hardPoints: string
+  /** 教学方法（讲授 / 探究 / 合作 …） */
+  methods: string[]
+  /** 教具与媒体 */
+  aids: string[]
+  /** 课时数 */
+  periods: number
+  steps: PlanStep[]
+  /** 板书设计 */
+  blackboard: string
+  /** 教学反思（课后填写） */
+  reflection: string
+}
+
+/** 课件版式：封面 / 要点 / 图文 / 例题 / 章节过渡 / 结束页 */
+export type SlideLayout = 'cover' | 'bullets' | 'image' | 'question' | 'section' | 'end'
+
+export const SLIDE_LAYOUT_TEXT: Record<SlideLayout, string> = {
+  cover: '封面',
+  bullets: '要点页',
+  image: '图文页',
+  question: '例题页',
+  section: '过渡页',
+  end: '结束页',
+}
+
+export interface CoursewareSlide {
+  id: number
+  layout: SlideLayout
+  title: string
+  subtitle?: string
+  bullets: string[]
+  /** 讲稿备注（放映时对教师可见，不投屏） */
+  note: string
+  /** 例题页引用的题库题目 */
+  questionId?: number
+}
+
+/**
+ * 讲义 / 课件统一模型。
+ *
+ * 两者共用一套元数据（名称 / 学科 / 年级 / 知识点 / 归属），差别只在正文结构：
+ * 讲义是 `blocks`（段落流），课件是 `slides`（分页）。合成一个模型而不是两张表，
+ * 是因为列表、筛选、权限、回收站这些逻辑对两者完全一致，分成两个模型只会到处写 if。
+ */
+export interface TeachDoc {
+  id: number
+  kind: TeachDocKind
+  name: string
+  subject: string
+  grade: string
+  textbook?: string
+  knowledge: string[]
+  status: 'draft' | 'published'
+  blocks: LectureBlock[]
+  slides: CoursewareSlide[]
+  /** 教案专属结构（kind === 'plan' 时存在） */
+  plan?: PlanDetail
+  owner: string
+  updatedAt: string
+  views: number
+  sharedSquare: boolean
+}
+
+/* ================ 考试与阅卷 ================ */
+
+/** 阅卷状态：未阅 / 已阅 / 缺考 / 违纪 */
+export type AnswerStatus = 'pending' | 'graded' | 'absent' | 'cheat'
+
+export const ANSWER_STATUS_TEXT: Record<AnswerStatus, string> = {
+  pending: '待阅',
+  graded: '已阅',
+  absent: '缺考',
+  cheat: '违纪',
+}
+
+/** 一次考试：由一份试卷下发到若干班级产生 */
+export interface ExamSession {
+  id: number
+  name: string
+  paperId: number
+  paperName: string
+  subject: string
+  grade: string
+  /** 参考班级 */
+  classes: string[]
+  studentCount: number
+  examAt: string
+  status: 'preparing' | 'grading' | 'finished'
+  /** 总分 */
+  fullScore: number
+  /** 阅卷分工 */
+  duties: GradingDuty[]
+  createdBy: string
+  updatedAt: string
+}
+
+/** 阅卷分工：按大题分给若干阅卷人，可选单评 / 双评 */
+export interface GradingDuty {
+  id: number
+  /** 大题标题 */
+  sectionTitle: string
+  questionIds: number[]
+  graders: string[]
+  /** 单评：一人定分；双评：两人给分，分差超限进仲裁 */
+  mode: 'single' | 'double'
+  done: number
+  total: number
+}
+
+/** 单题作答 */
+export interface AnswerItem {
+  questionId: number
+  /** 卷面序号（全局第几题） */
+  qIndex: number
+  sectionTitle: string
+  type: string
+  knowledge: string[]
+  /** 本题满分 */
+  full: number
+  score: number
+  answer: string
+  correct: boolean
+}
+
+/** 一份答卷 */
+export interface ExamAnswer {
+  id: number
+  sessionId: number
+  student: string
+  className: string
+  items: AnswerItem[]
+  total: number
+  status: AnswerStatus
+  /** 异常备注 */
+  remark?: string
+}
+
+/* ================ 试卷分析 / 学情反馈 ================ */
+
+export interface AnalysisQuestionStat {
+  questionId: number
+  qIndex: number
+  sectionTitle: string
+  type: string
+  knowledge: string[]
+  full: number
+  avg: number
+  /** 得分率 */
+  scoreRate: number
+  /** 难度系数（得分率，0~1，越大越易） */
+  difficulty: number
+  /** 区分度（高分组得分率 - 低分组得分率） */
+  discrimination: number
+  /** 客观题正确率 */
+  correctRate: number
+}
+
+export interface PaperAnalysis {
+  sessionId: number
+  paperId: number
+  paperName: string
+  subject: string
+  grade: string
+  studentCount: number
+  fullScore: number
+  avg: number
+  max: number
+  min: number
+  median: number
+  stdDev: number
+  passRate: number
+  excellentRate: number
+  /** 整卷难度系数 */
+  difficulty: number
+  /** 整卷区分度 */
+  discrimination: number
+  /** 分数段分布 */
+  bands: Array<{ label: string; min: number; max: number; count: number }>
+  questions: AnalysisQuestionStat[]
+  /** 知识点得分率 */
+  knowledge: Array<{ name: string; scoreRate: number; count: number }>
+  /** 班级对比 */
+  classes: Array<{ name: string; count: number; avg: number; passRate: number; excellentRate: number }>
+  /** 讲评建议（据得分率自动生成） */
+  suggestions: string[]
+}
+
+/* ================ 错题本 ================ */
+
+export type MistakeMastery = 'weak' | 'improving' | 'mastered'
+
+export const MISTAKE_MASTERY_TEXT: Record<MistakeMastery, string> = {
+  weak: '未掌握',
+  improving: '巩固中',
+  mastered: '已掌握',
+}
+
+/** 错误原因（教研云的错题分类口径） */
+export const MISTAKE_REASONS = ['概念不清', '方法不当', '计算失误', '审题偏差', '表达不规范', '时间不足'] as const
+
+export interface MistakeEntry {
+  id: number
+  questionId: number
+  /** 归属：班级错题本用班级名，个人错题本用学生名 */
+  scope: string
+  /** 来源：考试名 / 作业名 */
+  source: string
+  student?: string
+  wrongAnswer: string
+  wrongCount: number
+  reason: string
+  mastery: MistakeMastery
+  /** 重练次数 */
+  practiced: number
+  note: string
+  addedAt: string
+  lastWrongAt: string
+}
+
+/* ================ 集体备课（协同教研） ================ */
+
+export type PrepTaskStatus = 'draft' | 'ongoing' | 'review' | 'done'
+
+export const PREP_TASK_STATUS_TEXT: Record<PrepTaskStatus, string> = {
+  draft: '草稿',
+  ongoing: '备课中',
+  review: '研讨中',
+  done: '已定稿',
+}
+
+export interface PrepMember {
+  name: string
+  /** 分工：教学目标 / 过程设计 / 例题选取 / 作业设计 … */
+  duty: string
+  status: 'pending' | 'working' | 'submitted'
+  online: boolean
+  lastActive: string
+}
+
+export interface PrepComment {
+  id: number
+  author: string
+  at: string
+  body: string
+  /** 针对哪一版 / 哪一环节 */
+  target: string
+}
+
+export interface PrepVersion {
+  id: number
+  no: number
+  author: string
+  at: string
+  summary: string
+  /** 该版正文快照（JSON 字符串） */
+  snapshot: string
+  replaced?: boolean
+}
+
+/** 集体备课任务：共备一份教案 / 课件，分工撰写、互相批注、版本对比、定稿 */
+export interface PrepTask {
+  id: number
+  name: string
+  subject: string
+  grade: string
+  /** 关联的备课文档（教案 / 课件 / 讲义） */
+  docKind?: TeachDocKind
+  docId?: number
+  docName: string
+  requirement: {
+    topic: string
+    goal: string
+    keyPoints: string
+    hardPoints: string
+    deadline: string
+    note: string
+  }
+  members: PrepMember[]
+  comments: PrepComment[]
+  versions: PrepVersion[]
+  status: PrepTaskStatus
+  owner: string
+  updatedAt: string
+}
+
+/* ================ 校本资源库与审批流 ================ */
+
+export type ResourceScope = 'personal' | 'group' | 'school' | 'public'
+
+export const RESOURCE_SCOPE_TEXT: Record<ResourceScope, string> = {
+  personal: '个人',
+  group: '备课组',
+  school: '校本',
+  public: '公开',
+}
+
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected'
+
+export const APPROVAL_STATUS_TEXT: Record<ApprovalStatus, string> = {
+  pending: '待审批',
+  approved: '已通过',
+  rejected: '已驳回',
+}
+
+export type ApprovalKind = '题目' | '试卷' | '讲义' | '课件' | '教案' | '学案' | '视频'
+
+/** 提审单：资源从个人 → 备课组 → 校本 → 公开，逐级审批 */
+export interface ResourceApproval {
+  id: number
+  kind: ApprovalKind
+  name: string
+  subject: string
+  grade: string
+  scope: ResourceScope
+  applicant: string
+  submittedAt: string
+  status: ApprovalStatus
+  reviewer?: string
+  reviewedAt?: string
+  opinion?: string
+  logs: Array<{ at: string; by: string; action: string; note?: string }>
+}
+
+/* ================ 微课与视频切片 ================ */
+
+/** 视频切片：在一条视频上按时间打点，标注知识点并关联题目 */
+export interface VideoClip {
+  id: number
+  mediaId: number
+  mediaName: string
+  title: string
+  /** 起止时间（秒） */
+  start: number
+  end: number
+  knowledge: string[]
+  questionIds: number[]
+  note: string
+  createdBy: string
+  createdAt: string
+}
+
+/* ================ 作业系统 ================ */
+
+export type HomeworkStatus = 'assigned' | 'ongoing' | 'closed'
+
+export const HOMEWORK_STATUS_TEXT: Record<HomeworkStatus, string> = {
+  assigned: '已布置',
+  ongoing: '进行中',
+  closed: '已截止',
+}
+
+export interface Homework {
+  id: number
+  name: string
+  subject: string
+  grade: string
+  /** 来源试卷（可选，整卷作为作业） */
+  paperId?: number
+  paperName?: string
+  questionIds: number[]
+  classes: string[]
+  assignAt: string
+  deadline: string
+  require: string
+  status: HomeworkStatus
+  submitted: number
+  total: number
+  owner: string
+  updatedAt: string
+}
+
+export interface HomeworkSubmission {
+  id: number
+  homeworkId: number
+  student: string
+  className: string
+  submittedAt: string
+  status: 'submitted' | 'late' | 'missing'
+  score?: number
+  correctRate?: number
+  wrongQuestionIds: number[]
+  comment?: string
 }
 
 /* ================ 全局搜索（FR-GN-026） ================ */
@@ -705,7 +1277,7 @@ export interface NotifyMatrixRow {
 
 export interface RecycleItem {
   id: number
-  kind: '题目' | '试卷' | '教辅' | '文件'
+  kind: '题目' | '试卷' | '教辅' | '文件' | '讲义' | '课件' | '教案' | '学案' | '协同组卷任务' | '集体备课' | '作业'
   name: string
   deletedBy: string
   deletedAt: string

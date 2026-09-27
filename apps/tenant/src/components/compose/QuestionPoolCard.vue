@@ -18,12 +18,18 @@ const props = defineProps<{
   inBasket: boolean
   /** 教材课时等来源提示（同步练习组卷按课时出题时展示） */
   sectionHint?: string
+  /** 是否已收藏。**不传则不显示收藏按钮**——题库管理等场景没有收藏夹，不该冒出点了没反应的按钮 */
+  favorited?: boolean
 }>()
 
 const emit = defineEmits<{
   toggle: [row: OrgQuestion]
   /** 按该题的知识点去试题页签找同类题 */
   findSimilar: [tags: string[]]
+  /** 收藏 / 取消收藏 */
+  toggleFavorite: [row: OrgQuestion]
+  /** 找题干或知识点相近的题（与「找同类题」不同：那个是跳去按知识点筛选） */
+  similar: [row: OrgQuestion]
 }>()
 
 const analysisOpen = ref(false)
@@ -92,6 +98,15 @@ const blocked = computed(() => props.row.status !== 'approved')
         {{ analysisOpen ? '收起解析' : '答案与解析' }}
       </button>
       <button
+        class="mini-btn"
+        type="button"
+        title="找出题干或知识点相近的题目"
+        @click="emit('similar', row)"
+      >
+        <AppIcon name="search" :size="12" />
+        相似题
+      </button>
+      <button
         v-if="row.knowledge.length"
         class="mini-btn"
         type="button"
@@ -99,6 +114,17 @@ const blocked = computed(() => props.row.status !== 'approved')
         @click="emit('findSimilar', row.knowledge)"
       >
         找同类题
+      </button>
+      <button
+        v-if="favorited !== undefined"
+        class="mini-btn fav"
+        :class="{ on: favorited }"
+        type="button"
+        :title="favorited ? '取消收藏' : '收藏这道题，之后可在「只看收藏」里快速找到'"
+        @click="emit('toggleFavorite', row)"
+      >
+        <AppIcon name="star" :size="12" />
+        {{ favorited ? '已收藏' : '收藏' }}
       </button>
       <button
         class="mini-btn"
@@ -186,4 +212,7 @@ const blocked = computed(() => props.row.status !== 'approved')
   padding-top: 9px;
 }
 .qc-ops .mini-btn { display: inline-flex; align-items: center; gap: 4px; }
+/* 收藏态用橙色实心星的感觉：与「加入组卷车」的绿 / 「移出」的红区分开，三种操作不会看混 */
+.qc-ops .mini-btn.fav.on { color: #b7791f; border-color: #e8c07a; background: #fdf6e6; }
+.qc-ops .mini-btn.fav.on :deep(svg) { fill: currentColor; }
 </style>
