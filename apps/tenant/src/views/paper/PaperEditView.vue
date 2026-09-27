@@ -1193,13 +1193,13 @@ function mmOf(px: number): number {
       </div>
 
       <!-- ===== 右：面板 + 图标竖栏 ===== -->
-      <aside v-if="panelRail" class="pe-panel">
+      <aside v-if="panelRail" class="pe-side">
         <template v-if="panelRail === 'settings'">
-          <div class="pe-panel-head">
+          <div class="pe-side-head">
             <h3>全文设置</h3>
             <button class="pe-icon-btn" type="button" @click="panelRail = ''"><AppIcon name="close" :size="13" /></button>
           </div>
-          <div class="pe-panel-body">
+          <div class="pe-side-body">
             <div class="pe-field">
               <label>排版样式</label>
               <div class="pe-style-list">
@@ -1307,11 +1307,11 @@ function mmOf(px: number): number {
         </template>
 
         <template v-else-if="panelRail === 'bank'">
-          <div class="pe-panel-head">
+          <div class="pe-side-head">
             <h3>试题库</h3>
             <button class="pe-icon-btn" type="button" @click="panelRail = ''"><AppIcon name="close" :size="13" /></button>
           </div>
-          <div class="pe-panel-body">
+          <div class="pe-side-body">
             <div class="pe-filters">
               <select v-model="bankFilter.type" class="f-select">
                 <option value="">全部题型</option>
@@ -1344,11 +1344,11 @@ function mmOf(px: number): number {
         </template>
 
         <template v-else-if="panelRail === 'media'">
-          <div class="pe-panel-head">
+          <div class="pe-side-head">
             <h3>媒体库</h3>
             <button class="pe-icon-btn" type="button" @click="panelRail = ''"><AppIcon name="close" :size="13" /></button>
           </div>
-          <div class="pe-panel-body">
+          <div class="pe-side-body">
             <p class="f-hint" style="margin-bottom: 10px">
               机构媒体库资源。题干配图请在录题中心编辑题目正文时插入（题目正文支持公式与插图）。
             </p>
@@ -1367,11 +1367,11 @@ function mmOf(px: number): number {
         </template>
 
         <template v-else-if="panelRail === 'basket'">
-          <div class="pe-panel-head">
+          <div class="pe-side-head">
             <h3>资源篮（组卷车）</h3>
             <button class="pe-icon-btn" type="button" @click="panelRail = ''"><AppIcon name="close" :size="13" /></button>
           </div>
-          <div class="pe-panel-body">
+          <div class="pe-side-body">
             <div class="pe-basket-bar">
               <span>{{ basket.count.value }} 题 · {{ basket.scoreTotal.value }} 分</span>
               <div class="op-group">
@@ -1396,11 +1396,11 @@ function mmOf(px: number): number {
         </template>
 
         <template v-else-if="panelRail === 'import'">
-          <div class="pe-panel-head">
+          <div class="pe-side-head">
             <h3>导入文档</h3>
             <button class="pe-icon-btn" type="button" @click="panelRail = ''"><AppIcon name="close" :size="13" /></button>
           </div>
-          <div class="pe-panel-body">
+          <div class="pe-side-body">
             <p class="f-hint" style="margin-bottom: 10px">
               从 Word / 网页复制题目文本粘贴到下面，按题号（或空行）自动切题并入卷。原题型、选项会一并识别。
             </p>
@@ -1430,13 +1430,13 @@ function mmOf(px: number): number {
         </template>
 
         <template v-else-if="panelRail === 'history'">
-          <div class="pe-panel-head">
+          <div class="pe-side-head">
             <h3>历史记录</h3>
             <button class="pe-icon-btn" type="button" @click="panelRail = ''"><AppIcon name="close" :size="13" /></button>
           </div>
-          <div class="pe-panel-body">
+          <div class="pe-side-body">
             <template v-if="versions.length">
-              <div class="pe-panel-sub">协同版本（可撤销 / 替换）</div>
+              <div class="pe-side-sub">协同版本（可撤销 / 替换）</div>
               <div class="pe-timeline">
                 <div v-for="row in versions.slice().reverse()" :key="row.id" class="pe-tl-row" :class="{ replaced: row.replaced }">
                   <div class="pe-tl-head">
@@ -1454,7 +1454,7 @@ function mmOf(px: number): number {
               </div>
             </template>
 
-            <div class="pe-panel-sub">本次编辑（点击回退）</div>
+            <div class="pe-side-sub">本次编辑（点击回退）</div>
             <div class="pe-timeline">
               <button
                 v-for="(row, i) in snapshots.slice().reverse()"
@@ -1859,8 +1859,8 @@ function mmOf(px: number): number {
 }
 .pe-measure-item { margin: 0 0 var(--pp-gap); }
 
-/* 右：面板 + 竖栏 */
-.pe-panel {
+/* 右：侧边面板（.pe-side）+ 竖栏 */
+.pe-side {
   width: 312px;
   flex-shrink: 0;
   border-left: 1px solid var(--border);
@@ -1869,7 +1869,7 @@ function mmOf(px: number): number {
   flex-direction: column;
   min-height: 0;
 }
-.pe-panel-head {
+.pe-side-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1877,10 +1877,10 @@ function mmOf(px: number): number {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
-.pe-panel-head h3 { font-size: 13.5px; font-weight: 700; }
-.pe-panel-body { flex: 1; overflow-y: auto; padding: 14px; }
-.pe-panel-sub { font-size: 12.5px; font-weight: 700; color: var(--ink); margin: 14px 0 8px; }
-.pe-panel-sub:first-child { margin-top: 0; }
+.pe-side-head h3 { font-size: 13.5px; font-weight: 700; }
+.pe-side-body { flex: 1; overflow-y: auto; padding: 14px; }
+.pe-side-sub { font-size: 12.5px; font-weight: 700; color: var(--ink); margin: 14px 0 8px; }
+.pe-side-sub:first-child { margin-top: 0; }
 .pe-field { margin-bottom: 14px; }
 .pe-field > label { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-2); margin-bottom: 6px; }
 .pe-field.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -2049,7 +2049,7 @@ function mmOf(px: number): number {
   .pe-head,
   .pe-toolbar,
   .pe-outline,
-  .pe-panel,
+  .pe-side,
   .pe-rail,
   .pe-footbar,
   .pe-blockbar,
@@ -2066,8 +2066,8 @@ function mmOf(px: number): number {
   }
   .pe-page { display: block !important; }
   .pe-sheet-wrap { width: auto !important; height: auto !important; }
-  .pe-panels { display: flex !important; }
-  .pe-panel { flex: 0 0 auto !important; }
+  /* 这两条曾是用来绕开 .pe-panel 同名冲突的补丁：隐藏右侧栏的规则把纸面分栏
+     也一起藏了，于是这里再强行显示回来。侧栏已改名 .pe-side，冲突消失，补丁删除。 */
   .pe-sheet {
     position: relative !important;
     transform: none !important;

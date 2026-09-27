@@ -7,7 +7,8 @@
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppIcon, CLASS_NAMES, HOMEWORK_STATUS_TEXT, RichTextViewer, showToast, truncateRich } from '@aiteach/shared'
+import { AppFilterChips, AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, AppSegmented, CLASS_NAMES, HOMEWORK_STATUS_TEXT, RichTextViewer, showToast, truncateRich } from '@aiteach/shared'
+import type { FilterRowDef } from '@aiteach/shared'
 import type { Homework, HomeworkSubmission, OrgPaper, OrgQuestion } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppDrawer from '@/components/ui/AppDrawer.vue'
@@ -62,7 +63,12 @@ const STATUS_TAG: Record<Homework['status'], string> = {
 /* ================= 布置 / 编辑弹窗 ================= */
 const hwOpen = ref(false)
 const hwEditingId = ref<number | null>(null)
-const pickMode = ref<'bank' | 'paper'>('bank')
+/** 选题方式：AppSegmented 的 modelValue 是 string，故这里不放宽成联合类型 */
+const pickMode = ref<string>('bank')
+const PICK_MODE_OPTIONS = [
+  { value: 'bank', label: '从题库选题' },
+  { value: 'paper', label: '选用整卷' },
+]
 const hwForm = reactive({
   name: '',
   subject: '数学',
@@ -119,7 +125,7 @@ function onPickPaper() {
   const p = papers.value.find((row) => row.id === hwForm.paperId)
   hwForm.questionIds = p ? p.sections.flatMap((s) => s.questions.map((q) => q.questionId)) : []
 }
-function switchMode(mode: 'bank' | 'paper') {
+function switchMode(mode: string) {
   pickMode.value = mode
   if (mode === 'paper') {
     hwForm.questionIds = []
@@ -127,11 +133,6 @@ function switchMode(mode: 'bank' | 'paper') {
     hwForm.paperId = undefined
     hwForm.questionIds = []
   }
-}
-function toggleClass(name: string) {
-  const i = hwForm.classes.indexOf(name)
-  if (i >= 0) hwForm.classes.splice(i, 1)
-  else hwForm.classes.push(name)
 }
 function toggleBank(id: number) {
   const i = hwForm.questionIds.indexOf(id)
@@ -249,6 +250,27 @@ const SUB_TEXT: Record<HomeworkSubmission['status'], string> = {
   missing: '未交',
 }
 
+/** 批阅视图筛选行：班级候选来自提交记录，故用 computed */
+const subFilterRows = computed<FilterRowDef[]>(() => [
+  { key: 'className', label: '班级', options: [...new Set(submissions.value.map((s) => s.className))], multiple: false },
+  { key: 'status', label: '状态', options: Object.values(SUB_TEXT), multiple: false },
+])
+
+/** chip 上是文案，subFilter 里存业务值 */
+function subStatusKeyOf(text: string): '' | HomeworkSubmission['status'] {
+  return (Object.keys(SUB_TEXT) as HomeworkSubmission['status'][]).find((k) => SUB_TEXT[k] === text) ?? ''
+}
+
+const subFilterModel = computed<Record<string, string[]>>(() => ({
+  className: subFilter.className ? [subFilter.className] : [],
+  status: subFilter.status ? [SUB_TEXT[subFilter.status as HomeworkSubmission['status']]] : [],
+}))
+
+function onSubFilterChange(next: Record<string, string[]>) {
+  subFilter.className = next.className?.[0] ?? ''
+  subFilter.status = subStatusKeyOf(next.status?.[0] ?? '')
+}
+
 async function openGrading(id: number) {
   const hw = homeworks.value.find((row) => row.id === id)
   if (!hw) {
@@ -331,13 +353,13 @@ onMounted(async () => {
 <template>
   <div class="page">
     <!-- ================= 批阅视图 ================= -->
-    <div v-if="grading" class="hw-grade">
-      <div class="page-head">
-        <div class="gh-left">
+    <div v-if="grading" class="page">
+      <div class="detail-head">
+        <div class="dh-left">
           <button class="te-back" type="button" @click="backToList"><AppIcon name="chevron-left" :size="15" /></button>
           <div>
-            <h2 style="font-size: 18px; font-weight: 700">{{ grading.name }}</h2>
-            <p class="f-hint" style="margin-top: 4px">
+            <h2>{{ grading.name }}</h2>
+            <p class="f-hint">
               {{ grading.subject }} · {{ grading.grade }} · 来源：{{ sourceText(grading) }} · 布置 {{ grading.assignAt }} · 截止 {{ grading.deadline }}
             </p>
           </div>
@@ -356,80 +378,71 @@ onMounted(async () => {
         <div class="stat"><span class="stat-n" style="color: var(--brand-deep)">{{ stats.avg }}%</span><span class="stat-l">平均正确率</span></div>
       </div>
 
-      <div class="panel">
-        <div class="filter-bar">
-          <span class="filter-label">班级</span>
-          <select v-model="subFilter.className" class="f-select" style="width: 130px">
-            <option value="">全部</option>
-            <option v-for="c in [...new Set(submissions.map((s) => s.className))]" :key="c" :value="c">{{ c }}</option>
-          </select>
-          <span class="filter-label">状态</span>
-          <select v-model="subFilter.status" class="f-select" style="width: 118px">
-            <option value="">全部</option>
-            <option value="submitted">已交</option>
-            <option value="late">迟交</option>
-            <option value="missing">未交</option>
-          </select>
-          <input v-model="subFilter.keyword" class="f-input" placeholder="搜索学生姓名" style="width: 170px" />
-        </div>
+      <AppFilterPanel
+        :model-value="subFilterModel"
+        :rows="subFilterRows"
+        @update:model-value="onSubFilterChange"
+      />
 
-        <table class="sub-table">
-          <thead>
-            <tr>
-              <th>学生</th>
-              <th>班级</th>
-              <th>提交时间</th>
-              <th>状态</th>
-              <th>正确率</th>
-              <th>得分（百分制）</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="sub in gradedRows" :key="sub.id">
-              <td>{{ sub.student }}</td>
-              <td>{{ sub.className }}</td>
-              <td>{{ sub.submittedAt }}</td>
-              <td><span class="tag" :class="SUB_TAG[sub.status]">{{ SUB_TEXT[sub.status] }}</span></td>
-              <td>
-                <div v-if="sub.status !== 'missing'" class="bar-cell">
-                  <div class="bar"><i :style="{ width: `${sub.correctRate ?? 0}%` }" /></div>
-                  <span class="bar-n">{{ sub.correctRate }}%</span>
-                </div>
-                <span v-else class="f-hint">—</span>
-              </td>
-              <td>{{ sub.status !== 'missing' ? `${sub.score ?? '—'} 分` : '—' }}</td>
-              <td>
-                <button class="mini-btn" :disabled="sub.status === 'missing'" @click="openGrade(sub)">批阅</button>
-              </td>
-            </tr>
-            <tr v-if="!gradedRows.length">
-              <td colspan="7" class="f-hint" style="padding: 26px; text-align: center">
-                {{ loading ? '正在载入…' : '暂无提交记录' }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div class="panel">
+        <AppListToolbar v-model="subFilter.keyword" placeholder="搜索学生姓名" class="hw-toolbar" />
+
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>学生</th>
+                <th>班级</th>
+                <th>提交时间</th>
+                <th>状态</th>
+                <th>正确率</th>
+                <th>得分（百分制）</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="sub in gradedRows" :key="sub.id">
+                <td class="cell-strong">{{ sub.student }}</td>
+                <td>{{ sub.className }}</td>
+                <td>{{ sub.submittedAt }}</td>
+                <td><span class="tag" :class="SUB_TAG[sub.status]">{{ SUB_TEXT[sub.status] }}</span></td>
+                <td>
+                  <div v-if="sub.status !== 'missing'" class="bar-cell">
+                    <div class="bar"><i :style="{ width: `${sub.correctRate ?? 0}%` }" /></div>
+                    <span class="bar-n">{{ sub.correctRate }}%</span>
+                  </div>
+                  <span v-else class="f-hint">—</span>
+                </td>
+                <td>{{ sub.status !== 'missing' ? `${sub.score ?? '—'} 分` : '—' }}</td>
+                <td>
+                  <button class="mini-btn" :disabled="sub.status === 'missing'" @click="openGrade(sub)">批阅</button>
+                </td>
+              </tr>
+              <tr v-if="!gradedRows.length">
+                <td colspan="7" class="empty-row">
+                  {{ loading ? '正在载入…' : '暂无提交记录' }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
     <!-- ================= 列表视图 ================= -->
     <div v-else>
-      <div class="page-head">
-        <div>
-          <h2 style="font-size: 18px; font-weight: 700">作业系统</h2>
-          <p class="f-hint" style="margin-top: 4px">布置日常练习，跟踪提交与正确率，批阅后错题自动沉淀进班级错题本。</p>
-        </div>
-        <div class="op-group">
-          <input v-model="hwKeyword" class="f-input" placeholder="搜索作业名 / 学科" style="width: 180px" />
+      <AppPageHeader desc="布置日常练习，跟踪提交与正确率，批阅后错题自动沉淀进班级错题本。">
+        <template #actions>
           <button class="btn btn-ghost" @click="router.push('/exam/mistake')"><AppIcon name="target" :size="15" /> 班级错题本</button>
           <button class="btn btn-primary" @click="openNewHw"><AppIcon name="plus" :size="15" /> 布置作业</button>
-        </div>
-      </div>
+        </template>
+      </AppPageHeader>
 
       <div class="panel">
+        <AppListToolbar v-model="hwKeyword" placeholder="搜索作业名 / 学科" class="hw-toolbar" />
+
         <div class="hw-grid">
-          <p v-if="!filteredHomeworks.length" class="f-hint" style="grid-column: 1 / -1; padding: 30px; text-align: center">
+          <p v-if="!filteredHomeworks.length" class="empty-row" style="grid-column: 1 / -1">
             {{ loading ? '正在载入…' : '暂无作业，点击右上角布置' }}
           </p>
           <div v-for="hw in filteredHomeworks" :key="hw.id" class="hw-card">
@@ -478,10 +491,7 @@ onMounted(async () => {
 
       <div class="f-field">
         <label class="f-label">选题方式</label>
-        <div class="seg-ctrl">
-          <button :class="{ on: pickMode === 'bank' }" type="button" @click="switchMode('bank')">从题库选题</button>
-          <button :class="{ on: pickMode === 'paper' }" type="button" @click="switchMode('paper')">选用整卷</button>
-        </div>
+        <AppSegmented :model-value="pickMode" :options="PICK_MODE_OPTIONS" @update:model-value="switchMode" />
       </div>
 
       <div v-if="pickMode === 'paper'" class="f-field">
@@ -498,17 +508,18 @@ onMounted(async () => {
       </div>
 
       <div v-else class="hw-bank">
-        <div class="f-field row3" style="margin-bottom: 8px">
-          <select v-model="bankFilter.type" class="f-select">
-            <option value="">全部题型</option>
-            <option v-for="t in questionTypes" :key="t" :value="t">{{ t }}</option>
-          </select>
-          <select v-model="bankFilter.difficulty" class="f-select">
-            <option value="">全部难度</option>
-            <option v-for="d in difficulties" :key="d" :value="d">{{ d }}</option>
-          </select>
-          <input v-model="bankFilter.keyword" class="f-input" placeholder="搜索题干" />
-        </div>
+        <AppListToolbar v-model="bankFilter.keyword" placeholder="搜索题干" class="hw-bank-toolbar">
+          <template #left>
+            <select v-model="bankFilter.type" class="f-select">
+              <option value="">全部题型</option>
+              <option v-for="t in questionTypes" :key="t" :value="t">{{ t }}</option>
+            </select>
+            <select v-model="bankFilter.difficulty" class="f-select">
+              <option value="">全部难度</option>
+              <option v-for="d in difficulties" :key="d" :value="d">{{ d }}</option>
+            </select>
+          </template>
+        </AppListToolbar>
         <p class="f-hint" style="margin-bottom: 8px">已选 {{ hwForm.questionIds.length }} 题</p>
         <div class="hw-bank-list">
           <div
@@ -522,23 +533,14 @@ onMounted(async () => {
             <span class="hw-bank-stem">{{ truncateRich(row.stem, 50) }}</span>
             <AppIcon v-if="hwForm.questionIds.includes(row.id)" name="check" :size="14" />
           </div>
-          <p v-if="!bankPool.length" class="f-hint" style="padding: 14px; text-align: center">题库暂无匹配题目</p>
+          <p v-if="!bankPool.length" class="empty-row">题库暂无匹配题目</p>
         </div>
       </div>
 
       <div class="f-field">
         <label class="f-label">布置班级<span class="req">*</span></label>
-        <div class="chips">
-          <button
-            v-for="c in CLASS_NAMES"
-            :key="c"
-            class="k-chip"
-            :class="{ on: hwForm.classes.includes(c) }"
-            type="button"
-            @click="toggleClass(c)"
-          >
-            {{ c }}
-          </button>
+        <div class="chip-plain">
+          <AppFilterChips v-model="hwForm.classes" label="" label-width="0" :options="CLASS_NAMES" />
         </div>
       </div>
 
@@ -604,27 +606,24 @@ onMounted(async () => {
 }
 .te-back:hover { border-color: var(--brand); color: var(--brand-deep); }
 
-/* 批阅视图 */
-.hw-grade { display: flex; flex-direction: column; gap: 14px; }
-.page-head .gh-left { display: flex; align-items: center; gap: 12px; }
+/* 批阅视图：作业名 + 元信息 + 操作，是「详情工具条」而不是页面名 */
+.detail-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.detail-head .dh-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.detail-head h2 { font-size: 16.5px; font-weight: 700; }
 .hw-stats { display: flex; gap: 12px; padding: 14px 18px; }
 .stat { display: flex; flex-direction: column; gap: 3px; padding: 0 18px; border-right: 1px solid var(--border); }
 .stat:last-child { border-right: none; }
 .stat-n { font-size: 20px; font-weight: 700; color: var(--ink); }
 .stat-l { font-size: 12px; color: var(--sub); }
 
-.sub-table { width: 100%; border-collapse: collapse; }
-.sub-table th, .sub-table td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--border); font-size: 13px; }
-.sub-table th { color: var(--sub); font-weight: 600; background: #fafcfe; }
-.sub-table td { color: var(--ink-2); }
-.sub-table tbody tr:hover { background: #f8fbfb; }
 .bar-cell { display: flex; align-items: center; gap: 8px; }
 .bar { flex: 1; max-width: 120px; height: 8px; border-radius: 999px; background: #eef2f8; overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--brand); border-radius: 999px; }
 .bar-n { font-size: 12px; color: var(--ink-2); min-width: 38px; }
 
 /* 列表 */
-.hw-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 16px; }
+.hw-toolbar { padding: 14px 16px 0; margin-bottom: 0; }
+.hw-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 14px 16px 16px; }
 .hw-card {
   border: 1.5px solid var(--border); border-radius: 12px;
   padding: 14px; display: flex; flex-direction: column; gap: 8px;
@@ -638,13 +637,6 @@ onMounted(async () => {
 .hw-progress .bar { flex: 1; }
 
 /* 布置弹窗 */
-.seg-ctrl { display: inline-flex; border: 1.5px solid var(--border); border-radius: 9px; overflow: hidden; }
-.seg-ctrl button {
-  border: none; background: #fff; color: var(--ink-2);
-  padding: 7px 16px; font-size: 13px; cursor: pointer;
-}
-.seg-ctrl button.on { background: var(--brand); color: #fff; font-weight: 600; }
-
 .hw-bank-list { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--border); border-radius: 10px; padding: 8px; }
 .hw-bank-card {
   display: flex; align-items: center; gap: 8px;
@@ -655,9 +647,9 @@ onMounted(async () => {
 .hw-bank-stem { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hw-bank-card .on + .hw-bank-stem, .hw-bank-card.on svg { color: var(--brand-deep); }
 
-.chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.k-chip { border: 1.5px solid var(--border); border-radius: 999px; background: #fff; color: var(--ink-2); font-size: 12.5px; padding: 4px 12px; }
-.k-chip.on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-deep); font-weight: 600; }
+/* AppFilterChips 在表单里当「多选组」用时靠 f-label 标名，去掉组件自带的标签列 */
+.chip-plain .chip-row { gap: 0; }
+.hw-bank-toolbar { margin-bottom: 8px; }
 
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }

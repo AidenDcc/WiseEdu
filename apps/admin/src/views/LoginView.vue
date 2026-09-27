@@ -218,6 +218,7 @@ function onPending(name: string) {
 
 .tabs {
   display: flex;
+  align-items: center;
   gap: 26px;
   border-bottom: 1px solid var(--border);
   margin-bottom: 28px;
@@ -302,7 +303,9 @@ function onPending(name: string) {
   margin-bottom: 14px;
 }
 
-.submit { width: 100%; height: 46px; font-size: 15.5px; letter-spacing: 6px; }
+/* letter-spacing 会在最后一个字后面也留一份字距，而 .btn 是靠 justify-content:center 居中
+   这个「含尾隙的文字盒」的 —— 于是字面整体偏左 letter-spacing/2 = 3px。用 text-indent 补回来。 */
+.submit { width: 100%; height: 46px; font-size: 15.5px; letter-spacing: 6px; text-indent: 3px; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 

@@ -69,7 +69,7 @@ const phases = ['需求评审', '原型设计', '开发实现', '联调测试', 
 .phase.current .phase-dot { background: var(--brand); box-shadow: 0 0 0 5px var(--brand-soft); animation: pulse 1.6s infinite; }
 @keyframes pulse {
   0%, 100% { box-shadow: 0 0 0 4px var(--brand-soft); }
-  50% { box-shadow: 0 0 0 8px rgba(79, 110, 247, 0.05); }
+  50% { box-shadow: 0 0 0 8px rgba(0, 180, 166, 0.05); }
 }
 .phase-name { font-size: 12px; color: var(--ink-2); margin-left: 6px; margin-right: 12px; }
 .phase-line { width: 34px; height: 2px; background: #e6eaf3; margin-right: 12px; border-radius: 1px; }

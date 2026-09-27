@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { AppIcon, hueColor, showToast, ApiError } from '@aiteach/shared'
-import type { DictItem, TextbookVersion } from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppPageHeader, hueColor, showToast, ApiError } from '@aiteach/shared'
+import type { DictItem, FilterRowDef, TextbookVersion } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import { deleteTextbook, fetchDict, fetchTextbooks, saveTextbook, toggleTextbook } from '@/api/platform'
@@ -9,11 +9,18 @@ import { deleteTextbook, fetchDict, fetchTextbooks, saveTextbook, toggleTextbook
 const subjects = ref<DictItem[]>([])
 const list = ref<TextbookVersion[]>([])
 const loading = ref(false)
-const subjectFilter = ref('')
 
-const filtered = computed(() =>
-  subjectFilter.value ? list.value.filter((item) => item.subject === subjectFilter.value) : list.value,
-)
+const FILTERS = reactive<Record<string, string[]>>({ subject: [] })
+
+/* 学科候选项取自接口数据，故用 computed 而不是模块级常量 */
+const FILTER_ROWS = computed<FilterRowDef[]>(() => [
+  { key: 'subject', label: '学科', options: subjects.value.filter((item) => item.enabled).map((item) => item.name), multiple: false },
+])
+
+const filtered = computed(() => {
+  const subject = FILTERS.subject[0]
+  return subject ? list.value.filter((item) => item.subject === subject) : list.value
+})
 
 async function load() {
   loading.value = true
@@ -94,62 +101,61 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="panel">
-    <div class="filter-bar">
-      <select v-model="subjectFilter" class="f-select" style="width: 130px" @change="load">
-        <option value="">全部学科</option>
-        <option v-for="subject in subjects.filter((item) => item.enabled)" :key="subject.id" :value="subject.name">
-          {{ subject.name }}
-        </option>
-      </select>
-      <span class="filter-label">版本与学科联动：同一学科下版本名不可重复</span>
-      <button class="btn btn-primary btn-sm" style="margin-left: auto" @click="openCreate">
-        <AppIcon name="plus" :size="15" /> 新增版本
-      </button>
-    </div>
+  <div>
+    <AppPageHeader desc="版本与学科联动：同一学科下版本名不可重复">
+      <template #actions>
+        <button class="btn btn-primary btn-sm" @click="openCreate">
+          <AppIcon name="plus" :size="15" /> 新增版本
+        </button>
+      </template>
+    </AppPageHeader>
 
-    <div class="data-table-wrap">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>封面</th>
-            <th>学科</th>
-            <th>版本名称</th>
-            <th>出版社</th>
-            <th>机构引用</th>
-            <th>状态</th>
-            <th style="width: 140px">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="loading && list.length === 0">
-            <td colspan="7" class="empty-row">加载中…</td>
-          </tr>
-          <tr v-else-if="filtered.length === 0">
-            <td colspan="7" class="empty-row">暂无教材版本</td>
-          </tr>
-          <template v-else>
-            <tr v-for="item in filtered" :key="item.id">
-              <td>
-                <span class="cover" :style="{ background: hueColor(item.hue) }">{{ item.name.charAt(0) }}</span>
-              </td>
-              <td>{{ item.subject }}</td>
-              <td class="cell-strong">{{ item.name }}</td>
-              <td>{{ item.publisher }}</td>
-              <td>
-                <span :class="{ 'ref-zero': item.refCount === 0 }">{{ item.refCount }} 个机构</span>
-              </td>
-              <td><AppSwitch :model-value="item.enabled" @update:model-value="onToggle(item)" /></td>
-              <td>
-                <div class="op-group">
-                  <button class="mini-btn" type="button" @click="openEdit(item)">编辑</button>
-                  <button class="mini-btn danger" type="button" @click="onDelete(item)">删除</button>
-                </div>
-              </td>
+    <div class="panel">
+      <AppFilterPanel v-model="FILTERS" :rows="FILTER_ROWS" />
+
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>封面</th>
+              <th>学科</th>
+              <th>版本名称</th>
+              <th>出版社</th>
+              <th>机构引用</th>
+              <th>状态</th>
+              <th style="width: 140px">操作</th>
             </tr>
-          </template>
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            <tr v-if="loading && list.length === 0">
+              <td colspan="7" class="empty-row">加载中…</td>
+            </tr>
+            <tr v-else-if="filtered.length === 0">
+              <td colspan="7" class="empty-row">暂无教材版本</td>
+            </tr>
+            <template v-else>
+              <tr v-for="item in filtered" :key="item.id">
+                <td>
+                  <span class="cover" :style="{ background: hueColor(item.hue) }">{{ item.name.charAt(0) }}</span>
+                </td>
+                <td>{{ item.subject }}</td>
+                <td class="cell-strong">{{ item.name }}</td>
+                <td>{{ item.publisher }}</td>
+                <td>
+                  <span :class="{ 'ref-zero': item.refCount === 0 }">{{ item.refCount }} 个机构</span>
+                </td>
+                <td><AppSwitch :model-value="item.enabled" @update:model-value="onToggle(item)" /></td>
+                <td>
+                  <div class="op-group">
+                    <button class="mini-btn" type="button" @click="openEdit(item)">编辑</button>
+                    <button class="mini-btn danger" type="button" @click="onDelete(item)">删除</button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <AppModal v-if="editing" :title="editing === 'new' ? '新增教材版本' : '编辑教材版本'" @close="editing = null">
@@ -181,6 +187,8 @@ onMounted(load)
 </template>
 
 <style scoped>
+.panel :deep(.filter-panel) { margin: 14px 14px 12px; }
+
 .cover {
   width: 32px;
   height: 42px;

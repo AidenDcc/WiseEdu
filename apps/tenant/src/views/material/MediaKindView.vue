@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { AppIcon, resolveMediaSrc, showToast } from '@aiteach/shared'
+import { AppFilterChips, AppIcon, AppPageHeader, AppSearchInput, resolveMediaSrc, showToast } from '@aiteach/shared'
 import type { DrawEditorType, MediaKind, OrgMedia } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import MediaDrawSelectDialog from '@/components/draw/MediaDrawSelectDialog.vue'
@@ -218,21 +218,20 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <h2>{{ meta.title }}</h2>
-      <div class="op-group">
-        <input v-model="keyword" class="f-input" placeholder="搜索资源名" style="width: 180px" />
+    <AppPageHeader>
+      <template #actions>
+        <AppSearchInput v-model="keyword" placeholder="搜索资源名" :width="200" />
         <button v-if="kind === 'image'" class="btn btn-ghost" @click="drawSelectOpen = true">
           <AppIcon name="shapes" :size="15" /> 在线画图
         </button>
         <button class="btn btn-primary" @click="openUpload">
           <AppIcon name="upload" :size="15" /> {{ kind === 'animation' ? '登记动画' : '上传资源' }}
         </button>
-      </div>
-    </div>
+      </template>
+    </AppPageHeader>
 
     <div class="media-grid">
-      <p v-if="filtered.length === 0" class="f-hint" style="grid-column: 1 / -1; padding: 30px; text-align: center">
+      <p v-if="filtered.length === 0" class="empty-row" style="grid-column: 1 / -1">
         {{ keyword ? '没有匹配的资源' : meta.emptyHint }}
       </p>
       <div v-for="row in filtered" :key="row.id" class="panel media-card">
@@ -288,18 +287,8 @@ onMounted(load)
       </div>
       <div class="f-field">
         <label class="f-label">关联知识点（选填，可多选）</label>
-        <div class="chips">
-          <button
-            v-for="k in upChipOptions"
-            :key="k"
-            class="k-chip"
-            :class="{ on: uploadKnowledge.includes(k) }"
-            type="button"
-            @click="uploadKnowledge.includes(k) ? uploadKnowledge.splice(uploadKnowledge.indexOf(k), 1) : uploadKnowledge.push(k)"
-          >
-            {{ k }}
-          </button>
-          <p v-if="!upChipOptions.length" class="f-hint">该学科暂未配置知识点</p>
+        <div class="chip-plain">
+          <AppFilterChips v-model="uploadKnowledge" label="" label-width="0" :options="upChipOptions" />
         </div>
       </div>
       <template #footer>
@@ -356,17 +345,8 @@ onMounted(load)
     <!-- 关联 -->
     <AppModal v-if="linkTarget" :title="`关联 · ${linkTarget.name}`" :width="460" @close="linkTarget = null">
       <p class="f-hint" style="margin-bottom: 10px">选择要关联的知识点（也可在录题 / 组卷时反向引用该资源）</p>
-      <div class="chips">
-        <button
-          v-for="k in linkOptions"
-          :key="k"
-          class="k-chip"
-          :class="{ on: linkTargets.includes(k) }"
-          type="button"
-          @click="linkTargets.includes(k) ? linkTargets.splice(linkTargets.indexOf(k), 1) : linkTargets.push(k)"
-        >
-          {{ k }}
-        </button>
+      <div class="chip-plain">
+        <AppFilterChips v-model="linkTargets" label="" label-width="0" :options="linkOptions" />
       </div>
       <template #footer>
         <button class="btn btn-ghost" @click="linkTarget = null">取消</button>
@@ -384,7 +364,7 @@ onMounted(load)
   color: #fff; position: relative; cursor: pointer; overflow: hidden;
 }
 .mc-thumb.animation { background: linear-gradient(135deg, #00b4a6, #0a8f9c); }
-.mc-thumb.video { background: linear-gradient(135deg, #4f6ef7, #6a5df0); }
+.mc-thumb.video { background: linear-gradient(135deg, var(--brand-2), var(--brand-deep)); }
 .mc-thumb.image { background: linear-gradient(135deg, #f0a23c, #f07a3c); }
 .mc-thumb img, .mc-thumb video { width: 100%; height: 100%; object-fit: contain; background: #fff; }
 .mc-duration {
@@ -395,7 +375,7 @@ onMounted(load)
 .mc-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
 .mc-name { font-size: 14px; font-weight: 600; color: var(--ink); }
 .mc-meta { font-size: 12px; color: var(--sub); margin-bottom: 4px; }
-.mc-ops { display: flex; gap: 8px; margin-top: 10px; }
+.mc-ops { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 
 .file-pick {
   width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;
@@ -414,7 +394,6 @@ onMounted(load)
 .preview-stage.media img, .preview-stage.media video { max-width: 100%; max-height: 100%; object-fit: contain; }
 .preview-stage .f-hint { color: #8fa0bb; }
 
-.chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.k-chip { border: 1.5px solid var(--border); border-radius: 999px; background: #fff; color: var(--ink-2); font-size: 12.5px; padding: 4px 12px; }
-.k-chip.on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-deep); font-weight: 600; }
+/* AppFilterChips 在表单里当「多选组」用时靠 f-label 标名，去掉组件自带的标签列 */
+.chip-plain .chip-row { gap: 0; }
 </style>

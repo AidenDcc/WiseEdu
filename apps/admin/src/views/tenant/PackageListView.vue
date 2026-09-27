@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { AppIcon, showToast, ApiError } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, ApiError } from '@aiteach/shared'
 import type { FeatureSwitches, PackageRecord } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
@@ -113,15 +113,13 @@ onMounted(load)
 
 <template>
   <div>
-    <div class="page-head">
-      <div>
-        <div class="title">套餐管理</div>
-        <p class="desc">套餐定义了机构的 AI 额度、存储、员工数与功能开关；机构开通 / 续费时按套餐初始化配额。</p>
-      </div>
-      <button class="btn btn-primary btn-sm" @click="openCreate">
-        <AppIcon name="plus" :size="15" /> 新增套餐
-      </button>
-    </div>
+    <AppPageHeader desc="套餐定义了机构的 AI 额度、存储、员工数与功能开关；机构开通 / 续费时按套餐初始化配额。">
+      <template #actions>
+        <button class="btn btn-primary btn-sm" @click="openCreate">
+          <AppIcon name="plus" :size="15" /> 新增套餐
+        </button>
+      </template>
+    </AppPageHeader>
 
     <div v-if="loading && packages.length === 0" class="panel loading-panel">加载中…</div>
 

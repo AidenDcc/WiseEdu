@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { AppIcon, showToast, hasImage, toPlainText } from '@aiteach/shared'
+import { AppIcon, AppListToolbar, showToast, hasImage, toPlainText } from '@aiteach/shared'
 import type { FileFolder, OrgFile } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import RichTextEditor from '@/components/ui/RichTextEditor.vue'
@@ -388,8 +388,7 @@ onMounted(load)
 
     <!-- 右：文件表 -->
     <div class="panel table-panel">
-      <div class="filter-bar">
-        <input v-model="keyword" class="f-input search-box" placeholder="搜索文件名" style="width: 220px" />
+      <AppListToolbar v-model="keyword" placeholder="搜索文件名" :search-width="220">
         <span class="f-hint">当前：{{ activeFolder === 0 ? '全部文件' : folderName(activeFolder) }}（{{ visibleFiles.length }}）</span>
         <label class="rounds-pick" title="识别后自动复核答案/解析的轮数；超轮仍有异常将提醒人工介入">
           AI 检查轮次
@@ -400,51 +399,55 @@ onMounted(load)
             <option :value="3">3 轮</option>
           </select>
         </label>
-        <button class="btn btn-primary btn-sm" style="margin-left: auto" @click="uploadTarget = activeFolder; uploadOpen = true">
-          <AppIcon name="upload" :size="14" /> 上传文件
-        </button>
-      </div>
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>文件名</th>
-            <th>类型</th>
-            <th>大小</th>
-            <th>所属文件夹</th>
-            <th>识别状态</th>
-            <th>上传人</th>
-            <th>上传时间</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="visibleFiles.length === 0">
-            <td colspan="8" class="empty-row">暂无文件</td>
-          </tr>
-          <template v-else>
-            <tr v-for="row in visibleFiles" :key="row.id">
-              <td class="cell-strong">
-                <span class="file-ico"><AppIcon :name="KIND_ICON[row.kind]" :size="14" /></span>
-                {{ row.name }}
-              </td>
-              <td>{{ row.kind.toUpperCase() }}</td>
-              <td>{{ row.sizeMb }} MB</td>
-              <td>{{ folderName(row.folderId) }}</td>
-              <td><span class="tag" :class="RECOGNIZE_CLASS[row.recognize]">{{ RECOGNIZE_TEXT[row.recognize] }}</span></td>
-              <td>{{ row.owner }}</td>
-              <td>{{ row.uploadedAt }}</td>
-              <td>
-                <div class="op-group">
-                  <button class="mini-btn" @click="onPreview(row)">预览</button>
-                  <button v-if="row.recognize === 'none'" class="mini-btn success" @click="startRecognize(row)">识别入库</button>
-                  <button class="mini-btn" @click="onDownload(row)">下载</button>
-                  <button class="mini-btn danger" @click="onDelete(row)">删除</button>
-                </div>
-              </td>
+        <template #right>
+          <button class="btn btn-primary btn-sm" @click="uploadTarget = activeFolder; uploadOpen = true">
+            <AppIcon name="upload" :size="14" /> 上传文件
+          </button>
+        </template>
+      </AppListToolbar>
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>文件名</th>
+              <th>类型</th>
+              <th>大小</th>
+              <th>所属文件夹</th>
+              <th>识别状态</th>
+              <th>上传人</th>
+              <th>上传时间</th>
+              <th>操作</th>
             </tr>
-          </template>
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            <tr v-if="visibleFiles.length === 0">
+              <td colspan="8" class="empty-row">暂无文件</td>
+            </tr>
+            <template v-else>
+              <tr v-for="row in visibleFiles" :key="row.id">
+                <td class="cell-strong">
+                  <span class="file-ico"><AppIcon :name="KIND_ICON[row.kind]" :size="14" /></span>
+                  {{ row.name }}
+                </td>
+                <td>{{ row.kind.toUpperCase() }}</td>
+                <td>{{ row.sizeMb }} MB</td>
+                <td>{{ folderName(row.folderId) }}</td>
+                <td><span class="tag" :class="RECOGNIZE_CLASS[row.recognize]">{{ RECOGNIZE_TEXT[row.recognize] }}</span></td>
+                <td>{{ row.owner }}</td>
+                <td>{{ row.uploadedAt }}</td>
+                <td>
+                  <div class="op-group">
+                    <button class="mini-btn" @click="onPreview(row)">预览</button>
+                    <button v-if="row.recognize === 'none'" class="mini-btn success" @click="startRecognize(row)">识别入库</button>
+                    <button class="mini-btn" @click="onDownload(row)">下载</button>
+                    <button class="mini-btn danger" @click="onDelete(row)">删除</button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- 文件夹弹窗 -->
@@ -643,11 +646,11 @@ onMounted(load)
 .folder-row.root { font-weight: 600; }
 .fr-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fr-count { font-size: 11.5px; color: var(--sub); }
-.fr-ops { display: none; gap: 3px; }
+.fr-ops { display: none; align-items: center; gap: 3px; }
 .folder-row:hover .fr-ops { display: flex; }
 
 .usage-box { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; }
-.usage-row { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--ink-2); margin-bottom: 6px; }
+.usage-row { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; color: var(--ink-2); margin-bottom: 6px; }
 .usage-track { height: 7px; border-radius: 999px; background: var(--border); overflow: hidden; }
 .usage-fill { height: 100%; background: linear-gradient(90deg, var(--brand), var(--brand-deep)); }
 
@@ -658,7 +661,7 @@ onMounted(load)
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 12.5px; color: var(--sub); white-space: nowrap;
 }
-.rounds-pick .f-select { width: 84px; height: 32px; font-size: 12.5px; }
+.rounds-pick .f-select { width: 84px; height: var(--ctrl-h); font-size: 12.5px; }
 
 /* AI 质检结论条：通过绿 / 超轮异常红 */
 .verify-banner {
@@ -676,7 +679,12 @@ onMounted(load)
   background: #fff; border: 1px solid var(--border); border-radius: 8px;
   font-size: 12.5px; color: var(--ink-2); padding: 4px 10px;
 }
-.chip-x { display: flex; color: var(--sub); }
+/* 纯图标按钮：撑成不小于 22×22 的命中区，图标在其中居中 */
+.chip-x {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; flex-shrink: 0; padding: 0;
+  border: none; border-radius: 6px; background: transparent; color: var(--sub);
+}
 
 /* ===== AI 识别弹窗 ===== */
 .recog-running { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 18px 0 8px; }
@@ -688,7 +696,7 @@ onMounted(load)
 }
 @keyframes ring-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.92); opacity: 0.75; } }
 .run-title { font-size: 14.5px; font-weight: 600; color: var(--ink); }
-.run-steps { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.run-steps { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
 .run-steps span { font-size: 12px; color: var(--sub); background: #f5f8f8; border-radius: 999px; padding: 3px 10px; }
 .progress-track { width: 100%; height: 7px; border-radius: 999px; background: var(--border); overflow: hidden; }
 .progress-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--brand), var(--brand-deep)); transition: width 0.25s; }

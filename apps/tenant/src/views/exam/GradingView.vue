@@ -16,6 +16,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   ANSWER_STATUS_TEXT,
   AppIcon,
+  AppPageHeader,
   CLASS_NAMES,
   type AnswerItem,
   type AnswerStatus,
@@ -371,7 +372,7 @@ onMounted(async () => {
 
 <template>
   <!-- ================= 阅卷工作台 ================= -->
-  <div v-if="session && paper" class="gr-page">
+  <div v-if="session && paper" class="page">
     <div v-if="unfinished" class="gr-tip">
       <AppIcon name="warning" :size="15" />
       <span>本次考试还有 <b>{{ pendingCount }}</b> 份答卷未批阅，结束阅卷前请先完成全部给分。</span>
@@ -432,21 +433,21 @@ onMounted(async () => {
         <div class="gr-ans-head">
           <div class="section-title">答卷（{{ filteredAnswers.length }} 份）</div>
           <div class="gr-ans-filters">
-            <select v-model="answerFilter.className" class="f-select" style="width: 120px">
+            <select v-model="answerFilter.className" class="f-select">
               <option value="">全部班级</option>
               <option v-for="c in classOptions" :key="c" :value="c">{{ c }}</option>
             </select>
-            <select v-model="answerFilter.status" class="f-select" style="width: 110px">
+            <select v-model="answerFilter.status" class="f-select">
               <option value="">全部状态</option>
               <option v-for="(text, s) in ANSWER_STATUS_TEXT" :key="s" :value="s">{{ text }}</option>
             </select>
             <label class="gr-check"><input v-model="answerFilter.pendingOnly" type="checkbox" /> 仅待阅</label>
-            <input v-model="answerFilter.keyword" class="f-input" style="width: 140px" placeholder="搜索学生" />
+            <input v-model="answerFilter.keyword" class="f-input" placeholder="搜索学生" />
           </div>
         </div>
 
         <div class="gr-ans-list">
-          <p v-if="!pagedAnswers.length" class="f-hint" style="padding: 30px; text-align: center">
+          <p v-if="!pagedAnswers.length" class="empty-row">
             {{ loading ? '正在载入…' : '没有符合条件的答卷' }}
           </p>
           <div
@@ -507,7 +508,6 @@ onMounted(async () => {
                 :ref="(el) => (scoreEls[item.questionId] = (el as HTMLInputElement) || null)"
                 v-model.number="draftScores[item.questionId]"
                 class="f-input"
-                style="width: 90px"
                 type="number"
                 :min="0"
                 :max="item.full"
@@ -530,19 +530,15 @@ onMounted(async () => {
 
   <!-- ================= 列表 ================= -->
   <div v-else-if="!loading || sessions.length" class="page">
-    <div class="page-head">
-      <div>
-        <h2 style="font-size: 18px; font-weight: 700">在线阅卷</h2>
-        <p class="f-hint" style="margin-top: 4px">把一份试卷下发到班级、分配阅卷人、逐题录入成绩，结束阅卷后成绩进入试卷分析。</p>
-      </div>
-      <div class="op-group">
+    <AppPageHeader desc="把一份试卷下发到班级、分配阅卷人、逐题录入成绩，结束阅卷后成绩进入试卷分析。">
+      <template #actions>
         <button class="btn btn-primary" @click="openCreate"><AppIcon name="plus" :size="15" /> 新建考试</button>
-      </div>
-    </div>
+      </template>
+    </AppPageHeader>
 
     <div class="panel">
       <div class="gr-grid">
-        <p v-if="!sessions.length" class="f-hint" style="padding: 30px; text-align: center; grid-column: 1 / -1">
+        <p v-if="!sessions.length" class="empty-row" style="grid-column: 1 / -1">
           {{ loading ? '正在载入…' : '暂无考试，点击右上角新建' }}
         </p>
         <div v-for="row in sessions" :key="row.id" class="gr-card">
@@ -627,7 +623,6 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.gr-page { display: flex; flex-direction: column; gap: 12px; }
 .gr-tip {
   display: flex; align-items: center; gap: 8px;
   background: var(--warn-soft); color: var(--warn);
@@ -665,6 +660,9 @@ onMounted(async () => {
 .gr-answers { padding: 14px; display: flex; flex-direction: column; }
 .gr-ans-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
 .gr-ans-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* 自写横向工具条：下拉 / 输入框不能吃满整行，高度与行内其它控件一致 */
+.gr-ans-filters .f-select { width: auto; min-width: 118px; flex-shrink: 0; height: var(--ctrl-h); }
+.gr-ans-filters .f-input { width: 150px; flex-shrink: 0; height: var(--ctrl-h); }
 .gr-check { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-2); }
 .gr-check input { accent-color: var(--brand); }
 .gr-ans-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
@@ -691,6 +689,8 @@ onMounted(async () => {
 .gr-q-line { font-size: 12.5px; color: var(--ink-2); line-height: 1.6; margin-top: 4px; }
 .gr-q-line.ok { color: var(--success); }
 .gr-q-score { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.gr-q-score .f-input { width: 90px; flex-shrink: 0; height: var(--ctrl-h); }
+.gr-q-score .f-hint { margin-top: 0; }
 .gr-remark { border-top: 1px dashed var(--border); padding-top: 12px; }
 
 /* 列表 */

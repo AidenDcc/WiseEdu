@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
-import { AppIcon, showToast } from '@aiteach/shared'
+import { AppIcon, AppListToolbar, AppSegmented, showToast } from '@aiteach/shared'
 import type { StandardFormula } from '@aiteach/shared'
 import KnowledgeFilter from '@/components/ui/KnowledgeFilter.vue'
 import { collectStandardFormula, fetchStandardFormulas, fetchTenantDict } from '@/api/org'
@@ -12,6 +12,12 @@ const subjects = ref<string[]>([])
 const subject = ref('')
 const keyword = ref('')
 const onlyCollected = ref(false)
+
+/** 学科学页签：互斥分段控件（「全部」由空值表示） */
+const SUBJECT_OPTIONS = computed(() => [
+  { value: '', label: '全部' },
+  ...subjects.value.map((name) => ({ value: name, label: name })),
+])
 /** 知识点过滤（KnowledgeFilter 选中节点的子树叶子 tag；null = 全部） */
 const activeTags = ref<string[] | null>(null)
 
@@ -65,33 +71,21 @@ async function onCollect(row: StandardFormula) {
     <!-- 右侧：学科学页签 + 公式卡片 -->
     <div class="right-col">
       <div class="panel lib-panel">
-        <div class="subject-tabs">
-          <button class="subj-tab" :class="{ on: subject === '' }" type="button" @click="subject = ''">
-            全部
-          </button>
-          <button
-            v-for="name in subjects"
-            :key="name"
-            class="subj-tab"
-            :class="{ on: subject === name }"
-            type="button"
-            @click="subject = name"
-          >
-            {{ name }}
-          </button>
+        <div class="subject-switch">
+          <AppSegmented v-model="subject" :options="SUBJECT_OPTIONS" />
         </div>
 
-        <div class="filter-bar">
-          <span class="filter-label">关键词</span>
-          <input v-model="keyword" class="f-input" placeholder="公式名 / 章节 / LaTeX 片段" style="width: 200px" />
+        <AppListToolbar v-model="keyword" placeholder="公式名 / 章节 / LaTeX 片段" :search-width="200">
           <label class="collect-toggle">
             <input v-model="onlyCollected" type="checkbox" />
             仅看已收藏
           </label>
-          <span class="f-hint" style="margin-left: auto">{{ filtered.length }} 个公式</span>
-        </div>
+          <template #right>
+            <span class="f-hint">{{ filtered.length }} 个公式</span>
+          </template>
+        </AppListToolbar>
 
-        <div class="formula-grid">
+        <div v-if="filtered.length" class="formula-grid">
           <div v-for="row in filtered" :key="row.id" class="formula-card">
             <div class="fc-top">
               <span class="fc-name">{{ row.name }}</span>
@@ -112,10 +106,10 @@ async function onCollect(row: StandardFormula) {
               <button class="mini-btn" @click="onCopy(row)">复制 LaTeX</button>
             </div>
           </div>
-          <p v-if="filtered.length === 0" class="f-hint" style="grid-column: 1 / -1; text-align: center; padding: 30px">
-            {{ subject ? `「${subject}」暂无匹配公式` : '无匹配公式' }}
-          </p>
         </div>
+        <p v-else class="empty-row">
+          {{ subject ? `「${subject}」暂无匹配公式` : '无匹配公式' }}
+        </p>
       </div>
     </div>
   </div>
@@ -132,32 +126,24 @@ async function onCollect(row: StandardFormula) {
   min-height: 460px;
 }
 .right-col { flex: 1; min-width: 0; min-height: 0; height: 100%; }
-.lib-panel { height: 100%; display: flex; flex-direction: column; overflow-y: auto; }
+.lib-panel { height: 100%; display: flex; flex-direction: column; overflow-y: auto; padding: 14px 18px; }
 
-/* 学科学页签 */
-.subject-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; flex-shrink: 0; }
-.subj-tab {
-  border: 1.5px solid var(--border);
-  border-radius: 9px;
-  background: #fff;
-  color: var(--ink-2);
-  font-size: 13px;
-  font-weight: 600;
-  padding: 6px 14px;
-  transition: all 0.15s;
-}
-.subj-tab:hover { border-color: var(--brand); color: var(--brand-deep); }
-.subj-tab.on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-deep); }
+/* 学科学页签：分段控件按内容宽度收窄，不撑满整行 */
+.subject-switch { align-self: flex-start; margin-bottom: 12px; flex-shrink: 0; }
 
-.collect-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--ink-2); margin-left: 10px; }
-.filter-bar { flex-shrink: 0; }
+.collect-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--ink-2); }
 
-.formula-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; padding: 12px 2px 8px; }
+.formula-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
 .formula-card { border: 1.5px solid var(--border); border-radius: 12px; padding: 13px 15px; background: #fff; transition: border-color 0.15s; }
 .formula-card:hover { border-color: var(--brand); }
 .fc-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .fc-name { font-size: 14px; font-weight: 600; color: var(--ink); }
-.star-btn { border: none; background: transparent; color: #c6cfd8; display: flex; padding: 2px; }
+/* 纯图标按钮：撑成不小于 22×22 的命中区，图标在其中居中 */
+.star-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; flex-shrink: 0;
+  border: none; border-radius: 6px; background: transparent; color: #c6cfd8; padding: 0;
+}
 .star-btn.on { color: #f0a23c; }
 .fc-chapter { font-size: 11.5px; color: var(--sub); margin: 4px 0 8px; }
 .fc-preview {

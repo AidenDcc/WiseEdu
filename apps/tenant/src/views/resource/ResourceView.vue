@@ -12,13 +12,18 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
+  AppFilterPanel,
   AppIcon,
+  AppListToolbar,
+  AppPageHeader,
+  AppSegmented,
   APPROVAL_STATUS_TEXT,
   RESOURCE_SCOPE_TEXT,
   TEACH_KIND_TEXT,
   showToast,
   truncateRich,
 } from '@aiteach/shared'
+import type { FilterRowDef } from '@aiteach/shared'
 import type {
   ApprovalKind,
   ApprovalStatus,
@@ -53,7 +58,14 @@ type Tab = 'approval' | 'library'
 /* 路由以 props 指定初始 Tab：菜单里「校本资源库」与「审批管理」是两个入口，
    进哪个就该停在哪个 Tab 上，否则点「校本资源库」却看到审批列表会让人以为走错了。 */
 const props = withDefaults(defineProps<{ tab?: Tab }>(), { tab: 'approval' })
-const tab = ref<Tab>(props.tab)
+/* 用 string 承载：AppSegmented 的 modelValue 是 string，v-model 回写才不会类型冲突 */
+const tab = ref<string>(props.tab)
+
+/** 顶部 Tab（互斥分段控件） */
+const TAB_OPTIONS = [
+  { value: 'approval', label: '审批管理', icon: 'clipboard' },
+  { value: 'library', label: '校本资源库', icon: 'folder' },
+]
 
 /* ================= 审批管理 ================= */
 const summary = ref({ pending: 0, approved: 0, rejected: 0 })
@@ -61,6 +73,24 @@ const approvals = ref<ResourceApproval[]>([])
 const statusFilter = ref<'' | ApprovalStatus>('')
 const staffList = ref<StaffMember[]>([])
 const activeName = ref('')
+
+/** 审批单状态筛选行（单选：点已选项即回到「全部」） */
+const APPROVAL_FILTER_ROWS: FilterRowDef[] = [
+  { key: 'status', label: '状态', options: Object.values(APPROVAL_STATUS_TEXT), multiple: false },
+]
+
+/** chip 上是文案，落回接口要的业务值 */
+function statusKeyOf(text: string): '' | ApprovalStatus {
+  return (Object.keys(APPROVAL_STATUS_TEXT) as ApprovalStatus[]).find((k) => APPROVAL_STATUS_TEXT[k] === text) ?? ''
+}
+
+const approvalFilters = computed<Record<string, string[]>>(() => ({
+  status: statusFilter.value ? [APPROVAL_STATUS_TEXT[statusFilter.value]] : [],
+}))
+
+function onApprovalFiltersChange(next: Record<string, string[]>) {
+  statusFilter.value = statusKeyOf(next.status?.[0] ?? '')
+}
 
 const scopeTagClass = (s: ApprovalStatus) =>
   s === 'approved' ? 'tag-green' : s === 'rejected' ? 'tag-red' : 'tag-orange'
@@ -249,6 +279,25 @@ interface LibItem {
 const libFilter = reactive({ type: '', subject: '', grade: '', keyword: '' })
 const libPage = ref(1)
 
+/** 校本资源库筛选行（学科 / 年级是字典，需等基础数据就绪，故用 computed） */
+const libFilterRows = computed<FilterRowDef[]>(() => [
+  { key: 'type', label: '类型', options: [...APPROVAL_KINDS], multiple: false },
+  { key: 'subject', label: '学科', options: subjects.value, multiple: false },
+  { key: 'grade', label: '年级', options: grades.value, multiple: false },
+])
+
+const libFilters = computed<Record<string, string[]>>(() => ({
+  type: libFilter.type ? [libFilter.type] : [],
+  subject: libFilter.subject ? [libFilter.subject] : [],
+  grade: libFilter.grade ? [libFilter.grade] : [],
+}))
+
+function onLibFiltersChange(next: Record<string, string[]>) {
+  libFilter.type = next.type?.[0] ?? ''
+  libFilter.subject = next.subject?.[0] ?? ''
+  libFilter.grade = next.grade?.[0] ?? ''
+}
+
 const library = computed<LibItem[]>(() => {
   const items: LibItem[] = []
   for (const a of approvals.value) {
@@ -341,154 +390,130 @@ watch(statusFilter, () => void loadApprovals())
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <div>
-        <h2 style="font-size: 18px; font-weight: 700">校本资源与审批</h2>
-        <p class="f-hint" style="margin-top: 4px">资源从个人逐级提审至校本 / 公开；通过审批的资源与已发布备课文档统一沉淀为校本资源库。</p>
-      </div>
-    </div>
+    <AppPageHeader desc="资源从个人逐级提审至校本 / 公开；通过审批的资源与已发布备课文档统一沉淀为校本资源库。" />
 
-    <div class="rv-tabs">
-      <button type="button" :class="{ on: tab === 'approval' }" @click="tab = 'approval'">
-        <AppIcon name="clipboard" :size="15" /> 审批管理
-      </button>
-      <button type="button" :class="{ on: tab === 'library' }" @click="tab = 'library'">
-        <AppIcon name="folder" :size="15" /> 校本资源库
-      </button>
-    </div>
+    <AppSegmented v-model="tab" :options="TAB_OPTIONS" />
 
     <!-- ================= 审批管理 ================= -->
-    <div v-if="tab === 'approval'" class="panel">
-      <div class="rv-stats">
-        <div class="rv-stat">
-          <span class="rv-stat-num" style="color: var(--warn)">{{ summary.pending }}</span>
-          <span class="rv-stat-label">待审批</span>
+    <template v-if="tab === 'approval'">
+      <AppFilterPanel
+        :model-value="approvalFilters"
+        :rows="APPROVAL_FILTER_ROWS"
+        @update:model-value="onApprovalFiltersChange"
+      />
+      <div class="panel">
+        <div class="rv-stats">
+          <div class="rv-stat">
+            <span class="rv-stat-num" style="color: var(--warn)">{{ summary.pending }}</span>
+            <span class="rv-stat-label">待审批</span>
+          </div>
+          <div class="rv-stat">
+            <span class="rv-stat-num" style="color: var(--success)">{{ summary.approved }}</span>
+            <span class="rv-stat-label">已通过</span>
+          </div>
+          <div class="rv-stat">
+            <span class="rv-stat-num" style="color: var(--danger)">{{ summary.rejected }}</span>
+            <span class="rv-stat-label">已驳回</span>
+          </div>
+          <div class="rv-stats-ops">
+            <span class="f-hint">当前身份</span>
+            <select v-model="activeName" class="f-select">
+              <option v-for="s in staffList" :key="s.id" :value="s.name">{{ s.name }}</option>
+            </select>
+            <button class="btn btn-primary btn-sm" @click="openSubmit"><AppIcon name="plus" :size="14" /> 提交审批</button>
+          </div>
         </div>
-        <div class="rv-stat">
-          <span class="rv-stat-num" style="color: var(--success)">{{ summary.approved }}</span>
-          <span class="rv-stat-label">已通过</span>
-        </div>
-        <div class="rv-stat">
-          <span class="rv-stat-num" style="color: var(--danger)">{{ summary.rejected }}</span>
-          <span class="rv-stat-label">已驳回</span>
-        </div>
-        <div class="rv-stats-ops">
-          <span class="f-hint">当前身份</span>
-          <select v-model="activeName" class="f-select" style="width: 120px; height: 34px">
-            <option v-for="s in staffList" :key="s.id" :value="s.name">{{ s.name }}</option>
-          </select>
-          <button class="btn btn-primary btn-sm" @click="openSubmit"><AppIcon name="plus" :size="14" /> 提交审批</button>
-        </div>
-      </div>
 
-      <div class="filter-bar">
-        <span class="filter-label">状态</span>
-        <select v-model="statusFilter" class="f-select" style="width: 130px">
-          <option value="">全部</option>
-          <option value="pending">待审批</option>
-          <option value="approved">已通过</option>
-          <option value="rejected">已驳回</option>
-        </select>
-      </div>
-
-      <div class="rv-approval-list">
-        <p v-if="!approvals.length" class="f-hint" style="padding: 30px; text-align: center">暂无审批单</p>
-        <div v-for="a in approvals" :key="a.id" class="rv-ap">
-          <div class="rv-ap-main">
-            <div class="rv-ap-top">
-              <span class="tag" :class="kindTagClass(a.kind)">{{ a.kind }}</span>
-              <b class="rv-ap-name">{{ a.name }}</b>
-              <span class="tag" :class="scopeTagClass(a.status)">{{ APPROVAL_STATUS_TEXT[a.status] }}</span>
+        <div class="rv-approval-list">
+          <p v-if="!approvals.length" class="empty-row">暂无审批单</p>
+          <div v-for="a in approvals" :key="a.id" class="rv-ap">
+            <div class="rv-ap-main">
+              <div class="rv-ap-top">
+                <span class="tag" :class="kindTagClass(a.kind)">{{ a.kind }}</span>
+                <b class="rv-ap-name">{{ a.name }}</b>
+                <span class="tag" :class="scopeTagClass(a.status)">{{ APPROVAL_STATUS_TEXT[a.status] }}</span>
+              </div>
+              <p class="f-hint">
+                {{ a.grade }} · {{ a.subject }} · 申请人 {{ a.applicant }} · 提交 {{ a.submittedAt }}
+                <template v-if="a.status !== 'pending'"> · 审核人 {{ a.reviewer }} · {{ a.reviewedAt }}</template>
+              </p>
+              <p v-if="a.status !== 'pending' && a.opinion" class="rv-ap-opinion">审批意见：{{ a.opinion }}</p>
             </div>
-            <p class="f-hint">
-              {{ a.grade }} · {{ a.subject }} · 申请人 {{ a.applicant }} · 提交 {{ a.submittedAt }}
-              <template v-if="a.status !== 'pending'"> · 审核人 {{ a.reviewer }} · {{ a.reviewedAt }}</template>
-            </p>
-            <p v-if="a.status !== 'pending' && a.opinion" class="rv-ap-opinion">审批意见：{{ a.opinion }}</p>
-          </div>
-          <div class="rv-ap-ops">
-            <button
-              v-if="a.status === 'pending' && a.applicant === activeName"
-              class="mini-btn"
-              @click="onRevoke(a)"
-            >
-              撤回
-            </button>
-            <button
-              v-if="a.status === 'pending'"
-              class="mini-btn success"
-              @click="openPass(a)"
-            >
-              通过
-            </button>
-            <button
-              v-if="a.status === 'pending'"
-              class="mini-btn danger"
-              @click="openReject(a)"
-            >
-              驳回
-            </button>
-            <button class="mini-btn" @click="toggleLog(a.id)">
-              {{ expandLogId === a.id ? '收起日志' : '审批日志' }}
-            </button>
-          </div>
+            <div class="rv-ap-ops">
+              <button
+                v-if="a.status === 'pending' && a.applicant === activeName"
+                class="mini-btn"
+                @click="onRevoke(a)"
+              >
+                撤回
+              </button>
+              <button
+                v-if="a.status === 'pending'"
+                class="mini-btn success"
+                @click="openPass(a)"
+              >
+                通过
+              </button>
+              <button
+                v-if="a.status === 'pending'"
+                class="mini-btn danger"
+                @click="openReject(a)"
+              >
+                驳回
+              </button>
+              <button class="mini-btn" @click="toggleLog(a.id)">
+                {{ expandLogId === a.id ? '收起日志' : '审批日志' }}
+              </button>
+            </div>
 
-          <div v-if="expandLogId === a.id" class="rv-log">
-            <p v-if="!a.logs.length" class="f-hint">暂无日志</p>
-            <div v-for="(log, i) in a.logs" :key="i" class="rv-log-row">
-              <span class="rv-log-dot" />
-              <div>
-                <p><b>{{ log.by }}</b> · {{ log.action }} <span class="f-hint">{{ log.at }}</span></p>
-                <p v-if="log.note" class="f-hint">{{ log.note }}</p>
+            <div v-if="expandLogId === a.id" class="rv-log">
+              <p v-if="!a.logs.length" class="f-hint">暂无日志</p>
+              <div v-for="(log, i) in a.logs" :key="i" class="rv-log-row">
+                <span class="rv-log-dot" />
+                <div>
+                  <p><b>{{ log.by }}</b> · {{ log.action }} <span class="f-hint">{{ log.at }}</span></p>
+                  <p v-if="log.note" class="f-hint">{{ log.note }}</p>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
-    </div>
+    </template>
 
     <!-- ================= 校本资源库 ================= -->
-    <div v-else class="panel">
-      <div class="filter-bar">
-        <span class="filter-label">类型</span>
-        <select v-model="libFilter.type" class="f-select" style="width: 130px">
-          <option value="">全部</option>
-          <option v-for="k in APPROVAL_KINDS" :key="k" :value="k">{{ k }}</option>
-        </select>
-        <span class="filter-label">学科</span>
-        <select v-model="libFilter.subject" class="f-select" style="width: 118px">
-          <option value="">全部</option>
-          <option v-for="s in subjects" :key="s" :value="s">{{ s }}</option>
-        </select>
-        <span class="filter-label">年级</span>
-        <select v-model="libFilter.grade" class="f-select" style="width: 118px">
-          <option value="">全部</option>
-          <option v-for="g in grades" :key="g" :value="g">{{ g }}</option>
-        </select>
-        <input v-model="libFilter.keyword" class="f-input" placeholder="资源名称" style="width: 190px" />
-      </div>
+    <template v-else>
+      <AppFilterPanel
+        :model-value="libFilters"
+        :rows="libFilterRows"
+        @update:model-value="onLibFiltersChange"
+      />
 
-      <div class="rv-grid">
-        <p v-if="!libRows.length" class="f-hint" style="padding: 30px; text-align: center; grid-column: 1 / -1">
-          暂无校本资源，通过审批的资源与已发布备课文档会在此沉淀
-        </p>
-        <div v-for="item in libRows" :key="`${item.kind}-${item.id}`" class="rv-card">
-          <div class="rv-card-top">
-            <span class="tag" :class="kindTagClass(item.kind)">{{ item.kind }}</span>
-            <span class="tag" :class="item.scope === 'public' ? 'tag-green' : 'tag-blue'">
-              {{ RESOURCE_SCOPE_TEXT[item.scope] }}
-            </span>
-          </div>
-          <h3 class="rv-card-name">{{ item.name }}</h3>
-          <p class="rv-card-meta">{{ item.grade }} · {{ item.subject }}</p>
-          <p class="rv-card-foot">{{ item.uploader }} · {{ item.time }}</p>
-          <div class="op-group">
-            <button class="mini-btn" @click="viewResource(item)">查看</button>
+      <div class="panel">
+        <AppListToolbar v-model="libFilter.keyword" placeholder="资源名称" class="rv-toolbar" />
+
+        <div class="rv-grid">
+          <p v-if="!libRows.length" class="empty-row" style="grid-column: 1 / -1">
+            暂无校本资源，通过审批的资源与已发布备课文档会在此沉淀
+          </p>
+          <div v-for="item in libRows" :key="`${item.kind}-${item.id}`" class="rv-card">
+            <div class="rv-card-top">
+              <span class="tag" :class="kindTagClass(item.kind)">{{ item.kind }}</span>
+              <span class="tag" :class="item.scope === 'public' ? 'tag-green' : 'tag-blue'">
+                {{ RESOURCE_SCOPE_TEXT[item.scope] }}
+              </span>
+            </div>
+            <h3 class="rv-card-name">{{ item.name }}</h3>
+            <p class="rv-card-meta">{{ item.grade }} · {{ item.subject }}</p>
+            <p class="rv-card-foot">{{ item.uploader }} · {{ item.time }}</p>
+            <div class="op-group">
+              <button class="mini-btn" @click="viewResource(item)">查看</button>
+            </div>
           </div>
         </div>
+        <AppPagination :total="libFiltered.length" v-model:page="libPage" :page-size="12" />
       </div>
-      <AppPagination :total="libFiltered.length" v-model:page="libPage" :page-size="12" />
-    </div>
+    </template>
 
     <!-- 通过确认（意见选填） -->
     <AppModal v-if="passOpen" title="通过审批单" :width="460" @close="passOpen = false">
@@ -568,20 +593,12 @@ watch(statusFilter, () => void loadApprovals())
 </template>
 
 <style scoped>
-.rv-tabs { display: flex; gap: 8px; margin-bottom: 14px; }
-.rv-tabs button {
-  display: inline-flex; align-items: center; gap: 6px;
-  border: 1.5px solid var(--border); border-radius: 10px;
-  background: #fff; color: var(--ink-2); font-size: 13.5px; font-weight: 600;
-  padding: 0 18px; height: 40px;
-}
-.rv-tabs button.on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-deep); }
-
 .rv-stats { display: flex; align-items: center; gap: 14px; padding: 16px 18px; border-bottom: 1px solid var(--border); }
 .rv-stat { display: flex; flex-direction: column; align-items: center; min-width: 84px; }
 .rv-stat-num { font-size: 26px; font-weight: 800; line-height: 1.1; }
 .rv-stat-label { font-size: 12px; color: var(--sub); margin-top: 2px; }
 .rv-stats-ops { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.rv-stats-ops .f-select { width: auto; min-width: 118px; flex-shrink: 0; height: var(--ctrl-h); }
 
 .rv-approval-list { display: flex; flex-direction: column; }
 .rv-ap {
@@ -596,10 +613,12 @@ watch(statusFilter, () => void loadApprovals())
 .rv-ap-ops { display: flex; align-items: center; gap: 4px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
 
 .rv-log { margin-top: 10px; padding: 10px 12px; background: #f8fafd; border-radius: 10px; }
-.rv-log-row { display: flex; gap: 10px; padding: 4px 0; }
+.rv-log-row { display: flex; align-items: flex-start; gap: 10px; padding: 4px 0; }
 .rv-log-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--brand); margin-top: 6px; flex-shrink: 0; }
 
-.rv-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; padding: 16px; }
+/* 面板自身不留白：工具条 / 网格各自带内边距，分页组件自带内边距 */
+.rv-toolbar { padding: 14px 16px 0; margin-bottom: 0; }
+.rv-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; padding: 14px 16px 4px; }
 .rv-card {
   border: 1.5px solid var(--border); border-radius: 12px;
   padding: 14px; display: flex; flex-direction: column; gap: 8px;

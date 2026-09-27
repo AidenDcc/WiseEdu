@@ -74,42 +74,44 @@ function onPending(name: string) {
             全部 <AppIcon name="arrow-right" :size="13" />
           </button>
         </template>
-        <table class="table">
-          <thead>
-            <tr>
-              <th>机构名称</th>
-              <th>类型 / 学段</th>
-              <th>联系人</th>
-              <th>提交时间</th>
-              <th>等待时长</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="apply in overview.pendingApplies" :key="apply.applyNo">
-              <td>
-                <div class="org-cell">
-                  <span class="org-name">{{ apply.orgName }}</span>
-                  <span class="org-no">{{ apply.applyNo }}</span>
-                </div>
-              </td>
-              <td class="muted">{{ apply.orgType }} · {{ apply.stages }}</td>
-              <td>
-                <div>{{ apply.contact }}</div>
-                <div class="muted">{{ apply.phone }}</div>
-              </td>
-              <td class="muted">{{ apply.submittedAt }}</td>
-              <td>
-                <span class="tag" :class="apply.overtime ? 'tag-red' : 'tag-gray'">
-                  {{ apply.overtime ? '超时' : '' }} {{ apply.waitingHours }}h
-                </span>
-              </td>
-              <td>
-                <button class="mini-btn" @click="router.push('/tenant/apply')">去处理</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>机构名称</th>
+                <th>类型 / 学段</th>
+                <th>联系人</th>
+                <th>提交时间</th>
+                <th>等待时长</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="apply in overview.pendingApplies" :key="apply.applyNo">
+                <td>
+                  <div class="org-cell">
+                    <span class="org-name">{{ apply.orgName }}</span>
+                    <span class="org-no">{{ apply.applyNo }}</span>
+                  </div>
+                </td>
+                <td class="muted">{{ apply.orgType }} · {{ apply.stages }}</td>
+                <td>
+                  <div>{{ apply.contact }}</div>
+                  <div class="muted">{{ apply.phone }}</div>
+                </td>
+                <td class="muted">{{ apply.submittedAt }}</td>
+                <td>
+                  <span class="tag" :class="apply.overtime ? 'tag-red' : 'tag-gray'">
+                    {{ apply.overtime ? '超时' : '' }} {{ apply.waitingHours }}h
+                  </span>
+                </td>
+                <td>
+                  <button class="dash-btn" @click="router.push('/tenant/apply')">去处理</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </PanelCard>
 
       <PanelCard title="到期预警" subtitle="30 天内到期的机构">
@@ -129,7 +131,7 @@ function onPending(name: string) {
               <span class="tag" :class="tenant.daysLeft <= 7 ? 'tag-red' : 'tag-orange'">
                 剩 {{ tenant.daysLeft }} 天
               </span>
-              <button class="mini-btn ghost" @click="router.push('/tenant/list')">查看</button>
+              <button class="dash-btn ghost" @click="router.push('/tenant/list')">查看</button>
             </div>
           </li>
         </ul>
@@ -161,6 +163,7 @@ function onPending(name: string) {
 
 .range-switch {
   display: flex;
+  align-items: center;
   background: #f1f3f9;
   border-radius: 9px;
   padding: 3px;
@@ -190,28 +193,17 @@ function onPending(name: string) {
   .dual { grid-template-columns: 1fr; }
 }
 
-.table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.table th {
-  text-align: left;
-  font-size: 12px;
-  color: var(--sub);
-  font-weight: 500;
-  padding: 8px 10px 8px 0;
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-}
-.table td {
-  padding: 12px 10px 12px 0;
-  border-bottom: 1px solid #f1f3f8;
-  vertical-align: middle;
-}
-.table tr:last-child td { border-bottom: none; }
 .org-cell { display: flex; flex-direction: column; }
 .org-name { font-weight: 600; }
 .org-no { font-size: 11.5px; color: var(--sub); font-family: 'SF Mono', monospace; }
 .muted { color: var(--sub); font-size: 12.5px; }
 
-.mini-btn {
+/* 工作台的实心 / 浅底动作按钮。**不要叫 `.mini-btn`** —— 全局 `.mini-btn`
+   是透明底色的文字按钮（全仓 169 处在用），同名两种语义会互相覆盖。 */
+.dash-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   border-radius: 8px;
   background: var(--brand-grad);
@@ -219,8 +211,10 @@ function onPending(name: string) {
   font-size: 12px;
   font-weight: 600;
   padding: 5px 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
-.mini-btn.ghost {
+.dash-btn.ghost {
   background: var(--brand-soft);
   color: var(--brand);
 }

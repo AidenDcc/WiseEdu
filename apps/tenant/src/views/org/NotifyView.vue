@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { AppIcon, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast } from '@aiteach/shared'
 import type { NotifyMatrixRow } from '@aiteach/shared'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import { fetchNotifyMatrix, saveNotifyMatrix } from '@/api/org'
@@ -40,40 +40,39 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <h2>通知配置</h2>
-      <span class="f-hint">站内通知免费；短信 / 邮件为付费增值通道，按量计费</span>
-    </div>
+    <AppPageHeader desc="站内通知免费；短信 / 邮件为付费增值通道，按量计费" />
 
     <div class="panel notify-panel">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th style="width: 200px">事件</th>
-            <th>站内通知</th>
-            <th>短信</th>
-            <th>邮件</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in rows" :key="row.key">
-            <td class="cell-strong">{{ row.label }}</td>
-            <td><AppSwitch :model-value="row.inApp" @update:model-value="(v: boolean) => onChange(row, 'inApp', v)" /></td>
-            <td>
-              <div class="cell-switch">
-                <AppSwitch :model-value="row.sms" @update:model-value="(v: boolean) => onChange(row, 'sms', v)" />
-                <span class="pay-tag">付费</span>
-              </div>
-            </td>
-            <td>
-              <div class="cell-switch">
-                <AppSwitch :model-value="row.email" @update:model-value="(v: boolean) => onChange(row, 'email', v)" />
-                <span class="pay-tag">付费</span>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width: 200px">事件</th>
+              <th>站内通知</th>
+              <th>短信</th>
+              <th>邮件</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in rows" :key="row.key">
+              <td class="cell-strong">{{ row.label }}</td>
+              <td><AppSwitch :model-value="row.inApp" @update:model-value="(v: boolean) => onChange(row, 'inApp', v)" /></td>
+              <td>
+                <div class="cell-switch">
+                  <AppSwitch :model-value="row.sms" @update:model-value="(v: boolean) => onChange(row, 'sms', v)" />
+                  <span class="pay-tag">付费</span>
+                </div>
+              </td>
+              <td>
+                <div class="cell-switch">
+                  <AppSwitch :model-value="row.email" @update:model-value="(v: boolean) => onChange(row, 'email', v)" />
+                  <span class="pay-tag">付费</span>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
       <div class="notify-foot">
         <p class="f-hint">

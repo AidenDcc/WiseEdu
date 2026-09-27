@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, AppSearchInput, showToast } from '@aiteach/shared'
 import type { OrgFormula } from '@aiteach/shared'
 import { fetchFormulas, offshelfFormula, reviewFormula } from '@/api/org'
 
@@ -50,11 +50,11 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <h2>机构共享公式</h2>
-      <span class="f-hint">员工提交 → 机构管理员审核上架 → 全机构录题 / 组卷可用</span>
-      <input v-model="keyword" class="f-input" placeholder="搜索公式 / 作者" style="width: 200px; margin-left: auto" />
-    </div>
+    <AppPageHeader desc="员工提交 → 机构管理员审核上架 → 全机构录题 / 组卷可用">
+      <template #actions>
+        <AppSearchInput v-model="keyword" placeholder="搜索公式 / 作者" :width="200" />
+      </template>
+    </AppPageHeader>
 
     <!-- 待审核 -->
     <div class="panel">
@@ -62,7 +62,7 @@ onMounted(load)
         待审核（{{ pendingReview.length }}）
         <span class="f-hint">机构管理员审核后上架</span>
       </div>
-      <p v-if="pendingReview.length === 0" class="f-hint" style="padding: 6px 2px 10px">暂无待审核公式</p>
+      <p v-if="pendingReview.length === 0" class="empty-row">暂无待审核公式</p>
       <div v-for="row in pendingReview" :key="row.id" class="formula-row pending">
         <div class="fr-main">
           <span class="fr-name">{{ row.name }}</span>
@@ -81,7 +81,7 @@ onMounted(load)
     <!-- 已上架 -->
     <div class="panel">
       <div class="section-title">已上架（{{ onshelf.length }}）<span class="f-hint">全机构可用</span></div>
-      <p v-if="onshelf.length === 0" class="f-hint" style="padding: 6px 2px 10px">暂无已上架公式</p>
+      <p v-if="onshelf.length === 0" class="empty-row">暂无已上架公式</p>
       <div v-for="row in onshelf" :key="row.id" class="formula-row">
         <div class="fr-main">
           <span class="fr-name">{{ row.name }}</span>
@@ -112,11 +112,15 @@ onMounted(load)
 </template>
 
 <style scoped>
+/* 面板内容默认贴边：给出统一内边距，行与行之间用下边距分隔（不再靠 2px 侧边补丁） */
+.page > .panel { padding: 14px 16px; }
+
 .formula-row {
   display: flex; align-items: center; gap: 14px;
   border: 1.5px solid var(--border); border-radius: 10px;
-  padding: 10px 14px; margin: 0 2px 8px; background: #fff;
+  padding: 10px 14px; margin-bottom: 8px; background: #fff;
 }
+.formula-row:last-child { margin-bottom: 0; }
 .formula-row.pending { border-color: var(--warn); background: var(--warn-soft); }
 .formula-row.dim { opacity: 0.62; }
 .fr-main { display: flex; align-items: center; gap: 10px; width: 330px; flex-shrink: 0; }

@@ -12,14 +12,18 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
+  AppFilterPanel,
   AppIcon,
+  AppListToolbar,
+  AppPageHeader,
+  AppSegmented,
   GUIDE_BLOCK_TEXT,
   RichTextViewer,
   TEACH_DOC_STATUS_TEXT,
   showToast,
   truncateRich,
 } from '@aiteach/shared'
-import type { GuideBlockKind, LectureBlock, OrgQuestion, TeachDoc } from '@aiteach/shared'
+import type { FilterRowDef, GuideBlockKind, LectureBlock, OrgQuestion, TeachDoc } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import RichTextEditor from '@/components/ui/RichTextEditor.vue'
@@ -48,15 +52,21 @@ const doc = ref<TeachDoc | null>(null)
 
 /* ================= 列表 ================= */
 
-const filter = reactive({ subject: '', grade: '', status: '', keyword: '' })
+const FILTER_ROWS = computed<FilterRowDef[]>(() => [
+  { key: 'subject', label: '学科', options: subjects.value, multiple: false },
+  { key: 'grade', label: '年级', options: grades.value, multiple: false },
+  { key: 'status', label: '状态', options: Object.values(TEACH_DOC_STATUS_TEXT), multiple: false },
+])
+const filters = reactive<Record<string, string[]>>({ subject: [], grade: [], status: [] })
+const keyword = ref('')
 const page = ref(1)
 const filtered = computed(() =>
   docs.value.filter(
     (row) =>
-      (!filter.subject || row.subject === filter.subject) &&
-      (!filter.grade || row.grade === filter.grade) &&
-      (!filter.status || row.status === filter.status) &&
-      (!filter.keyword || row.name.includes(filter.keyword) || row.knowledge.some((k) => k.includes(filter.keyword))),
+      (filters.subject.length === 0 || filters.subject.includes(row.subject)) &&
+      (filters.grade.length === 0 || filters.grade.includes(row.grade)) &&
+      (filters.status.length === 0 || filters.status.includes(TEACH_DOC_STATUS_TEXT[row.status])) &&
+      (!keyword.value || row.name.includes(keyword.value) || row.knowledge.some((k) => k.includes(keyword.value))),
   ),
 )
 const rows = computed(() => filtered.value.slice((page.value - 1) * 9, page.value * 9))
@@ -294,10 +304,10 @@ onMounted(async () => {
       <div class="te-head-main">
         <input v-model="doc.name" class="te-title" maxlength="50" placeholder="学案名称" />
         <div class="te-head-meta">
-          <select v-model="doc.subject" class="f-select" style="width: 96px; height: 28px">
+          <select v-model="doc.subject" class="f-select">
             <option v-for="s in withCurrent(subjects, doc.subject)" :key="s" :value="s">{{ s }}</option>
           </select>
-          <select v-model="doc.grade" class="f-select" style="width: 96px; height: 28px">
+          <select v-model="doc.grade" class="f-select">
             <option v-for="g in withCurrent(grades, doc.grade)" :key="g" :value="g">{{ g }}</option>
           </select>
           <span class="tag" :class="doc.status === 'published' ? 'tag-green' : 'tag-gray'">
@@ -418,8 +428,14 @@ onMounted(async () => {
     <AppModal v-if="previewOpen" :title="doc.name" :width="880" @close="previewOpen = false">
       <div class="gd-switch">
         <span class="f-hint">预览版本</span>
-        <button class="k-chip" :class="{ on: !withAnswer }" type="button" @click="withAnswer = false">学生版（隐去答案）</button>
-        <button class="k-chip" :class="{ on: withAnswer }" type="button" @click="withAnswer = true">教师版（含答案）</button>
+        <AppSegmented
+          :model-value="withAnswer ? 'teacher' : 'student'"
+          :options="[
+            { value: 'student', label: '学生版（隐去答案）' },
+            { value: 'teacher', label: '教师版（含答案）' },
+          ]"
+          @update:model-value="withAnswer = $event === 'teacher'"
+        />
       </div>
       <div class="te-doc">
         <div class="te-doc-head">
@@ -467,38 +483,19 @@ onMounted(async () => {
 
   <!-- ================= 列表 ================= -->
   <div v-else class="page">
-    <div class="page-head">
-      <div>
-        <h2 style="font-size: 18px; font-weight: 700">学案</h2>
-        <p class="f-hint" style="margin-top: 4px">
-          按「预习导学 → 课堂探究 → 达标检测 → 拓展提升」组织学生用件，留白处供学生作答；可一键打印学生版（隐去答案）与教师版（含答案）。
-        </p>
-      </div>
-      <div class="op-group">
+    <AppPageHeader desc="按「预习导学 → 课堂探究 → 达标检测 → 拓展提升」组织学生用件，留白处供学生作答；可一键打印学生版（隐去答案）与教师版（含答案）。">
+      <template #actions>
         <button class="btn btn-ghost" @click="router.push('/teach/plan')"><AppIcon name="clipboard" :size="15" /> 切换教案</button>
         <button class="btn btn-primary" @click="openCreate"><AppIcon name="plus" :size="15" /> 新建学案</button>
-      </div>
-    </div>
+      </template>
+    </AppPageHeader>
+
+    <AppFilterPanel v-model="filters" :rows="FILTER_ROWS" />
 
     <div class="panel">
-      <div class="filter-bar">
-        <span class="filter-label">学科</span>
-        <select v-model="filter.subject" class="f-select" style="width: 118px">
-          <option value="">全部</option>
-          <option v-for="s in subjects" :key="s" :value="s">{{ s }}</option>
-        </select>
-        <span class="filter-label">年级</span>
-        <select v-model="filter.grade" class="f-select" style="width: 118px">
-          <option value="">全部</option>
-          <option v-for="g in grades" :key="g" :value="g">{{ g }}</option>
-        </select>
-        <span class="filter-label">状态</span>
-        <select v-model="filter.status" class="f-select" style="width: 118px">
-          <option value="">全部</option>
-          <option value="draft">草稿</option>
-          <option value="published">已发布</option>
-        </select>
-        <input v-model="filter.keyword" class="f-input" placeholder="名称 / 知识点" style="width: 190px" />
+      <!-- 工具条自带 14/18 的内边距，与下方栅格 / 分页的边距对齐 -->
+      <div class="list-head">
+        <AppListToolbar v-model="keyword" placeholder="名称 / 知识点" />
       </div>
 
       <div class="te-grid">
@@ -525,9 +522,7 @@ onMounted(async () => {
           </div>
         </div>
       </div>
-      <p v-if="!rows.length" class="f-hint" style="padding: 30px; text-align: center">
-        {{ loading ? '正在载入…' : '暂无学案，点击右上角新建' }}
-      </p>
+      <p v-if="!rows.length" class="empty-row">{{ loading ? '正在载入…' : '暂无学案，点击右上角新建' }}</p>
       <AppPagination :total="filtered.length" v-model:page="page" :page-size="9" />
     </div>
 
@@ -602,6 +597,11 @@ onMounted(async () => {
 .te-title:hover { background: #f4f7fb; }
 .te-title:focus { outline: none; box-shadow: 0 0 0 2px var(--brand-soft); }
 .te-head-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+/* 横向居中的行里，f-hint 自带的 5px 上边距会把文字顶歪 */
+.te-head-meta .f-hint,
+.te-linked-head .f-hint,
+.te-bank-foot .f-hint,
+.gd-switch .f-hint { margin-top: 0; }
 
 .te-body { display: grid; grid-template-columns: 258px minmax(0, 1fr) 300px; gap: 12px; align-items: start; }
 
@@ -623,22 +623,27 @@ onMounted(async () => {
 .te-ol-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .te-ol-main b { font-size: 12.5px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .te-ol-main em { font-size: 11px; color: var(--sub); font-style: normal; }
-.te-ol-ops { display: flex; gap: 2px; opacity: 0; transition: opacity 0.15s; }
+.te-ol-ops { display: flex; align-items: center; gap: 2px; opacity: 0; transition: opacity 0.15s; }
 .te-ol-row:hover .te-ol-ops { opacity: 1; }
 .te-icon {
-  width: 20px; height: 20px; border: none; border-radius: 5px;
-  background: #f0f3f8; color: var(--ink-2); font-size: 12px; line-height: 1;
+  width: 22px; height: 22px; border: none; border-radius: 5px;
+  background: #f0f3f8; color: var(--ink-2); font-size: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
 }
 .te-icon:hover { background: var(--brand-soft); color: var(--brand-deep); }
 .te-icon.danger:hover { background: var(--danger-soft); color: var(--danger); }
 .te-add { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+/* 「新增板块」是动作按钮（无选中态），不是选择器，因此不能换成 AppFilterChips；
+   但外形与筛选 chip 保持同一套尺寸（与共享组件 AppFilterChips 的 .opt-chip 同形，
+   包括同样不设 line-height）。 */
 .k-chip {
-  border: 1.5px solid var(--border); border-radius: 999px;
-  background: #fff; color: var(--ink-2); font-size: 11.5px; padding: 3px 10px;
+  border: 1.5px solid var(--border); border-radius: 8px;
+  background: var(--card); color: var(--ink-2); font-size: 12.5px; padding: 3px 12px;
+  white-space: nowrap; flex-shrink: 0;
+  transition: border-color 0.12s, color 0.12s;
 }
 .k-chip:hover { border-color: var(--brand); color: var(--brand-deep); }
-.k-chip.on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-deep); }
 
 .te-main { min-width: 0; }
 .te-edit { padding: 16px; }
@@ -681,8 +686,11 @@ onMounted(async () => {
 }
 .gd-answer b { color: var(--brand-deep); }
 
+/* 列表工具条与面板左右同边距（表格 / 栅格满幅，内边距给在工具条这一层） */
+.list-head { padding: 14px 18px 0; }
+
 /* 列表 */
-.te-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 16px; }
+.te-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 0 18px 4px; }
 .te-card {
   border: 1.5px solid var(--border); border-radius: 12px;
   padding: 14px; display: flex; flex-direction: column; gap: 8px;
@@ -692,7 +700,7 @@ onMounted(async () => {
 .te-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .te-card-top h3 { font-size: 14px; font-weight: 700; line-height: 1.5; }
 .te-card-meta { font-size: 12px; color: var(--sub); }
-.te-card-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.te-card-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
 .te-card-foot { font-size: 11.5px; color: var(--sub); }
 .row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .te-tpl-list { display: flex; flex-direction: column; gap: 8px; }

@@ -9,7 +9,11 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
+  AppFilterPanel,
   AppIcon,
+  AppListToolbar,
+  AppPageHeader,
+  type FilterRowDef,
   type MistakeEntry,
   type MistakeMastery,
   MISTAKE_MASTERY_TEXT,
@@ -48,6 +52,30 @@ const busy = ref(false)
 const filter = reactive({ scope: '', mastery: '', reason: '', keyword: '' })
 const page = ref(1)
 const pageSize = 9
+
+/** 筛选行：班级候选来自接口，故用 computed */
+const filterRows = computed<FilterRowDef[]>(() => [
+  { key: 'scope', label: '班级', options: scopes.value, multiple: false },
+  { key: 'mastery', label: '掌握度', options: Object.values(MISTAKE_MASTERY_TEXT), multiple: false },
+  { key: 'reason', label: '错误原因', options: [...MISTAKE_REASONS], multiple: false },
+])
+
+/** chip 上是文案，filter 里存业务值 */
+function masteryKeyOf(text: string): '' | MistakeMastery {
+  return (Object.keys(MISTAKE_MASTERY_TEXT) as MistakeMastery[]).find((k) => MISTAKE_MASTERY_TEXT[k] === text) ?? ''
+}
+
+const filterModel = computed<Record<string, string[]>>(() => ({
+  scope: filter.scope ? [filter.scope] : [],
+  mastery: filter.mastery ? [MISTAKE_MASTERY_TEXT[filter.mastery as MistakeMastery]] : [],
+  reason: filter.reason ? [filter.reason] : [],
+}))
+
+function onFilterChange(next: Record<string, string[]>) {
+  filter.scope = next.scope?.[0] ?? ''
+  filter.mastery = masteryKeyOf(next.mastery?.[0] ?? '')
+  filter.reason = next.reason?.[0] ?? ''
+}
 
 const filtered = computed(() =>
   mistakes.value.filter(
@@ -237,39 +265,24 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="mk-page">
-    <div class="page-head">
-      <div>
-        <h2 style="font-size: 18px; font-weight: 700">错题本</h2>
-        <p class="f-hint" style="margin-top: 4px">按班级归集共性薄弱点，多选可一键生成重练题单并跳到组卷 / 作业。</p>
-      </div>
-      <div class="op-group">
+  <div class="page mk-page">
+    <AppPageHeader desc="按班级归集共性薄弱点，多选可一键生成重练题单并跳到组卷 / 作业。">
+      <template #actions>
         <button class="btn btn-primary" @click="openAdd"><AppIcon name="plus" :size="15" /> 手动添加错题</button>
-      </div>
-    </div>
+      </template>
+    </AppPageHeader>
+
+    <AppFilterPanel
+      :model-value="filterModel"
+      :rows="filterRows"
+      @update:model-value="onFilterChange"
+    />
 
     <div class="panel">
-      <div class="filter-bar">
-        <span class="filter-label">班级</span>
-        <select v-model="filter.scope" class="f-select" style="width: 130px">
-          <option value="">全部班级</option>
-          <option v-for="s in scopes" :key="s" :value="s">{{ s }}</option>
-        </select>
-        <span class="filter-label">掌握度</span>
-        <select v-model="filter.mastery" class="f-select" style="width: 120px">
-          <option value="">全部</option>
-          <option v-for="(text, m) in MISTAKE_MASTERY_TEXT" :key="m" :value="m">{{ text }}</option>
-        </select>
-        <span class="filter-label">错误原因</span>
-        <select v-model="filter.reason" class="f-select" style="width: 130px">
-          <option value="">全部</option>
-          <option v-for="r in MISTAKE_REASONS" :key="r" :value="r">{{ r }}</option>
-        </select>
-        <input v-model="filter.keyword" class="f-input" placeholder="搜索题干" style="width: 190px" />
-      </div>
+      <AppListToolbar v-model="filter.keyword" placeholder="搜索题干" class="mk-toolbar" />
 
       <div class="mk-grid">
-        <p v-if="!paged.length" class="f-hint" style="padding: 30px; text-align: center; grid-column: 1 / -1">
+        <p v-if="!paged.length" class="empty-row" style="grid-column: 1 / -1">
           {{ loading ? '正在载入…' : '暂无错题，去阅卷或作业里积累吧' }}
         </p>
         <div v-for="row in paged" :key="row.id" class="mk-card" :class="{ on: isSelected(row.id) }">
@@ -371,17 +384,18 @@ onMounted(async () => {
           </select>
         </div>
       </div>
-      <div class="mk-add-filter">
-        <select v-model="bankFilter.type" class="f-select" style="width: 120px">
-          <option value="">全部题型</option>
-          <option v-for="t in ['单选题', '多选题', '判断题', '填空题', '解答题']" :key="t" :value="t">{{ t }}</option>
-        </select>
-        <select v-model="bankFilter.difficulty" class="f-select" style="width: 110px">
-          <option value="">全部难度</option>
-          <option v-for="d in difficulties" :key="d" :value="d">{{ d }}</option>
-        </select>
-        <input v-model="bankFilter.keyword" class="f-input" placeholder="搜索题干" />
-      </div>
+      <AppListToolbar v-model="bankFilter.keyword" placeholder="搜索题干">
+        <template #left>
+          <select v-model="bankFilter.type" class="f-select">
+            <option value="">全部题型</option>
+            <option v-for="t in ['单选题', '多选题', '判断题', '填空题', '解答题']" :key="t" :value="t">{{ t }}</option>
+          </select>
+          <select v-model="bankFilter.difficulty" class="f-select">
+            <option value="">全部难度</option>
+            <option v-for="d in difficulties" :key="d" :value="d">{{ d }}</option>
+          </select>
+        </template>
+      </AppListToolbar>
       <div class="mk-add-list">
         <div
           v-for="q in bankPool"
@@ -403,8 +417,11 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.mk-page { display: flex; flex-direction: column; gap: 12px; padding-bottom: 60px; }
-.mk-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 16px; }
+/* .page 已给纵向节奏，这里只留悬浮条需要的底部空间 */
+.mk-page { padding-bottom: 60px; }
+/* 面板自身不留白：工具条 / 网格各自带内边距，分页组件自带内边距 */
+.mk-toolbar { padding: 14px 16px 0; margin-bottom: 0; }
+.mk-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 14px 16px 4px; }
 .mk-card {
   position: relative; border: 1.5px solid var(--border); border-radius: 12px; padding: 14px;
   display: flex; flex-direction: column; gap: 8px;
@@ -414,7 +431,7 @@ onMounted(async () => {
 .mk-check { position: absolute; top: 12px; right: 12px; }
 .mk-check input { accent-color: var(--brand); width: 16px; height: 16px; }
 .mk-stem { font-size: 13px; color: var(--ink); line-height: 1.6; padding-right: 22px; }
-.mk-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.mk-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
 .mk-meta { font-size: 11.5px; color: var(--sub); }
 
 /* 浮动条 */
@@ -443,7 +460,6 @@ onMounted(async () => {
 .mk-sim-stem { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); }
 
 /* 手动添加 */
-.mk-add-filter { display: flex; gap: 8px; margin-bottom: 10px; }
 .mk-add-list { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); padding-top: 10px; }
 .mk-add-card {
   display: flex; align-items: center; gap: 8px; border: 1.5px solid var(--border);

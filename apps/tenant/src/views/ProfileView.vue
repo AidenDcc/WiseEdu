@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppIcon, hueColor, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, AppTabs, hueColor, showToast } from '@aiteach/shared'
+import type { TabDef } from '@aiteach/shared'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import { useAuthStore } from '@/stores/auth'
 import { fetchOrgLoginLogs } from '@/api/org'
@@ -10,13 +11,18 @@ const router = useRouter()
 const auth = useAuthStore()
 
 type TabKey = 'profile' | 'security' | 'notify' | 'logs'
-const TABS: Array<{ key: TabKey; label: string }> = [
+const TABS: TabDef[] = [
   { key: 'profile', label: '个人资料' },
   { key: 'security', label: '账号安全' },
   { key: 'notify', label: '消息偏好' },
   { key: 'logs', label: '登录记录' },
 ]
 const tab = ref<TabKey>('profile')
+
+/** AppTabs 回传 string，这里收窄回 TabKey */
+function switchTab(value: string) {
+  tab.value = value as TabKey
+}
 
 /* ===== 个人资料（FR-GN-021） ===== */
 const profile = reactive({
@@ -76,11 +82,8 @@ async function onLogout() {
 </script>
 
 <template>
-  <div class="page profile-page">
-    <div class="page-head">
-      <h2>个人中心</h2>
-      <span class="f-hint">{{ auth.user?.orgName }} · {{ auth.user?.roleName }}</span>
-    </div>
+  <div class="page">
+    <AppPageHeader :desc="`${auth.user?.orgName} · ${auth.user?.roleName}`" />
 
     <div class="panel profile-panel">
       <!-- 用户卡片头 -->
@@ -97,43 +100,32 @@ async function onLogout() {
         </button>
       </div>
 
-      <div class="tab-bar">
-        <button
-          v-for="t in TABS"
-          :key="t.key"
-          class="tab-btn"
-          :class="{ on: tab === t.key }"
-          type="button"
-          @click="tab = t.key"
-        >
-          {{ t.label }}
-        </button>
-      </div>
+      <AppTabs :tabs="TABS" :model-value="tab" @update:model-value="switchTab" />
 
       <!-- 个人资料 -->
       <div v-if="tab === 'profile'" class="tab-body">
         <div class="detail-grid">
           <div class="detail-item">
-            <span class="d-label">姓名</span>
-            <span class="d-value">
+            <div class="d-label">姓名</div>
+            <div class="d-value">
               <template v-if="editingProfile"><input v-model="profile.name" class="f-input" style="width: 180px" /></template>
               <template v-else>{{ profile.name }}</template>
-            </span>
+            </div>
           </div>
           <div class="detail-item">
-            <span class="d-label">手机号</span>
-            <span class="d-value">{{ profile.phone }}</span>
+            <div class="d-label">手机号</div>
+            <div class="d-value">{{ profile.phone }}</div>
           </div>
           <div class="detail-item">
-            <span class="d-label">邮箱</span>
-            <span class="d-value">
+            <div class="d-label">邮箱</div>
+            <div class="d-value">
               <template v-if="editingProfile"><input v-model="profile.email" class="f-input" style="width: 220px" /></template>
               <template v-else>{{ profile.email }}</template>
-            </span>
+            </div>
           </div>
           <div class="detail-item">
-            <span class="d-label">角色</span>
-            <span class="d-value"><span class="tag tag-blue">{{ auth.user?.roleName }}</span></span>
+            <div class="d-label">角色</div>
+            <div class="d-value"><span class="tag tag-blue">{{ auth.user?.roleName }}</span></div>
           </div>
         </div>
         <div class="f-field" style="max-width: 460px">
@@ -205,26 +197,28 @@ async function onLogout() {
 
       <!-- 登录记录 -->
       <div v-else class="tab-body">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>时间</th>
-              <th>IP</th>
-              <th>设备 / 浏览器</th>
-              <th>结果</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in logs" :key="row.id">
-              <td>{{ row.time }}</td>
-              <td><code class="ip">{{ row.ip }}</code></td>
-              <td>{{ row.device }}</td>
-              <td>
-                <span class="tag" :class="row.ok ? 'tag-green' : 'tag-red'">{{ row.ok ? '成功' : '失败' }}</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>IP</th>
+                <th>设备 / 浏览器</th>
+                <th>结果</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in logs" :key="row.id">
+                <td>{{ row.time }}</td>
+                <td><code class="ip">{{ row.ip }}</code></td>
+                <td>{{ row.device }}</td>
+                <td>
+                  <span class="tag" :class="row.ok ? 'tag-green' : 'tag-red'">{{ row.ok ? '成功' : '失败' }}</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <p class="f-hint" style="margin-top: 10px">仅展示最近 8 条；完整日志见 机构管理 → 日志管理</p>
       </div>
     </div>
@@ -240,13 +234,6 @@ async function onLogout() {
   font-size: 24px; font-weight: 700; display: flex; align-items: center; justify-content: center;
 }
 .head-meta h3 { font-size: 17px; }
-
-.tab-bar { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
-.tab-btn {
-  border: none; background: transparent; padding: 9px 16px;
-  font-size: 13.5px; color: var(--sub); border-bottom: 2.5px solid transparent; margin-bottom: -1px;
-}
-.tab-btn.on { color: var(--brand-deep); font-weight: 600; border-bottom-color: var(--brand); }
 
 .tab-body.narrow { max-width: 480px; }
 .security-tips { margin-top: 14px; }

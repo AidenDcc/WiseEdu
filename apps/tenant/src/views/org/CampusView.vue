@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { AppIcon, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast } from '@aiteach/shared'
 import type { Campus } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import { deleteCampus, fetchCampuses, saveCampus, toggleCampus } from '@/api/org'
@@ -64,52 +64,54 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <h2>校区管理</h2>
-      <span class="f-hint">多校区隔离数据；校区编码创建后不可修改</span>
-      <button class="btn btn-primary" style="margin-left: auto" @click="openCreate">
-        <AppIcon name="plus" :size="15" /> 新增校区
-      </button>
-    </div>
+    <AppPageHeader desc="多校区隔离数据；校区编码创建后不可修改">
+      <template #actions>
+        <button class="btn btn-primary" @click="openCreate">
+          <AppIcon name="plus" :size="15" /> 新增校区
+        </button>
+      </template>
+    </AppPageHeader>
 
     <div class="panel">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>校区名称</th>
-            <th>编码</th>
-            <th>地址</th>
-            <th>负责人</th>
-            <th>员工数</th>
-            <th>状态</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="campuses.length === 0">
-            <td colspan="7" class="empty-row">暂无校区</td>
-          </tr>
-          <template v-else>
-            <tr v-for="row in campuses" :key="row.id">
-              <td class="cell-strong">{{ row.name }}</td>
-              <td><code class="code-chip">{{ row.code }}</code></td>
-              <td>{{ row.address || '—' }}</td>
-              <td>{{ row.manager || '—' }}</td>
-              <td>{{ row.staffCount }}</td>
-              <td>
-                <span class="tag" :class="row.enabled ? 'tag-green' : 'tag-gray'">{{ row.enabled ? '启用' : '停用' }}</span>
-              </td>
-              <td>
-                <div class="op-group">
-                  <button class="mini-btn" @click="openEdit(row)">编辑</button>
-                  <button class="mini-btn" @click="onToggle(row)">{{ row.enabled ? '停用' : '启用' }}</button>
-                  <button class="mini-btn danger" @click="onDelete(row)">删除</button>
-                </div>
-              </td>
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>校区名称</th>
+              <th>编码</th>
+              <th>地址</th>
+              <th>负责人</th>
+              <th>员工数</th>
+              <th>状态</th>
+              <th>操作</th>
             </tr>
-          </template>
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            <tr v-if="campuses.length === 0">
+              <td colspan="7" class="empty-row">暂无校区</td>
+            </tr>
+            <template v-else>
+              <tr v-for="row in campuses" :key="row.id">
+                <td class="cell-strong">{{ row.name }}</td>
+                <td><code class="code-chip">{{ row.code }}</code></td>
+                <td>{{ row.address || '—' }}</td>
+                <td>{{ row.manager || '—' }}</td>
+                <td>{{ row.staffCount }}</td>
+                <td>
+                  <span class="tag" :class="row.enabled ? 'tag-green' : 'tag-gray'">{{ row.enabled ? '启用' : '停用' }}</span>
+                </td>
+                <td>
+                  <div class="op-group">
+                    <button class="mini-btn" @click="openEdit(row)">编辑</button>
+                    <button class="mini-btn" @click="onToggle(row)">{{ row.enabled ? '停用' : '启用' }}</button>
+                    <button class="mini-btn danger" @click="onDelete(row)">删除</button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <AppModal v-if="editing" :title="editing.id ? '编辑校区' : '新增校区'" :width="460" @close="editing = null">

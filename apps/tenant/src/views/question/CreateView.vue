@@ -1,8 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppIcon, RichTextViewer, showToast, ApiError, hasImage, toPlainText, truncateRich } from '@aiteach/shared'
-import type { GeneratedQuestion, OrgCategory, OrgQuestion } from '@aiteach/shared'
+import {
+  AppFilterChips,
+  AppFilterPanel,
+  AppIcon,
+  RichTextViewer,
+  showToast,
+  ApiError,
+  hasImage,
+  toPlainText,
+  truncateRich,
+} from '@aiteach/shared'
+import type { FilterRowDef, GeneratedQuestion, OrgCategory, OrgQuestion } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import RichTextEditor from '@/components/ui/RichTextEditor.vue'
 import QuestionResultList from '@/components/question/QuestionResultList.vue'
@@ -113,8 +123,115 @@ function pickGrade(value: string) {
   if (options.length > 0 && !options.includes(form.subject)) form.subject = options[0] ?? form.subject
 }
 
-/** 题目基本信息折叠态：默认展开，收起后参数面板只留标题条（长表单滚动更省） */
-const metaOpen = ref(true)
+/* ===== 题目基本信息面板（共享 AppFilterPanel + AppFilterChips） =====
+   折叠头与 chip 行原先是手抄题库管理（BankView）的 `.prop-bar` / `.prop-head` / `.p-chip`，
+   现改用共享组件：两端（机构端 / 超管端）的折叠交互与 chip 造型从此只有一份实现。
+   面板的行定义与取值按需展开，表单本身仍是单值（string / string[]），两边在下面互相转换。 */
+
+/** 知识点上限（validate 里的提示文案与此保持一致） */
+const MAX_KNOWLEDGE = 5
+
+/** 面板行：候选项随字典 / 教材矩阵 / 录题方式变化，故为 computed */
+/**
+ * 历史题目的取值可能已停用：`withCurrent` 会把它并进选项（否则会被静默改写），
+ * 但文案得标出「（已停用）」，否则看着像还能选。
+ * 值不变，只改显示 —— 见 `useBaseData` 的 `optionLabel`。
+ */
+function retiredLabel(known: string[], value: string): Record<string, string> | undefined {
+  return value && !known.includes(value) ? { [value]: optionLabel(known, value) } : undefined
+}
+
+const metaRows = computed<FilterRowDef[]>(() => {
+  const rows: FilterRowDef[] = [
+    {
+      key: 'grade', label: '年级', multiple: false,
+      options: withCurrent(grades.value, form.grade),
+      optionLabels: retiredLabel(grades.value, form.grade),
+    },
+    {
+      key: 'subject', label: '学科', multiple: false,
+      options: subjectOptions.value,
+      optionLabels: retiredLabel(optionsForGrade(form.grade), form.subject),
+    },
+    {
+      key: 'type', label: '题型', multiple: false,
+      options: withCurrent(questionTypes.value, form.type),
+      optionLabels: retiredLabel(questionTypes.value, form.type),
+    },
+    {
+      key: 'difficulty', label: '难度', multiple: false,
+      options: withCurrent(difficulties.value, form.difficulty),
+      optionLabels: retiredLabel(difficulties.value, form.difficulty),
+    },
+  ]
+  /* 学期 / 考试类型 / 教材版本只有手动录入用得到（AI 出题不读它们，表单一并隐藏），
+     整行连同取值一起不给面板，折叠摘要才不会摘出用户看不见的条件 */
+  if (mode.value === 'manual') {
+    rows.push({ key: 'term', label: '学期', options: [...TERMS], multiple: false })
+    rows.push({ key: 'examType', label: '考试类型', options: examTypes.value, multiple: false })
+    rows.push({
+      key: 'textbook', label: '教材版本', multiple: false,
+      options: versionOptions.value,
+      optionLabels: retiredLabel(versionsFor(form.grade, form.subject), form.textbook),
+    })
+  }
+  rows.push({ key: 'knowledge', label: '知识点', options: knowledgeOptions.value })
+  return rows
+})
+
+/** 面板的当前取值：单值字段包成单元素数组（chip 组件以 string[] 表达选中） */
+const metaFilter = computed<Record<string, string[]>>(() => {
+  const value: Record<string, string[]> = {
+    grade: form.grade ? [form.grade] : [],
+    subject: form.subject ? [form.subject] : [],
+    type: form.type ? [form.type] : [],
+    difficulty: form.difficulty ? [form.difficulty] : [],
+  }
+  if (mode.value === 'manual') {
+    value.term = form.term ? [form.term] : []
+    value.examType = form.examType ? [form.examType] : []
+    value.textbook = form.textbook ? [form.textbook] : []
+  }
+  value.knowledge = [...form.knowledge]
+  return value
+})
+
+/**
+ * 面板回传的是整份取值（覆盖式），这里逐行写回表单。
+ * 必填项（年级 / 学科 / 题型 / 难度）取消选中时保持原值 —— 它们没有「全部」这一档，
+ * 点一下已选项只是误触，不该把必填字段清空；单选的行「点已选项 = 取消」正好表示
+ * 考试类型「不指定」/ 教材版本「不绑定」。年级变更仍走 pickGrade 以联动收窄学科。
+ */
+function onMetaChange(next: Record<string, string[]>) {
+  const first = (key: string) => next[key]?.[0] ?? ''
+  const grade = first('grade')
+  if (grade && grade !== form.grade) pickGrade(grade)
+  const subject = first('subject')
+  if (subject) form.subject = subject
+  const type = first('type')
+  if (type && type !== form.type) pickType(type)
+  const difficulty = first('difficulty')
+  if (difficulty) form.difficulty = difficulty
+  /* 三个 AI 态不出现（因而不在 next 里）的字段：缺键即跳过，别把用户看不见的值清掉 */
+  if ('term' in next) form.term = first('term') || form.term
+  if ('examType' in next) form.examType = first('examType')
+  if ('textbook' in next) form.textbook = first('textbook')
+  if ('knowledge' in next) setKnowledge(next.knowledge ?? [])
+}
+
+/** 知识点最多 5 个：超出的不落地（沿用原 chip 的约束） */
+function setKnowledge(list: string[]) {
+  if (list.length > MAX_KNOWLEDGE) {
+    showToast(`知识点最多 ${MAX_KNOWLEDGE} 个`, 'error')
+    form.knowledge = list.slice(0, MAX_KNOWLEDGE)
+    return
+  }
+  form.knowledge = list
+}
+
+/** 面板的展开态由 AppFilterPanel 自持（组件没有 open 双向绑定）；
+    校验失败要强制展开时换 key 重挂载，否则用户只看到一句「请按红字提示修正」。 */
+const metaPanelKey = ref(0)
 
 /** 年级或学科变化后，原教材版本可能已不适用 —— 清空，避免存出无效组合。
     AI 态跳过：教材版本那一行在 AI 态是隐藏的，清掉用户看不见，切回手动态才发现绑定没了。 */
@@ -251,18 +368,6 @@ function toggleAnswer(index: number) {
   }
 }
 
-function toggleKnowledge(item: string) {
-  const pos = form.knowledge.indexOf(item)
-  if (pos >= 0) form.knowledge.splice(pos, 1)
-  else {
-    if (form.knowledge.length >= 5) {
-      showToast('知识点最多 5 个', 'error')
-      return
-    }
-    form.knowledge.push(item)
-  }
-}
-
 const answerText = computed(() => {
   if (isChoice.value) {
     if (form.answers.length === 0) return ''
@@ -295,7 +400,7 @@ function validate(full: boolean): boolean {
 async function save(submit: boolean) {
   if (!validate(submit)) {
     /* 基本信息的红字在收起态是看不见的，校验失败时展开，否则用户只看到一句「按红字提示修正」 */
-    if (errors.knowledge) metaOpen.value = true
+    if (errors.knowledge) metaPanelKey.value += 1
     showToast('请按红字提示修正后重试', 'error')
     return
   }
@@ -729,12 +834,6 @@ function applyDraft(item: GeneratedQuestion) {
   dirty.value = true
 }
 
-function toggleStrategy(item: string) {
-  const pos = ai.strategies.indexOf(item)
-  if (pos >= 0) ai.strategies.splice(pos, 1)
-  else ai.strategies.push(item)
-}
-
 /** 丢弃未处理题目的确认：取消返回 false */
 function confirmDiscardPending(): boolean {
   return pendingCount.value === 0 || window.confirm(`还有 ${pendingCount.value} 题未处理，重新生成将丢弃，确认？`)
@@ -806,168 +905,24 @@ onMounted(load)
       </button>
     </div>
 
-    <!-- 题目基本信息：两种录题方式共用，全页唯一一处参数界面（FR-TM-008） -->
-    <div class="panel prop-bar">
-      <!-- 整条可点：与题库管理「搜索条件」同一套交互（点击行任意处切换，右侧文案 + 旋转箭头） -->
-      <div class="prop-head" @click="metaOpen = !metaOpen">
-        <span class="ph-title">
-          题目基本信息
-          <!-- 收起时把关键取值摘要出来：AI 出题的参数取自这里，收起来也得看得出用的是哪一套 -->
-          <span v-if="!metaOpen" class="ph-sum">
-            {{ form.grade }} · {{ form.subject }} · {{ form.type }} · {{ form.difficulty }}
-          </span>
-        </span>
-        <span class="ph-toggle">
-          {{ metaOpen ? '收起' : '展开' }}
-          <AppIcon name="chevron-down" :size="15" class="ph-caret" :class="{ up: metaOpen }" />
-        </span>
-      </div>
-
-      <!-- 每个属性一行：标签左、选项右平铺。候选项都不多（最多 12 个），下拉是多余的一次点击，
-           且看不到还有什么可选。顺序一律取数据源现成顺序（字典 sort / 教材矩阵 / TERMS），不重排；
-           唯一例外是年级排到学科前面 —— 学科选项由年级收窄，先选年级才不用回头改学科。 -->
-      <div v-if="metaOpen" class="prop-body">
-        <div class="prop-row">
-          <span class="prop-label">年级<span class="req">*</span></span>
-          <div class="prop-opts">
-            <button
-              v-for="g in withCurrent(grades, form.grade)"
-              :key="g"
-              class="p-chip"
-              :class="{ on: form.grade === g }"
-              type="button"
-              @click="pickGrade(g)"
-            >
-              {{ optionLabel(grades, g) }}
-            </button>
-          </div>
-        </div>
-
-        <div class="prop-row">
-          <span class="prop-label">学科<span class="req">*</span></span>
-          <div class="prop-opts">
-            <button
-              v-for="s in subjectOptions"
-              :key="s"
-              class="p-chip"
-              :class="{ on: form.subject === s }"
-              type="button"
-              @click="form.subject = s"
-            >
-              {{ optionLabel(subjects, s) }}
-            </button>
-          </div>
-        </div>
-
-        <div class="prop-row">
-          <span class="prop-label">题型<span class="req">*</span></span>
-          <div class="prop-opts">
-            <button
-              v-for="t in withCurrent(questionTypes, form.type)"
-              :key="t"
-              class="p-chip"
-              :class="{ on: form.type === t }"
-              type="button"
-              @click="pickType(t)"
-            >
-              {{ optionLabel(questionTypes, t) }}
-            </button>
-          </div>
-        </div>
-
-        <div class="prop-row">
-          <span class="prop-label">难度<span class="req">*</span></span>
-          <div class="prop-opts">
-            <button
-              v-for="d in withCurrent(difficulties, form.difficulty)"
-              :key="d"
-              class="p-chip"
-              :class="{ on: form.difficulty === d }"
-              type="button"
-              @click="form.difficulty = d"
-            >
-              {{ optionLabel(difficulties, d) }}
-            </button>
-          </div>
-        </div>
-
-        <!-- 以下三行只有手动录入用得到：AI 出题不读它们，采纳时也进不了这些字段，
-             在 AI 态显示出来等于「能设置但无效」，故隐藏。 -->
-        <template v-if="mode === 'manual'">
-          <div class="prop-row">
-            <span class="prop-label">学期</span>
-            <div class="prop-opts">
-              <button
-                v-for="t in TERMS"
-                :key="t"
-                class="p-chip"
-                :class="{ on: form.term === t }"
-                type="button"
-                @click="form.term = t"
-              >
-                {{ t }}
-              </button>
-            </div>
-          </div>
-
-          <div class="prop-row">
-            <span class="prop-label">考试类型</span>
-            <div class="prop-opts">
-              <button class="p-chip" :class="{ on: form.examType === '' }" type="button" @click="form.examType = ''">
-                不指定
-              </button>
-              <button
-                v-for="e in examTypes"
-                :key="e"
-                class="p-chip"
-                :class="{ on: form.examType === e }"
-                type="button"
-                @click="form.examType = e"
-              >
-                {{ e }}
-              </button>
-            </div>
-          </div>
-
-          <div class="prop-row">
-            <span class="prop-label">教材版本</span>
-            <div class="prop-opts">
-              <button class="p-chip" :class="{ on: form.textbook === '' }" type="button" @click="form.textbook = ''">
-                不绑定
-              </button>
-              <button
-                v-for="v in versionOptions"
-                :key="v"
-                class="p-chip"
-                :class="{ on: form.textbook === v }"
-                type="button"
-                @click="form.textbook = v"
-              >
-                {{ v }}
-              </button>
-            </div>
-          </div>
-        </template>
-
-        <div class="prop-row">
-          <span class="prop-label">知识点<span class="req">*</span></span>
-          <div class="prop-opts">
-            <button
-              v-for="k in knowledgeOptions"
-              :key="k"
-              class="p-chip"
-              :class="{ on: form.knowledge.includes(k), off: orphanKnowledge.includes(k) }"
-              type="button"
-              @click="toggleKnowledge(k)"
-            >
-              {{ k }}
-            </button>
-            <span class="prop-hint">随学科 / 年级 / 教材版本加载，最多 5 个</span>
-          </div>
-          <p v-if="errors.knowledge" class="f-err">{{ errors.knowledge }}</p>
-        </div>
-      </div>
-    </div>
+    <!-- 题目基本信息：两种录题方式共用，全页唯一一处参数界面（FR-TM-008）。
+         折叠头与 chip 行走共享组件（AppFilterPanel / AppFilterChips），不再手抄题库管理的那一套；
+         每个属性一行：标签左、候选项右平铺（候选项都不多，下拉是多余的一次点击，且看不到还有什么可选）。
+         顺序取数据源现成顺序（字典 sort / 教材矩阵 / TERMS），唯一例外是年级排到学科前面
+         —— 学科选项由年级收窄，先选年级才不用回头改学科。 -->
+    <AppFilterPanel
+      :key="metaPanelKey"
+      :model-value="metaFilter"
+      :rows="metaRows"
+      title="题目基本信息"
+      @update:model-value="onMetaChange"
+    >
+      <!-- 知识点行的说明与校验红字：chip 行组件没有插槽，统一落在面板末尾 -->
+      <template #extra>
+        <p class="prop-hint">随学科 / 年级 / 教材版本加载，最多 5 个</p>
+        <p v-if="errors.knowledge" class="prop-err">{{ errors.knowledge }}</p>
+      </template>
+    </AppFilterPanel>
 
     <!-- ===== 手动录入 ===== -->
     <template v-if="mode === 'manual'">
@@ -1146,19 +1101,13 @@ onMounted(load)
             <span class="prop-hint">变式题自动挂接「变式关联」，策略可多选</span>
           </div>
           <div class="f-field" style="margin: 0 0 14px">
-            <label class="f-label">变式策略（可多选）</label>
-            <div class="prop-opts">
-              <button
-                v-for="sgy in STRATEGIES"
-                :key="sgy"
-                class="p-chip"
-                :class="{ on: ai.strategies.includes(sgy) }"
-                type="button"
-                @click="toggleStrategy(sgy)"
-              >
-                {{ sgy }}
-              </button>
-            </div>
+            <AppFilterChips
+              label="变式策略（可多选）"
+              label-width="auto"
+              :options="STRATEGIES"
+              :model-value="ai.strategies"
+              @update:model-value="ai.strategies = $event"
+            />
           </div>
         </template>
 
@@ -1327,70 +1276,12 @@ onMounted(load)
 <style scoped>
 .edit-layout { display: flex; flex-direction: column; gap: 14px; }
 
-/* 全局 .panel 只给了底色 / 边框 / 圆角，没有 padding；属性条此前因此贴着边框。
-   补在这一处而不是改 .panel，免得波及全站其它面板。下留 4px：每个 .prop-row 自带 12px 下边距。
-   上边距交给 .prop-head —— 收起时只剩标题条，上下间距才一样。 */
-.prop-bar { padding: 0 20px 4px; }
-
-/* 标题条：既是「题目基本信息」的标识，也是折叠开关 —— 整条可点（.prop-head 的 click），
-   故 cursor: pointer。样式照搬题库管理的「搜索条件」头（.fp-head / .fp-title / .fp-toggle / .fp-caret），
-   两处的折叠交互看起来才是同一套东西。min-height 让收起态的高度与「搜索条件」条一致。 */
-.prop-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 12px 0;
-  cursor: pointer;
-  min-height: 46px;
-}
-.ph-title {
-  font-size: 13.5px;
-  font-weight: 700;
-  color: var(--ink);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-.ph-sum { font-weight: 400; font-size: 12.5px; color: var(--sub); }
-.ph-toggle { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--sub); flex-shrink: 0; }
-.ph-caret { transition: transform 0.18s; }
-.ph-caret.up { transform: rotate(180deg); }
-/* 正文与标题条之间用虚线分隔（同 .fp-body）：收起时只剩标题条，展开时内容有个起点 */
-.prop-body { border-top: 1px dashed var(--border); padding-top: 12px; }
-
-.prop-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
-/* 校验红字占满一行，落到 chip 下方而不是被挤在行内。
-   全局的 .f-err 选择器是 `.f-field .f-err`，这里不在 .f-field 内，故字号与颜色要自己给。 */
-.prop-row > .f-err { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--danger); }
-.prop-label {
-  width: 82px;
-  flex-shrink: 0;
-  padding-top: 5px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink-2);
-}
-.prop-opts { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; min-width: 0; }
-.prop-hint { align-self: center; font-size: 12px; color: var(--sub); }
-
-/* 取值枚举统一用 chip：点一下就选中，且不必先展开才知道有什么可选。
-   与其它页的 .k-chip 同造型（那是各页各自 scoped 复制的）。 */
-.p-chip {
-  border: 1.5px solid var(--border);
-  border-radius: 999px;
-  background: #fff;
-  color: var(--ink-2);
-  font-size: 12.5px;
-  padding: 4px 12px;
-  transition: all 0.15s;
-}
-.p-chip:hover { border-color: var(--brand); color: var(--brand-deep); }
-.p-chip.on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-deep); font-weight: 600; }
-/* 已选但已不属于当前知识点池的项：虚线提示，仍可点击取消 */
-.p-chip.off { border-style: dashed; opacity: 0.7; }
+/* 基本信息面板的折叠头 / chip 行 / 面板外观都由共享的 AppFilterPanel 自持，
+   原先手抄自题库管理的那套 `.prop-bar` / `.prop-head` / `.prop-row` / `.p-chip` 已全部删除。
+   只剩两个面板内的小字：说明文案与知识点校验红字（chip 组件没有对应插槽，放在 #extra 里）。 */
+.prop-hint { font-size: 12px; color: var(--sub); }
+/* 全局的 .f-err 选择器是 `.f-field .f-err`，面板内不在 .f-field 里，故字号与颜色要自己给 */
+.prop-err { margin: 0; font-size: 12px; color: var(--danger); }
 
 /* ===== 录题方式切换 =====
    两种方式平级，故用带说明文字的标签卡而不是小号分段控件：说明文字直接回答「我该用哪种」。
@@ -1539,7 +1430,7 @@ onMounted(load)
 }
 @keyframes ring-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.92); opacity: 0.75; } }
 .run-title { font-size: 14.5px; font-weight: 600; color: var(--ink); }
-.run-steps { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.run-steps { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
 .run-steps span {
   font-size: 12px; color: var(--sub); background: #f5f8f8;
   border-radius: 999px; padding: 3px 10px;
@@ -1570,7 +1461,7 @@ onMounted(load)
 }
 .corr-label { font-size: 12px; font-weight: 600; color: var(--brand-deep); width: 64px; flex-shrink: 0; padding-top: 2px; }
 .corr-value { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.6; max-height: 110px; overflow-y: auto; }
-.pv-meta { display: flex; gap: 8px; margin-bottom: 12px; }
+.pv-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .pv-stem { font-size: 14.5px; color: var(--ink); line-height: 1.8; margin-bottom: 12px; }
 .option-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 .option-list li {

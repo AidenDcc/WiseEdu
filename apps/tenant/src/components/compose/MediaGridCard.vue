@@ -135,6 +135,9 @@ const durationText = computed(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.mc-ops { display: flex; gap: 6px; margin-top: auto; padding-top: 9px; }
-.mc-ops .mini-btn { flex: 1; }
+/* 操作区：允许换行，窄卡片里宁可换行也不压缩按钮（卡片的 overflow:hidden 会把溢出的按钮文字裁掉）。
+   两个按钮等宽撑满（flex-grow:1），但不参与收缩（flex-shrink:0）——`flex: 1` 会把全局
+   `.mini-btn` 的 flex-shrink:0 覆盖掉，这正是「按知识点找题」被挤到裁切的根因。 */
+.mc-ops { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: auto; padding-top: 9px; }
+.mc-ops .mini-btn { flex: 1 0 auto; white-space: nowrap; }
 </style>

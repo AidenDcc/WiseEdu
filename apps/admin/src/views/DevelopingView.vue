@@ -55,7 +55,7 @@ const phases = ['需求评审', '原型设计', '开发实现', '联调测试', 
 .dev-card h2 { font-size: 20px; margin-top: 14px; }
 .desc { color: var(--sub); font-size: 13.5px; line-height: 1.8; margin: 10px 0 30px; }
 
-.phases { display: flex; justify-content: center; margin-bottom: 32px; }
+.phases { display: flex; align-items: center; justify-content: center; margin-bottom: 32px; }
 .phase { display: flex; align-items: center; }
 .phase-dot {
   width: 22px; height: 22px;

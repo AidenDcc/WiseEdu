@@ -13,14 +13,18 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
+  AppFilterChips,
+  AppFilterPanel,
   AppIcon,
+  AppListToolbar,
+  AppPageHeader,
   PLAN_STEP_TEXT,
   RichTextViewer,
   TEACH_DOC_STATUS_TEXT,
   showToast,
   truncateRich,
 } from '@aiteach/shared'
-import type { OrgQuestion, PlanStep, PlanStepKind, TeachDoc } from '@aiteach/shared'
+import type { FilterRowDef, OrgQuestion, PlanStep, PlanStepKind, TeachDoc } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import RichTextEditor from '@/components/ui/RichTextEditor.vue'
@@ -49,15 +53,21 @@ const doc = ref<TeachDoc | null>(null)
 
 /* ================= 列表 ================= */
 
-const filter = reactive({ subject: '', grade: '', status: '', keyword: '' })
+const FILTER_ROWS = computed<FilterRowDef[]>(() => [
+  { key: 'subject', label: '学科', options: subjects.value, multiple: false },
+  { key: 'grade', label: '年级', options: grades.value, multiple: false },
+  { key: 'status', label: '状态', options: Object.values(TEACH_DOC_STATUS_TEXT), multiple: false },
+])
+const filters = reactive<Record<string, string[]>>({ subject: [], grade: [], status: [] })
+const keyword = ref('')
 const page = ref(1)
 const filtered = computed(() =>
   docs.value.filter(
     (row) =>
-      (!filter.subject || row.subject === filter.subject) &&
-      (!filter.grade || row.grade === filter.grade) &&
-      (!filter.status || row.status === filter.status) &&
-      (!filter.keyword || row.name.includes(filter.keyword) || row.knowledge.some((k) => k.includes(filter.keyword))),
+      (filters.subject.length === 0 || filters.subject.includes(row.subject)) &&
+      (filters.grade.length === 0 || filters.grade.includes(row.grade)) &&
+      (filters.status.length === 0 || filters.status.includes(TEACH_DOC_STATUS_TEXT[row.status])) &&
+      (!keyword.value || row.name.includes(keyword.value) || row.knowledge.some((k) => k.includes(keyword.value))),
   ),
 )
 const rows = computed(() => filtered.value.slice((page.value - 1) * 9, page.value * 9))
@@ -195,10 +205,12 @@ const overTime = computed(() => {
 const METHOD_POOL = ['讲授法', '探究式学习', '合作交流', '讲练结合', '归纳法', '演示实验', '错因分析', '分层教学']
 const AID_POOL = ['多媒体课件', '几何画板', '实物教具', '实验器材', '导学案', '微课视频']
 
-function toggleChip(list: string[], value: string) {
-  const index = list.indexOf(value)
-  if (index >= 0) list.splice(index, 1)
-  else list.push(value)
+function setMethods(next: string[]) {
+  if (doc.value?.plan) doc.value.plan.methods = next
+}
+
+function setAids(next: string[]) {
+  if (doc.value?.plan) doc.value.plan.aids = next
 }
 
 const customMethod = ref('')
@@ -341,10 +353,10 @@ onMounted(async () => {
       <div class="te-head-main">
         <input v-model="doc.name" class="te-title" maxlength="50" placeholder="教案名称" />
         <div class="te-head-meta">
-          <select v-model="doc.subject" class="f-select" style="width: 96px; height: 28px">
+          <select v-model="doc.subject" class="f-select">
             <option v-for="s in withCurrent(subjects, doc.subject)" :key="s" :value="s">{{ s }}</option>
           </select>
-          <select v-model="doc.grade" class="f-select" style="width: 96px; height: 28px">
+          <select v-model="doc.grade" class="f-select">
             <option v-for="g in withCurrent(grades, doc.grade)" :key="g" :value="g">{{ g }}</option>
           </select>
           <span class="pl-period">
@@ -474,38 +486,26 @@ onMounted(async () => {
         <div v-else-if="activeKey === 'method' && doc.plan" class="panel te-edit">
           <div class="te-edit-head"><span class="tag tag-blue">方法与教具</span><b>教学方法与教具媒体</b></div>
           <div class="f-field">
-            <label class="f-label">教学方法</label>
-            <div class="chips">
-              <button
-                v-for="row in METHOD_POOL"
-                :key="row"
-                class="k-chip"
-                :class="{ on: doc.plan.methods.includes(row) }"
-                type="button"
-                @click="toggleChip(doc.plan.methods, row)"
-              >
-                {{ row }}
-              </button>
-            </div>
+            <AppFilterChips
+              label="教学方法"
+              label-width="72px"
+              :options="METHOD_POOL"
+              :model-value="doc.plan.methods"
+              @update:model-value="setMethods"
+            />
             <div class="pl-custom">
               <input v-model="customMethod" class="f-input" placeholder="自定义方法" @keyup.enter="addCustom(doc.plan.methods, customMethod, () => (customMethod = ''))" />
               <button class="mini-btn" @click="addCustom(doc.plan.methods, customMethod, () => (customMethod = ''))">添加</button>
             </div>
           </div>
           <div class="f-field" style="margin-bottom: 0">
-            <label class="f-label">教具与媒体</label>
-            <div class="chips">
-              <button
-                v-for="row in AID_POOL"
-                :key="row"
-                class="k-chip"
-                :class="{ on: doc.plan.aids.includes(row) }"
-                type="button"
-                @click="toggleChip(doc.plan.aids, row)"
-              >
-                {{ row }}
-              </button>
-            </div>
+            <AppFilterChips
+              label="教具与媒体"
+              label-width="72px"
+              :options="AID_POOL"
+              :model-value="doc.plan.aids"
+              @update:model-value="setAids"
+            />
             <div class="pl-custom">
               <input v-model="customAid" class="f-input" placeholder="自定义教具" @keyup.enter="addCustom(doc.plan.aids, customAid, () => (customAid = ''))" />
               <button class="mini-btn" @click="addCustom(doc.plan.aids, customAid, () => (customAid = ''))">添加</button>
@@ -675,7 +675,7 @@ onMounted(async () => {
                 <td>{{ step.minutes }}′</td>
               </tr>
               <tr v-if="!doc.plan?.steps.length">
-                <td colspan="4" class="pl-empty">尚未设计教学环节</td>
+                <td colspan="4" class="empty-row">尚未设计教学环节</td>
               </tr>
             </tbody>
           </table>
@@ -701,38 +701,19 @@ onMounted(async () => {
 
   <!-- ================= 列表 ================= -->
   <div v-else class="page">
-    <div class="page-head">
-      <div>
-        <h2 style="font-size: 18px; font-weight: 700">教案</h2>
-        <p class="f-hint" style="margin-top: 4px">
-          按「三维目标 → 重难点 → 教学过程 → 板书 → 反思」撰写教学设计，过程按环节写清教师活动、学生活动与设计意图，可直接关联题库题目并打印。
-        </p>
-      </div>
-      <div class="op-group">
+    <AppPageHeader desc="按「三维目标 → 重难点 → 教学过程 → 板书 → 反思」撰写教学设计，过程按环节写清教师活动、学生活动与设计意图，可直接关联题库题目并打印。">
+      <template #actions>
         <button class="btn btn-ghost" @click="router.push('/teach/guide')"><AppIcon name="clipboard" :size="15" /> 切换学案</button>
         <button class="btn btn-primary" @click="openCreate"><AppIcon name="plus" :size="15" /> 新建教案</button>
-      </div>
-    </div>
+      </template>
+    </AppPageHeader>
+
+    <AppFilterPanel v-model="filters" :rows="FILTER_ROWS" />
 
     <div class="panel">
-      <div class="filter-bar">
-        <span class="filter-label">学科</span>
-        <select v-model="filter.subject" class="f-select" style="width: 118px">
-          <option value="">全部</option>
-          <option v-for="s in subjects" :key="s" :value="s">{{ s }}</option>
-        </select>
-        <span class="filter-label">年级</span>
-        <select v-model="filter.grade" class="f-select" style="width: 118px">
-          <option value="">全部</option>
-          <option v-for="g in grades" :key="g" :value="g">{{ g }}</option>
-        </select>
-        <span class="filter-label">状态</span>
-        <select v-model="filter.status" class="f-select" style="width: 118px">
-          <option value="">全部</option>
-          <option value="draft">草稿</option>
-          <option value="published">已发布</option>
-        </select>
-        <input v-model="filter.keyword" class="f-input" placeholder="名称 / 知识点" style="width: 190px" />
+      <!-- 工具条自带 14/18 的内边距，与下方栅格 / 分页的边距对齐 -->
+      <div class="list-head">
+        <AppListToolbar v-model="keyword" placeholder="名称 / 知识点" />
       </div>
 
       <div class="te-grid">
@@ -763,9 +744,7 @@ onMounted(async () => {
           </div>
         </div>
       </div>
-      <p v-if="!rows.length" class="f-hint" style="padding: 30px; text-align: center">
-        {{ loading ? '正在载入…' : '暂无教案，点击右上角新建' }}
-      </p>
+      <p v-if="!rows.length" class="empty-row">{{ loading ? '正在载入…' : '暂无教案，点击右上角新建' }}</p>
       <AppPagination :total="filtered.length" v-model:page="page" :page-size="9" />
     </div>
 
@@ -840,6 +819,10 @@ onMounted(async () => {
 .te-title:hover { background: #f4f7fb; }
 .te-title:focus { outline: none; box-shadow: 0 0 0 2px var(--brand-soft); }
 .te-head-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+/* 横向居中的行里，f-hint 自带的 5px 上边距会把文字顶歪 */
+.te-head-meta .f-hint,
+.te-linked-head .f-hint,
+.te-bank-foot .f-hint { margin-top: 0; }
 .pl-period { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--sub); }
 .pl-period-input {
   width: 52px; height: 26px; border: 1px solid var(--border); border-radius: 7px;
@@ -873,24 +856,31 @@ onMounted(async () => {
 .te-ol-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .te-ol-main b { font-size: 12.5px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .te-ol-main em { font-size: 11px; color: var(--sub); font-style: normal; }
-.te-ol-ops { display: flex; gap: 2px; opacity: 0; transition: opacity 0.15s; }
+.te-ol-ops { display: flex; align-items: center; gap: 2px; opacity: 0; transition: opacity 0.15s; }
 .te-ol-row:hover .te-ol-ops { opacity: 1; }
 .te-icon {
-  width: 20px; height: 20px; border: none; border-radius: 5px;
-  background: #f0f3f8; color: var(--ink-2); font-size: 12px; line-height: 1;
+  width: 22px; height: 22px; border: none; border-radius: 5px;
+  background: #f0f3f8; color: var(--ink-2); font-size: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
 }
 .te-icon:hover { background: var(--brand-soft); color: var(--brand-deep); }
 .te-icon.danger:hover { background: var(--danger-soft); color: var(--danger); }
 .te-add { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+/* 「新增教学环节」是动作按钮（无选中态），不是选择器，因此不能换成 AppFilterChips；
+   但外形与筛选 chip 保持同一套尺寸（与共享组件 AppFilterChips 的 .opt-chip 同形，
+   包括同样不设 line-height）。 */
 .k-chip {
-  border: 1.5px solid var(--border); border-radius: 999px;
-  background: #fff; color: var(--ink-2); font-size: 11.5px; padding: 3px 10px;
+  border: 1.5px solid var(--border); border-radius: 8px;
+  background: var(--card); color: var(--ink-2); font-size: 12.5px; padding: 3px 12px;
+  white-space: nowrap; flex-shrink: 0;
+  transition: border-color 0.12s, color 0.12s;
 }
 .k-chip:hover { border-color: var(--brand); color: var(--brand-deep); }
-.k-chip.on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-deep); }
-.pl-custom { display: flex; gap: 6px; margin-top: 8px; }
-.pl-custom .f-input { flex: 1; height: 30px; font-size: 12.5px; }
+/* 自定义方法 / 教具的输入行：同一行的输入框与按钮必须同高，否则上下错位 */
+.pl-custom { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.pl-custom .f-input { flex: 1; height: var(--ctrl-h); font-size: 12.5px; }
+.pl-custom .mini-btn { height: var(--ctrl-h); }
 
 .te-main { min-width: 0; }
 .te-edit { padding: 16px; }
@@ -925,11 +915,13 @@ onMounted(async () => {
 .pl-table th { background: #f6f9fc; font-weight: 700; color: var(--ink); }
 .pl-intent { margin-top: 6px; font-size: 11.5px; color: var(--sub); line-height: 1.6; }
 .pl-inline-q { color: var(--ink-2); }
-.pl-empty { text-align: center; color: var(--sub); }
 .pl-total { text-align: right; font-size: 12px; color: var(--sub); margin-top: 6px; }
 
+/* 列表工具条与面板左右同边距（表格 / 栅格满幅，内边距给在工具条这一层） */
+.list-head { padding: 14px 18px 0; }
+
 /* 列表 */
-.te-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 16px; }
+.te-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 0 18px 4px; }
 .te-card {
   border: 1.5px solid var(--border); border-radius: 12px;
   padding: 14px; display: flex; flex-direction: column; gap: 8px;
@@ -939,7 +931,7 @@ onMounted(async () => {
 .te-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .te-card-top h3 { font-size: 14px; font-weight: 700; line-height: 1.5; }
 .te-card-meta { font-size: 12px; color: var(--sub); }
-.te-card-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.te-card-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
 .te-card-foot { font-size: 11.5px; color: var(--sub); }
 .row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .te-tpl-list { display: flex; flex-direction: column; gap: 8px; }

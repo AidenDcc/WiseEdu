@@ -54,6 +54,20 @@ export { formatCount, formatDelta, hueColor, formatQuota } from './utils/format'
 export { showToast } from './utils/toast'
 export type { ToastType } from './utils/toast'
 export { default as AppIcon } from './components/AppIcon.vue'
+
+/* ===== 共享 UI 组件（机构端 / 超管端通用，样式自带、只取 CSS 变量） =====
+   这些原本散落在单个页面的 scoped 样式里（题库管理的 `.opt-chip` / `.filter-panel` /
+   `.search-box` / `.list-toolbar` 等），别的页面无法复用，只能各写一份。 */
+export { default as AppPageHeader } from './components/ui/AppPageHeader.vue'
+export { default as AppFilterPanel } from './components/ui/AppFilterPanel.vue'
+export { default as AppFilterChips } from './components/ui/AppFilterChips.vue'
+export { default as AppSearchInput } from './components/ui/AppSearchInput.vue'
+export { default as AppListToolbar } from './components/ui/AppListToolbar.vue'
+export { default as AppTabs } from './components/ui/AppTabs.vue'
+export { default as AppSegmented } from './components/ui/AppSegmented.vue'
+export type { FilterRowDef, TabDef } from './components/ui/types'
+export { buildBreadcrumb } from './utils/breadcrumb'
+export type { Crumb, CrumbMenuItem } from './utils/breadcrumb'
 export { default as TrendChart } from './components/TrendChart.vue'
 export type ChartSeries = {
   name: string

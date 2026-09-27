@@ -7,7 +7,7 @@
  * 区分度 < 0.2、得分率 < 50% / < 60% 等教研常用阈值直接标红，让老师一眼看到薄弱点。
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { AppIcon, type ExamSession, type PaperAnalysis, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, type ExamSession, type PaperAnalysis, showToast } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import { fetchExamSessions, fetchPaperAnalysis } from '@/api/org'
 import { useBaseData } from '@/composables/useBaseData'
@@ -156,21 +156,17 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="an-page">
-    <div class="page-head an-head">
-      <div>
-        <h2 style="font-size: 18px; font-weight: 700">试卷分析</h2>
-        <p class="f-hint" style="margin-top: 4px">考后自动生成得分率、区分度、知识点与班级对比，支撑讲评与补弱。</p>
-      </div>
-      <div class="op-group">
+  <div class="page">
+    <AppPageHeader desc="考后自动生成得分率、区分度、知识点与班级对比，支撑讲评与补弱。">
+      <template #actions>
         <button class="btn btn-ghost" :disabled="!analysis" @click="onExport"><AppIcon name="download" :size="15" /> 导出分析报告</button>
         <button class="btn btn-ghost" :disabled="!analysis" @click="onPrint"><AppIcon name="print" :size="15" /> 打印</button>
-      </div>
-    </div>
+      </template>
+    </AppPageHeader>
 
     <div class="panel an-pick">
       <span class="filter-label">选择考试</span>
-      <select v-model.number="sessionId" class="f-select" style="width: 280px">
+      <select v-model.number="sessionId" class="f-select">
         <option v-for="s in sessions" :key="s.id" :value="s.id">
           {{ s.name }}（{{ s.subject }} {{ s.grade }} · {{ s.examAt }}）
         </option>
@@ -180,8 +176,8 @@ onMounted(async () => {
       </span>
     </div>
 
-    <p v-if="loading" class="panel" style="padding: 40px; text-align: center; color: var(--sub)">正在分析…</p>
-    <p v-else-if="!analysis" class="panel" style="padding: 40px; text-align: center; color: var(--sub)">请选择一次考试查看分析</p>
+    <p v-if="loading" class="panel empty-row">正在分析…</p>
+    <p v-else-if="!analysis" class="panel empty-row">请选择一次考试查看分析</p>
 
     <template v-else>
       <!-- 概览卡片 -->
@@ -213,29 +209,43 @@ onMounted(async () => {
             按得分率排序{{ scoreRateSort === 'asc' ? '↑' : scoreRateSort === 'desc' ? '↓' : '' }}
           </button>
         </div>
-        <div class="an-table">
-          <div class="an-tr an-th">
-            <span>题号</span><span>题型</span><span>知识点</span><span>满分</span><span>平均分</span><span>得分率</span><span>难度</span><span>区分度</span><span>正确率</span>
-          </div>
-          <div
-            v-for="q in sortedQuestions"
-            :key="q.questionId"
-            class="an-tr"
-            :class="{ danger: q.scoreRate < 0.5 }"
-          >
-            <span class="cell-strong">{{ q.qIndex }}</span>
-            <span>{{ q.type }}</span>
-            <span class="an-know">{{ q.knowledge.join('/') }}</span>
-            <span>{{ q.full }}</span>
-            <span>{{ q.avg.toFixed(1) }}</span>
-            <span class="an-rate">
-              <div class="mini-bar"><i :style="{ width: `${Math.round(q.scoreRate * 100)}%` }" /></div>
-              {{ (q.scoreRate * 100).toFixed(0) }}%
-            </span>
-            <span>{{ q.difficulty.toFixed(2) }}</span>
-            <span :class="{ 'cell-danger': q.discrimination < 0.2 }">{{ q.discrimination.toFixed(2) }}</span>
-            <span>{{ (q.correctRate * 100).toFixed(0) }}%</span>
-          </div>
+        <div class="data-table-wrap">
+          <table class="data-table an-q-table">
+            <thead>
+              <tr>
+                <th>题号</th>
+                <th>题型</th>
+                <th>知识点</th>
+                <th>满分</th>
+                <th>平均分</th>
+                <th>得分率</th>
+                <th>难度</th>
+                <th>区分度</th>
+                <th>正确率</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="q in sortedQuestions" :key="q.questionId" :class="{ danger: q.scoreRate < 0.5 }">
+                <td class="cell-strong">{{ q.qIndex }}</td>
+                <td>{{ q.type }}</td>
+                <td class="an-know">{{ q.knowledge.join('/') }}</td>
+                <td>{{ q.full }}</td>
+                <td>{{ q.avg.toFixed(1) }}</td>
+                <td>
+                  <div class="an-rate">
+                    <div class="mini-bar"><i :style="{ width: `${Math.round(q.scoreRate * 100)}%` }" /></div>
+                    {{ (q.scoreRate * 100).toFixed(0) }}%
+                  </div>
+                </td>
+                <td>{{ q.difficulty.toFixed(2) }}</td>
+                <td :class="{ 'cell-danger': q.discrimination < 0.2 }">{{ q.discrimination.toFixed(2) }}</td>
+                <td>{{ (q.correctRate * 100).toFixed(0) }}%</td>
+              </tr>
+              <tr v-if="!sortedQuestions.length">
+                <td colspan="9" class="empty-row">暂无小题数据</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
         <p class="f-hint" style="margin-top: 8px">得分率 &lt; 50% 的行标红，区分度 &lt; 0.2 的题区分度标红（偏低）。</p>
       </div>
@@ -255,17 +265,30 @@ onMounted(async () => {
       <!-- 班级对比 -->
       <div class="panel an-block">
         <div class="section-title" style="margin-bottom: 12px"><AppIcon name="users" :size="14" /> 班级对比</div>
-        <div class="an-table">
-          <div class="an-tr an-th">
-            <span>班级</span><span>人数</span><span>平均分</span><span>及格率</span><span>优秀率</span>
-          </div>
-          <div v-for="c in analysis.classes" :key="c.name" class="an-tr">
-            <span class="cell-strong">{{ c.name }}</span>
-            <span>{{ c.count }}</span>
-            <span>{{ c.avg.toFixed(1) }}</span>
-            <span>{{ c.passRate.toFixed(1) }}%</span>
-            <span>{{ c.excellentRate.toFixed(1) }}%</span>
-          </div>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>班级</th>
+                <th>人数</th>
+                <th>平均分</th>
+                <th>及格率</th>
+                <th>优秀率</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="c in analysis.classes" :key="c.name">
+                <td class="cell-strong">{{ c.name }}</td>
+                <td>{{ c.count }}</td>
+                <td>{{ c.avg.toFixed(1) }}</td>
+                <td>{{ c.passRate.toFixed(1) }}%</td>
+                <td>{{ c.excellentRate.toFixed(1) }}%</td>
+              </tr>
+              <tr v-if="!analysis.classes.length">
+                <td colspan="5" class="empty-row">暂无班级数据</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -284,9 +307,8 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.an-page { display: flex; flex-direction: column; gap: 12px; }
-.an-head { align-items: flex-end; }
 .an-pick { display: flex; align-items: center; gap: 10px; padding: 12px 16px; }
+.an-pick .f-select { width: auto; min-width: 280px; flex-shrink: 0; height: var(--ctrl-h); }
 
 .an-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .an-card { padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
@@ -297,7 +319,7 @@ onMounted(async () => {
 .an-card-hint { font-size: 11.5px; color: var(--sub); }
 
 .an-block { padding: 16px; }
-.an-block-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.an-block-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
 
 /* 分数段 */
 .an-band { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
@@ -307,18 +329,12 @@ onMounted(async () => {
 .an-band-num { width: 110px; flex-shrink: 0; text-align: right; font-size: 12px; color: var(--sub); }
 
 /* 表格 */
-.an-table { display: flex; flex-direction: column; }
-.an-tr {
-  display: grid; grid-template-columns: 0.5fr 1fr 1.4fr 0.6fr 0.8fr 1.4fr 0.7fr 0.8fr 0.8fr;
-  align-items: center; gap: 8px; padding: 9px 10px; border-bottom: 1px solid var(--border); font-size: 12.5px; color: var(--ink-2);
-}
-.an-tr.an-th { font-size: 12px; color: var(--sub); background: #fafbfd; border-radius: 8px 8px 0 0; }
-.an-tr:not(.an-th):hover { background: #fbfdfd; }
-.an-tr.danger { background: var(--danger-soft); }
-.an-know { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cell-strong { color: var(--ink); font-weight: 600; }
+.an-know { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cell-danger { color: var(--danger); font-weight: 600; }
-.an-rate { display: flex; align-items: center; gap: 6px; }
+/* 得分率 < 50% 的行标红（含 hover 态，避免被全局 hover 底色盖掉） */
+.an-q-table tbody tr.danger,
+.an-q-table tbody tr.danger:hover { background: var(--danger-soft); }
+.an-rate { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .mini-bar { width: 56px; height: 8px; background: #f1f3f9; border-radius: 5px; overflow: hidden; flex-shrink: 0; }
 .mini-bar > i { display: block; height: 100%; background: var(--brand); border-radius: 5px; }
 

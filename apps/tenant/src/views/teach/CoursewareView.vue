@@ -12,14 +12,17 @@
 import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
+  AppFilterPanel,
   AppIcon,
+  AppListToolbar,
+  AppPageHeader,
   RichTextViewer,
   SLIDE_LAYOUT_TEXT,
   TEACH_DOC_STATUS_TEXT,
   showToast,
   truncateRich,
 } from '@aiteach/shared'
-import type { CoursewareSlide, OrgQuestion, SlideLayout, TeachDoc } from '@aiteach/shared'
+import type { CoursewareSlide, FilterRowDef, OrgQuestion, SlideLayout, TeachDoc } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import {
@@ -47,15 +50,21 @@ const doc = ref<TeachDoc | null>(null)
 
 /* ================= 列表 ================= */
 
-const filter = reactive({ subject: '', grade: '', status: '', keyword: '' })
+const FILTER_ROWS = computed<FilterRowDef[]>(() => [
+  { key: 'subject', label: '学科', options: subjects.value, multiple: false },
+  { key: 'grade', label: '年级', options: grades.value, multiple: false },
+  { key: 'status', label: '状态', options: Object.values(TEACH_DOC_STATUS_TEXT), multiple: false },
+])
+const filters = reactive<Record<string, string[]>>({ subject: [], grade: [], status: [] })
+const keyword = ref('')
 const page = ref(1)
 const filtered = computed(() =>
   docs.value.filter(
     (row) =>
-      (!filter.subject || row.subject === filter.subject) &&
-      (!filter.grade || row.grade === filter.grade) &&
-      (!filter.status || row.status === filter.status) &&
-      (!filter.keyword || row.name.includes(filter.keyword) || row.knowledge.some((k) => k.includes(filter.keyword))),
+      (filters.subject.length === 0 || filters.subject.includes(row.subject)) &&
+      (filters.grade.length === 0 || filters.grade.includes(row.grade)) &&
+      (filters.status.length === 0 || filters.status.includes(TEACH_DOC_STATUS_TEXT[row.status])) &&
+      (!keyword.value || row.name.includes(keyword.value) || row.knowledge.some((k) => k.includes(keyword.value))),
   ),
 )
 const rows = computed(() => filtered.value.slice((page.value - 1) * 9, page.value * 9))
@@ -332,10 +341,10 @@ onMounted(async () => {
       <div class="cw-head-main">
         <input v-model="doc.name" class="cw-title" maxlength="50" placeholder="课件名称" />
         <div class="cw-head-meta">
-          <select v-model="doc.subject" class="f-select" style="width: 96px; height: 28px">
+          <select v-model="doc.subject" class="f-select">
             <option v-for="s in withCurrent(subjects, doc.subject)" :key="s" :value="s">{{ s }}</option>
           </select>
-          <select v-model="doc.grade" class="f-select" style="width: 96px; height: 28px">
+          <select v-model="doc.grade" class="f-select">
             <option v-for="g in withCurrent(grades, doc.grade)" :key="g" :value="g">{{ g }}</option>
           </select>
           <span class="tag" :class="doc.status === 'published' ? 'tag-green' : 'tag-gray'">
@@ -603,38 +612,19 @@ onMounted(async () => {
 
   <!-- ================= 列表 ================= -->
   <div v-else class="page">
-    <div class="page-head">
-      <div>
-        <h2 style="font-size: 18px; font-weight: 700">课件</h2>
-        <p class="f-hint" style="margin-top: 4px">
-          按「封面 → 学习目标 → 讲解 → 例题 → 小结」组织投屏页面，支持要点页 / 图文页 / 例题页，可放映与打印。
-        </p>
-      </div>
-      <div class="op-group">
+    <AppPageHeader desc="按「封面 → 学习目标 → 讲解 → 例题 → 小结」组织投屏页面，支持要点页 / 图文页 / 例题页，可放映与打印。">
+      <template #actions>
         <button class="btn btn-ghost" @click="router.push('/teach/lecture')"><AppIcon name="book" :size="15" /> 切换讲义</button>
         <button class="btn btn-primary" @click="openCreate"><AppIcon name="plus" :size="15" /> 新建课件</button>
-      </div>
-    </div>
+      </template>
+    </AppPageHeader>
+
+    <AppFilterPanel v-model="filters" :rows="FILTER_ROWS" />
 
     <div class="panel">
-      <div class="filter-bar">
-        <span class="filter-label">学科</span>
-        <select v-model="filter.subject" class="f-select" style="width: 118px">
-          <option value="">全部</option>
-          <option v-for="s in subjects" :key="s" :value="s">{{ s }}</option>
-        </select>
-        <span class="filter-label">年级</span>
-        <select v-model="filter.grade" class="f-select" style="width: 118px">
-          <option value="">全部</option>
-          <option v-for="g in grades" :key="g" :value="g">{{ g }}</option>
-        </select>
-        <span class="filter-label">状态</span>
-        <select v-model="filter.status" class="f-select" style="width: 118px">
-          <option value="">全部</option>
-          <option value="draft">草稿</option>
-          <option value="published">已发布</option>
-        </select>
-        <input v-model="filter.keyword" class="f-input" placeholder="名称 / 知识点" style="width: 190px" />
+      <!-- 工具条自带 14/18 的内边距，与下方栅格 / 分页的边距对齐 -->
+      <div class="list-head">
+        <AppListToolbar v-model="keyword" placeholder="名称 / 知识点" />
       </div>
 
       <div class="te-grid">
@@ -658,9 +648,7 @@ onMounted(async () => {
           </div>
         </div>
       </div>
-      <p v-if="!rows.length" class="f-hint" style="padding: 30px; text-align: center">
-        {{ loading ? '正在载入…' : '暂无课件，点击右上角新建' }}
-      </p>
+      <p v-if="!rows.length" class="empty-row">{{ loading ? '正在载入…' : '暂无课件，点击右上角新建' }}</p>
       <AppPagination :total="filtered.length" v-model:page="page" :page-size="9" />
     </div>
 
@@ -731,6 +719,12 @@ onMounted(async () => {
 .cw-title:hover { background: #f4f7fb; }
 .cw-title:focus { outline: none; box-shadow: 0 0 0 2px var(--brand-soft); }
 .cw-head-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+/* 自写横向工具条里的下拉：全局 .f-select 是 width:100%，会把这一行撑满（见规范第 4 条） */
+.cw-head-meta .f-select { width: auto; min-width: 96px; height: 28px; flex-shrink: 0; }
+/* 横向居中的行里，f-hint 自带的 5px 上边距会把文字顶歪 */
+.cw-head-meta .f-hint,
+.cw-bank-foot .f-hint,
+.cw-show-bar .f-hint { margin-top: 0; }
 
 .cw-body { display: grid; grid-template-columns: 232px minmax(0, 1fr) 306px; gap: 12px; align-items: start; }
 
@@ -749,17 +743,31 @@ onMounted(async () => {
 .cw-thumb-mini b { font-size: 11.5px; color: var(--ink); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .cw-thumb-mini i { font-size: 10px; color: var(--sub); font-style: normal; }
 .mini-cover, .mini-end, .mini-section { background: linear-gradient(135deg, var(--brand-soft), #fff); }
-.cw-thumb-ops { display: flex; gap: 2px; justify-content: flex-end; margin-top: 4px; opacity: 0; transition: opacity 0.15s; }
+.cw-thumb-ops { display: flex; align-items: center; gap: 2px; justify-content: flex-end; margin-top: 4px; opacity: 0; transition: opacity 0.15s; }
 .cw-thumb:hover .cw-thumb-ops { opacity: 1; }
 .te-icon {
-  width: 20px; height: 20px; border: none; border-radius: 5px;
-  background: #f0f3f8; color: var(--ink-2); font-size: 12px; line-height: 1;
+  width: 22px; height: 22px; border: none; border-radius: 5px;
+  background: #f0f3f8; color: var(--ink-2); font-size: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
 }
 .te-icon:hover { background: var(--brand-soft); color: var(--brand-deep); }
 .te-icon.danger:hover { background: var(--danger-soft); color: var(--danger); }
 .te-add { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.k-chip { border: 1.5px solid var(--border); border-radius: 999px; background: #fff; color: var(--ink-2); font-size: 11.5px; padding: 3px 10px; }
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+/* 「新增页面」是动作按钮（无选中态），不是选择器，因此不能换成 AppFilterChips；
+   但外形与筛选 chip 保持同一套尺寸（与共享组件 AppFilterChips 的 .opt-chip 同形，
+   包括同样不设 line-height）。 */
+.k-chip {
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  padding: 3px 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: border-color 0.12s, color 0.12s;
+}
 .k-chip:hover { border-color: var(--brand); color: var(--brand-deep); }
 
 .cw-main { min-width: 0; }
@@ -772,7 +780,7 @@ onMounted(async () => {
 .cw-tt { font-size: 20px; font-weight: 700; color: var(--ink); border-left: 4px solid var(--brand); padding-left: 10px; margin-bottom: 16px; }
 .cw-cols { display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 18px; flex: 1; min-height: 0; }
 .cw-bullets { display: flex; flex-direction: column; gap: 12px; overflow: auto; }
-.cw-bullets li { display: flex; gap: 9px; font-size: 15px; color: var(--ink-2); line-height: 1.6; }
+.cw-bullets li { display: flex; align-items: flex-start; gap: 9px; font-size: 15px; color: var(--ink-2); line-height: 1.6; }
 .cw-bullets em {
   width: 20px; height: 20px; flex-shrink: 0; border-radius: 50%;
   background: var(--brand-soft); color: var(--brand-deep);
@@ -792,10 +800,10 @@ onMounted(async () => {
 .cw-sec-line { width: 54px; height: 4px; border-radius: 2px; background: var(--brand); }
 .ly-cover, .ly-section, .ly-end { background: linear-gradient(160deg, var(--brand-soft) 0%, #fff 62%); }
 .cw-qbox { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; background: #fbfdfd; overflow: auto; }
-.cw-qmeta { display: flex; gap: 6px; margin-bottom: 8px; }
+.cw-qmeta { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
 .cw-qstem { font-size: 15px; line-height: 1.75; color: var(--ink); }
 .cw-qopts { margin-top: 8px; display: flex; flex-direction: column; gap: 5px; }
-.cw-qopts li { display: flex; gap: 6px; font-size: 14px; color: var(--ink-2); line-height: 1.6; }
+.cw-qopts li { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--ink-2); line-height: 1.6; }
 .cw-tip { font-size: 11.5px; color: var(--sub); }
 .cw-empty { padding: 40px; text-align: center; color: var(--sub); font-size: 13px; }
 
@@ -822,8 +830,11 @@ onMounted(async () => {
 .cw-show-bar { display: flex; align-items: center; justify-content: center; gap: 14px; }
 .cw-note { font-size: 12.5px; color: var(--ink-2); background: #f7f9fc; border-radius: 8px; padding: 9px 12px; line-height: 1.7; }
 
+/* 列表工具条与面板左右同边距（表格 / 栅格满幅，内边距给在工具条这一层） */
+.list-head { padding: 14px 18px 0; }
+
 /* 列表（复用讲义页的栅格样式命名，保持一致） */
-.te-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 16px; }
+.te-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 0 18px 4px; }
 .te-card {
   border: 1.5px solid var(--border); border-radius: 12px;
   padding: 14px; display: flex; flex-direction: column; gap: 8px;
@@ -833,7 +844,7 @@ onMounted(async () => {
 .te-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .te-card-top h3 { font-size: 14px; font-weight: 700; line-height: 1.5; }
 .te-card-meta { font-size: 12px; color: var(--sub); }
-.te-card-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.te-card-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
 .te-card-foot { font-size: 11.5px; color: var(--sub); }
 .row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .te-tpl-list { display: flex; flex-direction: column; gap: 8px; }

@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   AppIcon,
+  AppTabs,
   BarChart,
   hueColor,
   showToast,
@@ -209,17 +210,8 @@ onMounted(async () => {
 
     <!-- Tabs -->
     <div class="panel">
-      <div class="tabs">
-        <button
-          v-for="tab in TABS"
-          :key="tab.key"
-          class="tab"
-          :class="{ active: activeTab === tab.key }"
-          type="button"
-          @click="activeTab = tab.key"
-        >
-          {{ tab.label }}
-        </button>
+      <div class="tabs-wrap">
+        <AppTabs :tabs="TABS" :model-value="activeTab" @update:model-value="activeTab = $event as TabKey" />
       </div>
 
       <div class="tab-body">
@@ -465,34 +457,17 @@ onMounted(async () => {
 .head-title h2 { font-size: 18px; font-weight: 700; }
 .head-sub { font-size: 12.5px; color: var(--sub); margin-top: 5px; }
 .disabled-reason { color: var(--danger); }
-.head-facts { display: flex; gap: 26px; }
+.head-facts { display: flex; align-items: center; gap: 26px; }
 .fact { text-align: right; }
 .fact span { display: block; font-size: 11.5px; color: var(--sub); margin-bottom: 3px; }
 .fact b { font-size: 16px; }
 .fact b.warn { color: var(--warn); }
 .fact b.danger { color: var(--danger); }
 
-.tabs {
-  display: flex;
-  gap: 4px;
-  padding: 10px 18px 0;
-  border-bottom: 1px solid var(--border);
-}
-.tab {
-  border: none;
-  background: transparent;
-  color: var(--ink-2);
-  font-size: 14px;
-  font-weight: 600;
-  padding: 10px 16px 13px;
-  border-bottom: 2.5px solid transparent;
-  margin-bottom: -1px;
-  transition: color 0.15s, border-color 0.15s;
-}
-.tab:hover { color: var(--ink); }
-.tab.active { color: var(--brand); border-bottom-color: var(--brand); }
+/* 标签条交给 AppTabs（自带下划线样式与 align-items: center） */
+.tabs-wrap { padding: 10px 18px 0; }
 
-.tab-body { padding: 22px; }
+.tab-body { padding: 8px 22px 22px; }
 
 .form-col { max-width: 640px; }
 .form-grid {
@@ -500,7 +475,7 @@ onMounted(async () => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0 20px;
 }
-.stage-row { display: flex; gap: 8px; }
+.stage-row { display: flex; align-items: center; gap: 8px; }
 .stage-btn {
   height: 36px;
   padding: 0 18px;
@@ -560,7 +535,7 @@ onMounted(async () => {
 .pkg-left { display: flex; align-items: center; gap: 10px; }
 .pkg-left b { font-size: 15px; }
 .pkg-price { font-size: 12.5px; color: var(--sub); }
-.pkg-facts { display: flex; gap: 16px; font-size: 12.5px; color: var(--ink-2); flex-wrap: wrap; }
+.pkg-facts { display: flex; align-items: center; gap: 16px; font-size: 12.5px; color: var(--ink-2); flex-wrap: wrap; }
 
 .switch-grid {
   display: grid;

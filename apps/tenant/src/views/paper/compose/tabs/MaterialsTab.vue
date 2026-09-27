@@ -160,7 +160,7 @@ function itemCount(material: OrgMaterial): number {
 .mc-count { font-size: 11.5px; color: var(--success); font-weight: 600; }
 .mc-count.zero { color: var(--sub); font-weight: 400; }
 .mc-chapter-head .mini-btn { margin-left: auto; }
-.mc-examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.mc-examples { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
 .mc-example {
   font-size: 11.5px;
   color: var(--sub);

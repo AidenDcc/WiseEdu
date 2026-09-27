@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppIcon, formatCount, showToast } from '@aiteach/shared'
-import type { OrgMaterial, OrgMedia, OrgPaper, TextbookOption } from '@aiteach/shared'
+import { AppIcon, AppTabs, formatCount, showToast } from '@aiteach/shared'
+import type { OrgMaterial, OrgMedia, OrgPaper, TabDef, TextbookOption } from '@aiteach/shared'
 import { fetchMaterials, fetchMedia, fetchPapers, fetchTextbookMatrix } from '@/api/org'
 import HomeSection from '@/components/home/HomeSection.vue'
 import MiniAppPreview from '@/components/home/MiniAppPreview.vue'
@@ -110,6 +110,11 @@ function paperCountOf(tab: string): number {
   return tab === '最新' ? papers.value.length : papers.value.filter((p) => paperTabOf(p.name) === tab).length
 }
 
+/** 标签页（含各分类资源数） */
+const paperTabs = computed<TabDef[]>(() =>
+  PAPER_TABS.map((tab) => ({ key: tab, label: tab, count: paperCountOf(tab) || undefined })),
+)
+
 const paperList = computed(() => {
   const byTime = [...papers.value].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
   const list = paperTab.value === '最新' ? byTime : byTime.filter((p) => paperTabOf(p.name) === paperTab.value)
@@ -139,6 +144,9 @@ interface PrepCard {
 }
 
 const prepTab = ref('全部')
+
+/** 备课资源分类标签页 */
+const prepTabs: TabDef[] = PREP_TABS.map((tab) => ({ key: tab, label: tab }))
 
 /** 教材版本选择：`年级|学科|版本`，当前按学科过滤资源（教材版本维度待资源侧补 textbook 字段） */
 const textbookKey = ref('')
@@ -280,16 +288,7 @@ const handbooks = computed(() => materials.value.slice(0, 10))
 
     <!-- ===== 模块3：真题试卷 ===== -->
     <HomeSection title="真题试卷" more="/paper/list">
-      <div class="tabs">
-        <button
-          v-for="tab in PAPER_TABS"
-          :key="tab"
-          :class="{ active: paperTab === tab }"
-          @click="paperTab = tab"
-        >
-          {{ tab }}<em v-if="paperCountOf(tab)">{{ paperCountOf(tab) }}</em>
-        </button>
-      </div>
+      <AppTabs :tabs="paperTabs" :model-value="paperTab" @update:model-value="paperTab = $event" />
       <div v-if="paperList.length" class="grid grid-3">
         <RouterLink v-for="paper in paperList" :key="paper.id" class="doc-card" to="/paper/list">
           <div class="doc-head">
@@ -314,11 +313,7 @@ const handbooks = computed(() => materials.value.slice(0, 10))
         </select>
       </template> -->
 
-      <div class="tabs">
-        <button v-for="tab in PREP_TABS" :key="tab" :class="{ active: prepTab === tab }" @click="prepTab = tab">
-          {{ tab }}
-        </button>
-      </div>
+      <AppTabs :tabs="prepTabs" :model-value="prepTab" @update:model-value="prepTab = $event" />
 
       <div v-if="prepCards.length" class="grid grid-5">
         <RouterLink v-for="card in prepCards" :key="card.key" class="res-card" :to="card.to">
@@ -419,6 +414,7 @@ const handbooks = computed(() => materials.value.slice(0, 10))
 
 .entries {
   display: flex;
+  align-items: center;
   justify-content: center;
   gap: 12px;
   margin-top: 26px;
@@ -467,7 +463,7 @@ const handbooks = computed(() => materials.value.slice(0, 10))
   line-height: 15px;
 }
 
-.more-wrap { position: relative; flex: 0 1 132px; display: flex; justify-content: center; }
+.more-wrap { position: relative; flex: 0 1 132px; display: flex; align-items: center; justify-content: center; }
 .more-panel {
   position: absolute;
   top: calc(100% + 10px);
@@ -545,7 +541,7 @@ const handbooks = computed(() => materials.value.slice(0, 10))
 .banner.t3 .banner-text p { opacity: 0.88; }
 .banner.t3 .banner-btn { background: #fff; color: var(--brand-deep); }
 
-.banner-nav { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.banner-nav { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 .banner-nav button {
   width: 28px;
   height: 28px;
@@ -560,31 +556,9 @@ const handbooks = computed(() => materials.value.slice(0, 10))
 }
 .banner-nav button:hover { border-color: var(--brand); color: var(--brand-deep); }
 
-/* ===== 标签选项卡 ===== */
-.tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-.tabs button {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: #f6f8fc;
-  color: var(--ink-2);
-  font-size: 13px;
-  font-weight: 600;
-  padding: 6px 14px;
-  transition: background 0.15s, color 0.15s;
-}
-.tabs button:hover { color: var(--brand-deep); background: var(--brand-soft); }
-.tabs button.active { background: var(--brand-grad); color: #fff; }
-.tabs button em { font-style: normal; font-size: 11.5px; opacity: 0.62; }
+/* ===== 标签选项卡（下划线标签页统一用共享组件 AppTabs） ===== */
 
-.textbook-select { width: 232px; height: 34px; font-size: 13px; }
+.textbook-select { width: 232px; height: var(--ctrl-h); font-size: 13px; }
 
 /* ===== 资源网格 ===== */
 .grid { display: grid; gap: 16px; }
@@ -608,7 +582,7 @@ const handbooks = computed(() => materials.value.slice(0, 10))
   transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
 }
 .doc-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: transparent; }
-.doc-head { display: flex; align-items: flex-start; gap: 9px; }
+.doc-head { display: flex; align-items: center; gap: 9px; }
 .doc-icon {
   flex-shrink: 0;
   width: 26px;
@@ -619,7 +593,6 @@ const handbooks = computed(() => materials.value.slice(0, 10))
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-top: 1px;
 }
 .doc-title {
   font-size: 14px;

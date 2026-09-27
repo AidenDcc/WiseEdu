@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { AppIcon, RichTextViewer, showToast, toPlainText } from '@aiteach/shared'
-import type { AuditRecord, PublicPaper, PublicQuestion } from '@aiteach/shared'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { AppFilterPanel, AppIcon, AppListToolbar, RichTextViewer, showToast, toPlainText } from '@aiteach/shared'
+import type { AuditRecord, FilterRowDef, PublicPaper, PublicQuestion } from '@aiteach/shared'
 import AppDrawer from '@/components/ui/AppDrawer.vue'
 import { fetchAuditRecords, fetchPublicPapers, fetchPublicQuestions } from '@/api/platform'
 
@@ -19,7 +19,12 @@ const audits = ref<AuditRecord[]>([])
 const loading = ref(false)
 
 const qKeyword = ref('')
-const qSubject = ref('')
+const qFilter = reactive<Record<string, string[]>>({ subject: [] })
+
+/* 学科候选项取自接口数据，故用 computed 而不是模块级常量 */
+const Q_FILTER_ROWS = computed<FilterRowDef[]>(() => [
+  { key: 'subject', label: '学科', options: [...new Set(questions.value.map((q) => q.subject))], multiple: false },
+])
 
 async function load() {
   loading.value = true
@@ -35,9 +40,10 @@ async function load() {
 }
 
 function filteredQuestions() {
+  const subject = qFilter.subject[0]
   return questions.value.filter(
     (q) =>
-      (!qSubject.value || q.subject === qSubject.value) &&
+      (!subject || q.subject === subject) &&
       (!qKeyword.value.trim() || toPlainText(q.stem).includes(qKeyword.value.trim())),
   )
 }
@@ -63,36 +69,29 @@ onMounted(load)
 <template>
   <div class="panel">
     <!-- 三类资源 Tab（FR-PT-029） -->
-    <div class="tab-row">
-      <button
-        v-for="tab in TABS"
-        :key="tab.key"
-        class="tab-btn"
-        :class="{ active: activeTab === tab.key }"
-        type="button"
-        @click="activeTab = tab.key"
-      >
-        {{ tab.label }}
-      </button>
-      <span class="read-only-hint">
-        <AppIcon name="shield" :size="13" /> 平台侧只读，机构名称已脱敏
-      </span>
+    <div class="tabs-wrap">
+      <AppTabs :tabs="TABS" :model-value="activeTab" @update:model-value="activeTab = $event as TabKey" />
+    </div>
+    <div class="tabs-tools">
+      <AppListToolbar :searchable="false">
+        <template #left>
+          <span class="read-only-hint">
+            <AppIcon name="shield" :size="13" /> 平台侧只读，机构名称已脱敏
+          </span>
+        </template>
+      </AppListToolbar>
     </div>
 
     <!-- 公开题库（FR-PT-030） -->
     <div v-if="activeTab === 'questions'" class="tab-body">
-      <div class="filter-bar">
-        <select v-model="qSubject" class="f-select" style="width: 120px">
-          <option value="">全部学科</option>
-          <option v-for="subject in [...new Set(questions.map((q) => q.subject))]" :key="subject" :value="subject">
-            {{ subject }}
-          </option>
-        </select>
-        <input v-model="qKeyword" class="f-input" style="width: 220px" placeholder="搜索题干关键词" />
-        <button class="btn btn-ghost btn-sm" style="margin-left: auto" @click="onExport('公开题库')">
-          <AppIcon name="download" :size="14" /> 导出
-        </button>
-      </div>
+      <AppFilterPanel v-model="qFilter" :rows="Q_FILTER_ROWS" />
+      <AppListToolbar v-model="qKeyword" placeholder="搜索题干关键词" :search-width="220">
+        <template #right>
+          <button class="btn btn-ghost btn-sm" @click="onExport('公开题库')">
+            <AppIcon name="download" :size="14" /> 导出
+          </button>
+        </template>
+      </AppListToolbar>
       <div class="data-table-wrap">
         <table class="data-table">
           <thead>
@@ -139,12 +138,16 @@ onMounted(load)
 
     <!-- 公开试卷（FR-PT-031） -->
     <div v-else-if="activeTab === 'papers'" class="tab-body">
-      <div class="filter-bar">
-        <span class="filter-label">平行卷信息只读展示；源卷内容与组卷结构不向平台侧开放</span>
-        <button class="btn btn-ghost btn-sm" style="margin-left: auto" @click="onExport('公开试卷')">
-          <AppIcon name="download" :size="14" /> 导出
-        </button>
-      </div>
+      <AppListToolbar :searchable="false">
+        <template #left>
+          <span class="tab-hint">平行卷信息只读展示；源卷内容与组卷结构不向平台侧开放</span>
+        </template>
+        <template #right>
+          <button class="btn btn-ghost btn-sm" @click="onExport('公开试卷')">
+            <AppIcon name="download" :size="14" /> 导出
+          </button>
+        </template>
+      </AppListToolbar>
       <div class="data-table-wrap">
         <table class="data-table">
           <thead>
@@ -190,12 +193,16 @@ onMounted(load)
 
     <!-- 审核记录（FR-PT-032） -->
     <div v-else class="tab-body">
-      <div class="filter-bar">
-        <span class="filter-label">多智能体检测 → 自动纠错 → 人工终审全链路记录</span>
-        <button class="btn btn-ghost btn-sm" style="margin-left: auto" @click="onExport('审核记录')">
-          <AppIcon name="download" :size="14" /> 导出
-        </button>
-      </div>
+      <AppListToolbar :searchable="false">
+        <template #left>
+          <span class="tab-hint">多智能体检测 → 自动纠错 → 人工终审全链路记录</span>
+        </template>
+        <template #right>
+          <button class="btn btn-ghost btn-sm" @click="onExport('审核记录')">
+            <AppIcon name="download" :size="14" /> 导出
+          </button>
+        </template>
+      </AppListToolbar>
       <div class="data-table-wrap">
         <table class="data-table">
           <thead>
@@ -335,36 +342,18 @@ onMounted(load)
 </template>
 
 <style scoped>
-.tab-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  border-bottom: 1px solid var(--border);
-  padding: 0 16px;
-}
-.tab-btn {
-  border: none;
-  background: transparent;
-  color: var(--sub);
-  font-size: 13.5px;
-  font-weight: 500;
-  padding: 14px 16px;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  transition: color 0.15s;
-}
-.tab-btn:hover { color: var(--ink); }
-.tab-btn.active { color: var(--brand); font-weight: 600; border-bottom-color: var(--brand); }
+.tabs-wrap { padding: 0 16px; }
+.tabs-tools { padding: 0 16px; }
 .read-only-hint {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 5px;
   font-size: 12px;
   color: var(--sub);
 }
-.tab-body { padding: 14px 16px 16px; }
+.tab-hint { font-size: 12.5px; color: var(--sub); }
+.tab-body { padding: 0 16px 16px; }
+.tab-body :deep(.filter-panel) { margin-bottom: 12px; }
 
 .stem-cell { max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .knowledge-cell { font-size: 12.5px; color: var(--ink-2); max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

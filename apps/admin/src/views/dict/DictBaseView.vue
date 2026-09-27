@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { AppIcon, showToast, ApiError, DICT_TYPES } from '@aiteach/shared'
+import { AppIcon, AppListToolbar, showToast, ApiError, DICT_TYPES } from '@aiteach/shared'
 import type { DictItem, DictTypeKey } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
@@ -163,19 +163,23 @@ onMounted(load)
 
     <!-- 右：数据维护 -->
     <div class="panel table-panel">
-      <div class="filter-bar">
-        <span class="filter-label">{{ typeMeta.title }} · {{ typeMeta.hint }}</span>
-        <div style="margin-left: auto; display: flex; gap: 8px">
-          <button class="btn btn-ghost btn-sm" @click="onImport">
-            <AppIcon name="upload" :size="14" /> 批量导入
-          </button>
-          <button class="btn btn-ghost btn-sm" @click="onExport">
-            <AppIcon name="download" :size="14" /> 导出
-          </button>
-          <button class="btn btn-primary btn-sm" @click="openCreate">
-            <AppIcon name="plus" :size="15" /> 新增
-          </button>
-        </div>
+      <div class="panel-tools">
+        <AppListToolbar :searchable="false">
+          <template #left>
+            <span class="panel-hint">{{ typeMeta.title }} · {{ typeMeta.hint }}</span>
+          </template>
+          <template #right>
+            <button class="btn btn-ghost btn-sm" @click="onImport">
+              <AppIcon name="upload" :size="14" /> 批量导入
+            </button>
+            <button class="btn btn-ghost btn-sm" @click="onExport">
+              <AppIcon name="download" :size="14" /> 导出
+            </button>
+            <button class="btn btn-primary btn-sm" @click="openCreate">
+              <AppIcon name="plus" :size="15" /> 新增
+            </button>
+          </template>
+        </AppListToolbar>
       </div>
 
       <div class="data-table-wrap">
@@ -333,6 +337,8 @@ onMounted(load)
 .type-item:hover { background: #f2f4fa; color: var(--ink); }
 .type-item.active { background: var(--brand-soft); color: var(--brand); font-weight: 600; }
 .table-panel { flex: 1; min-width: 0; }
+.panel-tools { padding: 14px 18px 0; }
+.panel-hint { font-size: 12.5px; color: var(--sub); }
 
 .code-chip {
   font-family: 'SF Mono', Menlo, monospace;

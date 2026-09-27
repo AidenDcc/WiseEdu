@@ -21,6 +21,9 @@
   --shadow: 0 2px 12px rgba(28, 36, 52, 0.05);
   --shadow-lg: 0 12px 32px rgba(28, 36, 52, 0.1);
   --font: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+  /* 筛选栏 / 工具条里控件的统一高度：输入框、下拉、按钮同高才不会顶边错位
+     （此前 .f-input 是 38px、.btn-sm 是 34px，混在一行里差 4px） */
+  --ctrl-h: 34px;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -64,6 +67,9 @@ input, select { font-family: inherit; }
   font-weight: 600;
   padding: 0 22px;
   height: 42px;
+  /* 固定高度 + 不定宽：被 flex 挤压时若不禁止收缩 / 换行，文字会折成两行撑破按钮 */
+  white-space: nowrap;
+  flex-shrink: 0;
   transition: opacity 0.2s, transform 0.15s, box-shadow 0.2s;
 }
 .btn:active { transform: scale(0.98); }
@@ -91,18 +97,23 @@ input, select { font-family: inherit; }
 .tag-green { background: var(--success-soft); color: var(--success); }
 .tag-orange { background: var(--warn-soft); color: var(--warn); }
 .tag-red { background: var(--danger-soft); color: var(--danger); }
-/* ===== 数据页面：页头 ===== */
-.page-head {
+/* ===== 页面骨架 =====
+   23 个机构端页面用 <div class="page"> 包裹正文，但这个类此前从未被定义过，
+   于是相邻的 .panel 块之间一点间距都没有（公式广场三块面板直接贴在一起）。
+   这里补上纵向节奏：默认 14px，与 HomeworkView 自己手写的 gap: 14px 一致。 */
+.page {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 14px;
-  margin-bottom: 16px;
+  min-width: 0;
 }
-.page-head .title { font-size: 18px; font-weight: 700; }
-.page-head .desc { font-size: 12.5px; color: var(--sub); margin-top: 4px; }
 
-/* ===== 数据页面：筛选栏 ===== */
+/* 页面页头已下沉为共享组件 AppPageHeader（packages/shared/src/components/ui/）。
+   它**刻意不渲染页面名** —— 页面名由顶栏面包屑承担，这两端都是如此。
+   原来这里的 .page-head / .page-head .title / .desc 已无任何调用方，删除。 */
+
+/* ===== 数据页面：筛选栏 =====
+   作为面板头部时自带下边框，与下方表格分隔。 */
 .filter-bar {
   display: flex;
   flex-wrap: wrap;
@@ -112,6 +123,25 @@ input, select { font-family: inherit; }
   border-bottom: 1px solid var(--border);
 }
 .filter-label { font-size: 12.5px; color: var(--sub); flex-shrink: 0; }
+
+/* 筛选栏 / 工具条内的控件统一高度，并且不再被 .f-select 的 width:100% 撑满整行
+   —— 全仓曾有 114 处内联 style="width:Npx" 就是为了绕开这个 100%。 */
+.filter-bar .f-input,
+.filter-bar .f-select,
+.filter-bar .btn,
+.list-toolbar .f-input,
+.list-toolbar .f-select,
+.list-toolbar .btn {
+  height: var(--ctrl-h);
+  width: auto;
+  min-width: 132px;
+  flex-shrink: 0;
+}
+.filter-bar .btn,
+.list-toolbar .btn { min-width: 0; padding: 0 14px; font-size: 13px; border-radius: 9px; }
+/* 说明文字在横向居中的行里不该带 5px 上边距（那是给纵向表单用的） */
+.filter-bar .f-hint,
+.list-toolbar .f-hint { margin-top: 0; }
 
 /* ===== 数据表格 ===== */
 .data-table-wrap { overflow-x: auto; }
@@ -144,12 +174,30 @@ input, select { font-family: inherit; }
 /* 有滚动表格：粘性表头 */
 .data-table thead th { position: sticky; top: 0; z-index: 1; }
 
+/* 表格直接贴在 .panel 里时（无 .filter-bar 打头），表头底色会盖住面板圆角，
+   这里把首行两端的表头切回圆角，避免方角顶出圆边框 */
+.panel > .data-table-wrap:first-child .data-table thead tr:first-child th:first-child,
+.panel > .data-table:first-child thead tr:first-child th:first-child {
+  border-top-left-radius: var(--radius);
+}
+.panel > .data-table-wrap:first-child .data-table thead tr:first-child th:last-child,
+.panel > .data-table:first-child thead tr:first-child th:last-child {
+  border-top-right-radius: var(--radius);
+}
+
+/* 空态：全仓 40 处把类写在 <td> 自己身上（`<td colspan="8" class="empty-row">`）、
+   20 处写在没有表格的 <p> 上。原来的 `.empty-row td`（后代选择器）两种都命中不了，
+   于是空表格一律左对齐、无内边距——「该居中的没居中」最典型的一处。 */
+.empty-row,
 .empty-row td {
   text-align: center;
   color: var(--sub);
-  padding: 46px 0 !important;
   font-size: 13px;
 }
+.empty-row td { padding: 46px 0 !important; }
+td.empty-row { padding: 46px 14px !important; }
+p.empty-row,
+div.empty-row { padding: 30px 0 !important; margin: 0; }
 
 /* ===== 表格内操作按钮 ===== */
 .mini-btn {
@@ -165,6 +213,7 @@ input, select { font-family: inherit; }
   border-radius: 7px;
   transition: background 0.15s;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 .mini-btn:hover { background: var(--brand-soft); }
 .mini-btn.danger { color: var(--danger); }
@@ -262,8 +311,10 @@ input, select { font-family: inherit; }
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px 22px;
 }
-.detail-item .d-label { font-size: 12px; color: var(--sub); margin-bottom: 4px; }
-.detail-item .d-value { font-size: 13.5px; color: var(--ink); font-weight: 500; }
+/* display:block 不能省：ProfileView / SquareView 用 <span> 写这两个类，
+   行内元素下 margin-bottom 无效，标签与值会挤在同一行 */
+.detail-item .d-label { display: block; font-size: 12px; color: var(--sub); margin-bottom: 4px; }
+.detail-item .d-value { display: block; font-size: 13.5px; color: var(--ink); font-weight: 500; }
 
 /* ===== 描述区块标题 ===== */
 .section-title {

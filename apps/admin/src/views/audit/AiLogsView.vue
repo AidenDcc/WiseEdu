@@ -1,15 +1,25 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { AppIcon, showToast } from '@aiteach/shared'
-import type { AiCallLog } from '@aiteach/shared'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { AppFilterPanel, AppIcon, AppListToolbar, AppSearchInput, showToast } from '@aiteach/shared'
+import type { AiCallLog, FilterRowDef } from '@aiteach/shared'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import { fetchAiLogs } from '@/api/platform'
 import type { AiLogStats } from '@/api/platform'
 
 const SCENES = ['AI 出题', 'AI 变式', '拍照识题', '文档识别入库', '题目校验', '试卷分析']
 const MODELS = ['GPT-5.1', 'Claude Opus 5', 'Qwen-VL Max', 'PaddleOCR']
+const RESULTS = ['成功', '失败']
+/** chip 上的中文文案 → 接口参数 */
+const RESULT_VALUE: Record<string, string> = { 成功: 'ok', 失败: 'fail' }
 
-const filters = reactive({ org: '', scene: '', model: '', result: '' })
+const FILTER_ROWS: FilterRowDef[] = [
+  { key: 'scene', label: '场景', options: SCENES, multiple: false },
+  { key: 'model', label: '模型', options: MODELS, multiple: false },
+  { key: 'result', label: '结果', options: RESULTS, multiple: false },
+]
+
+const filters = reactive<Record<string, string[]>>({ scene: [], model: [], result: [] })
+const keyword = ref('')
 const list = ref<AiCallLog[]>([])
 const stats = ref<AiLogStats>({ total: 0, successRate: 0, totalTokens: 0, totalCost: 0 })
 const loading = ref(false)
@@ -21,10 +31,10 @@ async function load() {
   loading.value = true
   try {
     const data = await fetchAiLogs({
-      org: filters.org.trim() || undefined,
-      scene: filters.scene || undefined,
-      model: filters.model || undefined,
-      result: filters.result || undefined,
+      org: keyword.value.trim() || undefined,
+      scene: filters.scene[0] || undefined,
+      model: filters.model[0] || undefined,
+      result: filters.result[0] ? RESULT_VALUE[filters.result[0]] : undefined,
     })
     list.value = data.list
     stats.value = data.stats
@@ -49,6 +59,10 @@ function rowCost(row: AiCallLog) {
 function onExport() {
   showToast(`已导出 ${list.value.length} 条 AI 调用日志（演示）`, 'success')
 }
+
+/* 筛选条件 / 关键词变化即重新查询（原来是点「查询」按钮） */
+watch(filters, load, { deep: true })
+watch(keyword, load)
 
 onMounted(load)
 </script>
@@ -80,26 +94,18 @@ onMounted(load)
     </div>
 
     <div class="panel">
-      <div class="filter-bar">
-        <input v-model="filters.org" class="f-input" style="width: 150px" placeholder="机构（脱敏名）" />
-        <select v-model="filters.scene" class="f-select" style="width: 130px">
-          <option value="">全部场景</option>
-          <option v-for="scene in SCENES" :key="scene" :value="scene">{{ scene }}</option>
-        </select>
-        <select v-model="filters.model" class="f-select" style="width: 150px">
-          <option value="">全部模型</option>
-          <option v-for="model in MODELS" :key="model" :value="model">{{ model }}</option>
-        </select>
-        <select v-model="filters.result" class="f-select" style="width: 110px">
-          <option value="">全部结果</option>
-          <option value="ok">成功</option>
-          <option value="fail">失败</option>
-        </select>
-        <button class="btn btn-primary btn-sm" @click="load">查询</button>
-        <button class="btn btn-ghost btn-sm" style="margin-left: auto" @click="onExport">
-          <AppIcon name="download" :size="14" /> 导出
-        </button>
-      </div>
+      <AppFilterPanel v-model="filters" :rows="FILTER_ROWS">
+        <template #extra>
+          <AppSearchInput v-model="keyword" placeholder="机构（脱敏名）" :width="200" />
+        </template>
+      </AppFilterPanel>
+      <AppListToolbar :searchable="false">
+        <template #right>
+          <button class="btn btn-ghost btn-sm" @click="onExport">
+            <AppIcon name="download" :size="14" /> 导出
+          </button>
+        </template>
+      </AppListToolbar>
 
       <div class="data-table-wrap">
         <table class="data-table">
@@ -141,8 +147,11 @@ onMounted(load)
                 </tr>
                 <tr v-if="!row.ok" class="fail-detail">
                   <td colspan="9">
-                    <AppIcon name="warning" :size="13" />
-                    错误信息：{{ row.error }}
+                    <!-- flex 只能加在 td 内部的 div 上：写在 colspan 的 td 上会把整行撑破 -->
+                    <div class="fail-detail-inner">
+                      <AppIcon name="warning" :size="13" />
+                      错误信息：{{ row.error }}
+                    </div>
                   </td>
                 </tr>
               </template>
@@ -177,6 +186,9 @@ onMounted(load)
 .stat-num.bad { color: var(--danger); }
 .stat-label { font-size: 12px; color: var(--sub); }
 
+.panel > :deep(.filter-panel) { margin: 14px 14px 0; }
+.panel > :deep(.list-toolbar) { padding: 0 14px; }
+
 .time-cell { font-size: 12.5px; color: var(--sub); white-space: nowrap; }
 .fail-row td { background: rgba(214, 69, 69, 0.05); }
 .fail-detail td {
@@ -185,8 +197,6 @@ onMounted(load)
   font-size: 12.5px;
   padding: 6px 14px 10px;
   border-top: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
 }
+.fail-detail-inner { display: flex; align-items: center; gap: 6px; }
 </style>

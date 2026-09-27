@@ -283,7 +283,8 @@ function onPaperSaved() {
 .cs-brand-text b { font-size: 15px; color: var(--ink); }
 .cs-brand-text em { font-size: 11.5px; color: var(--sub); font-style: normal; }
 
-.cs-search { flex: 1; display: flex; justify-content: center; }
+/* 横向居中搜索条：补 align-items 让子元素按自身高度纵向居中（否则被拉伸到条高） */
+.cs-search { flex: 1; display: flex; align-items: center; justify-content: center; }
 
 .cs-head-ops { flex-shrink: 0; }
 .cs-basket-btn {

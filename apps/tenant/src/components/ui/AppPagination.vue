@@ -90,7 +90,7 @@ function go(page: number) {
 .page-btn.active {
   background: var(--brand-grad);
   color: #fff;
-  box-shadow: 0 4px 10px rgba(79, 110, 247, 0.3);
+  box-shadow: 0 4px 10px rgba(0, 180, 166, 0.3);
 }
 .page-btn:disabled { color: #c3cad8; cursor: not-allowed; }
 .dots { color: var(--sub); font-size: 13px; padding: 0 2px; }

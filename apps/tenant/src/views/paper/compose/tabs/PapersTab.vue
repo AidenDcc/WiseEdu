@@ -123,7 +123,7 @@ function usePaper(paper: OrgPaper) {
 .pc-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .pc-name { font-size: 14px; font-weight: 600; color: var(--ink); }
 .pc-meta { font-size: 12px; color: var(--sub); }
-.pc-sections { display: flex; flex-wrap: wrap; gap: 5px; }
+.pc-sections { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
 .pc-section {
   font-size: 11.5px;
   color: var(--ink-2);
@@ -133,6 +133,6 @@ function usePaper(paper: OrgPaper) {
 }
 .pc-section b { color: var(--brand-deep); }
 .pc-foot { font-size: 11.5px; color: var(--sub); }
-.pc-ops { display: flex; gap: 6px; margin-top: auto; padding-top: 8px; border-top: 1px dashed var(--border); }
+.pc-ops { display: flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 8px; border-top: 1px dashed var(--border); }
 .pc-ops .mini-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
 </style>

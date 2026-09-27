@@ -12,8 +12,8 @@
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppIcon, COLLAB_MEMBER_TEXT, COLLAB_STATUS_TEXT, showToast } from '@aiteach/shared'
-import type { CollabMember, OrgCollabTask, OrgPaper, OrgQuestion, StaffMember } from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, COLLAB_MEMBER_TEXT, COLLAB_STATUS_TEXT, showToast } from '@aiteach/shared'
+import type { CollabMember, FilterRowDef, OrgCollabTask, OrgPaper, OrgQuestion, StaffMember } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppDrawer from '@/components/ui/AppDrawer.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
@@ -30,13 +30,17 @@ const questions = ref<OrgQuestion[]>([])
 const staff = ref<StaffMember[]>([])
 const loading = ref(true)
 
-const filter = reactive({ status: '', keyword: '' })
+const FILTER_ROWS: FilterRowDef[] = [
+  { key: 'status', label: '状态', options: Object.values(COLLAB_STATUS_TEXT), multiple: false },
+]
+const filters = reactive<Record<string, string[]>>({ status: [] })
+const keyword = ref('')
 const page = ref(1)
 const filtered = computed(() =>
   tasks.value.filter(
     (row) =>
-      (!filter.status || row.status === filter.status) &&
-      (!filter.keyword || row.name.includes(filter.keyword)),
+      (filters.status.length === 0 || filters.status.includes(COLLAB_STATUS_TEXT[row.status])) &&
+      (!keyword.value || row.name.includes(keyword.value)),
   ),
 )
 const rows = computed(() => filtered.value.slice((page.value - 1) * 8, page.value * 8))
@@ -328,22 +332,16 @@ onMounted(async () => {
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <div>
-        <h2 style="font-size: 18px; font-weight: 700">协同组卷</h2>
-        <p class="f-hint" style="margin-top: 4px">
-          一张试卷按题型拆给多位老师分头组卷，发起人定卷面要求，处理人只能选自己负责的题型，但可以看到整张试卷。
-        </p>
-      </div>
-      <div class="op-group">
+    <AppPageHeader desc="一张试卷按题型拆给多位老师分头组卷，发起人定卷面要求，处理人只能选自己负责的题型，但可以看到整张试卷。">
+      <template #actions>
         <button class="btn btn-ghost" @click="router.push('/paper/compose')">
           <AppIcon name="grid" :size="15" /> 题库组卷
         </button>
         <button class="btn btn-primary" @click="openCreate()">
           <AppIcon name="plus" :size="15" /> 新建协同组卷任务
         </button>
-      </div>
-    </div>
+      </template>
+    </AppPageHeader>
 
     <div class="stat-row">
       <div class="stat-card panel">
@@ -368,15 +366,12 @@ onMounted(async () => {
       </div>
     </div>
 
+    <AppFilterPanel v-model="filters" :rows="FILTER_ROWS" />
+
     <div class="panel">
-      <div class="filter-bar">
-        <span class="filter-label">状态</span>
-        <select v-model="filter.status" class="f-select" style="width: 140px">
-          <option value="">全部</option>
-          <option v-for="(text, key) in COLLAB_STATUS_TEXT" :key="key" :value="key">{{ text }}</option>
-        </select>
-        <span class="filter-label">关键词</span>
-        <input v-model="filter.keyword" class="f-input" placeholder="试卷名称" style="width: 200px" />
+      <!-- 工具条自带 14/18 的内边距，与下方表格的满幅排布配合（表格要贴着面板边才能横向滚动） -->
+      <div class="list-head">
+        <AppListToolbar v-model="keyword" placeholder="试卷名称" />
       </div>
 
       <div class="data-table-wrap">
@@ -541,7 +536,7 @@ onMounted(async () => {
             <button
               v-for="row in form.structure"
               :key="row.type"
-              class="k-chip"
+              class="assign-chip"
               :class="{ on: (form.assignment[name] ?? []).includes(row.type) }"
               type="button"
               @click="toggleType(name, row.type)"
@@ -608,19 +603,23 @@ onMounted(async () => {
 
 <style scoped>
 .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }
+/* 列表工具条与面板同宽同边距：表格满幅贴边才能横向滚动，所以内边距给在工具条这一层 */
+.list-head { padding: 14px 18px 0; }
 .stat-card { padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
 .stat-label { font-size: 12.5px; color: var(--sub); }
 .stat-card b { font-size: 24px; color: var(--brand-deep); line-height: 1.2; }
 .stat-card em { font-size: 11.5px; color: var(--sub); font-style: normal; }
 
-.assign-cell { display: flex; flex-wrap: wrap; gap: 4px; max-width: 260px; }
+.assign-cell { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; max-width: 260px; }
 .prog { min-width: 120px; }
 
 .row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .struct-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+/* 横向居中的行里，f-hint 自带的 5px 上边距会把文字顶歪 */
+.struct-row .f-hint { margin-top: 0; }
 .is-warn { color: var(--warn); }
 
-.member-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.member-grid { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
 .member-chip {
   display: inline-flex;
   align-items: center;
@@ -646,18 +645,29 @@ onMounted(async () => {
   background: #fbfdfd;
 }
 .assign-name { font-size: 13px; font-weight: 600; color: var(--ink); width: 64px; flex-shrink: 0; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; }
-.k-chip {
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+/* 题型分工不是筛选条件，而是「谁负责哪个题型 · 几道题」的派活板：选项文案带题数、
+   同一题型跨成员互斥（见 toggleType）。共享的 AppFilterChips 只有「单值 option + 实心选中」
+   一种造型，套过来会丢掉题数并换掉这块的视觉语言，故保留 pill（与 .member-chip 同族）。
+   共享组件里没有 pill 变体，且 packages/shared 不在本次改动范围内，故样式就地保留。 */
+.assign-chip {
   border: 1.5px solid var(--border);
   border-radius: 999px;
   background: #fff;
   color: var(--ink-2);
   font-size: 12px;
   padding: 4px 11px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
-.k-chip.on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-deep); font-weight: 600; }
+.assign-chip:hover { border-color: var(--brand); color: var(--brand-deep); }
+.assign-chip.on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-deep); font-weight: 600; }
 
 .prog-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+/* 横向居中的行里，f-hint 自带的 5px 上边距会把文字顶歪 */
+.prog-head .f-hint,
+.prog-top .f-hint,
+.assign-row .f-hint { margin-top: 0; }
 .prog-head .usage { flex: 1; }
 .prog-row { border-bottom: 1px dashed var(--border); padding: 12px 0; }
 .prog-top { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink); }

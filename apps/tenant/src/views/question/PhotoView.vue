@@ -412,8 +412,8 @@ onMounted(load)
   <div class="photo-layout">
     <!-- 上传区（FR-TM-017：拖拽 / 拍照 / 相册，≤20 张） -->
     <div class="panel upload-panel">
-      <div class="page-head" style="margin-bottom: 12px">
-        <h2>AI 拍照识题</h2>
+      <!-- 区块头（不是页面名：页面名由顶栏面包屑承担），保留轮次选择与引擎标签 -->
+      <div class="blk-head">
         <span class="f-hint">已处理 {{ doneCount }} / {{ tasks.length }} 张 · 单次最多 20 张，支持 jpg / png / webp</span>
         <label class="rounds-pick" title="识别后自动复核答案/解析的轮数；超轮仍有异常将提醒人工介入">
           AI 检查轮次
@@ -469,54 +469,57 @@ onMounted(load)
     <!-- 任务列表 -->
     <div class="panel">
       <div class="section-title">识别任务</div>
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>文件</th>
-            <th>状态</th>
-            <th>识别结果</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="tasks.length === 0">
-            <td colspan="4" class="empty-row">暂无识别任务，先上传照片试试</td>
-          </tr>
-          <template v-else>
-            <tr v-for="task in tasks" :key="task.id">
-              <td class="cell-strong">{{ task.name }}</td>
-              <td><span class="tag" :class="STATUS_CLASS[task.status]">{{ STATUS_TEXT[task.status] }}</span></td>
-              <td>
-                <template v-if="task.status === 'done'">
-                  {{ task.results.length }} 题 · 已处理 {{ task.results.filter((row) => row.decided).length }}
-                  <!-- 质检结论打标：超轮异常红、有提醒橙、通过绿 -->
-                  <span
-                    v-if="verifySummaryByTaskId.get(task.id)"
-                    class="tag"
-                    :class="verifySummaryByTaskId.get(task.id)!.manual ? 'tag-red' : verifySummaryByTaskId.get(task.id)!.warn ? 'tag-orange' : 'tag-green'"
-                  >
-                    质检{{ verifySummaryByTaskId.get(task.id)!.manual ? '异常 · 需人工' : verifySummaryByTaskId.get(task.id)!.warn ? '有提醒' : '通过' }}
-                  </span>
-                </template>
-                <span v-else class="f-hint">{{ task.failReason ?? '—' }}</span>
-              </td>
-              <td>
-                <div class="op-group">
-                  <button
-                    v-if="task.status === 'done'"
-                    class="mini-btn"
-                    @click="openConfirm(task)"
-                  >
-                    确认结果
-                  </button>
-                  <button v-if="task.status === 'failed'" class="mini-btn" @click="onRetry(task)">重新识别</button>
-                  <span v-if="task.status === 'recognizing'" class="f-hint">正在还原公式…</span>
-                </div>
-              </td>
+      <!-- 表格包在 .data-table-wrap 里：窄屏时表头与内容一起横向滚动 -->
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>文件</th>
+              <th>状态</th>
+              <th>识别结果</th>
+              <th>操作</th>
             </tr>
-          </template>
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            <tr v-if="tasks.length === 0">
+              <td colspan="4" class="empty-row">暂无识别任务，先上传照片试试</td>
+            </tr>
+            <template v-else>
+              <tr v-for="task in tasks" :key="task.id">
+                <td class="cell-strong">{{ task.name }}</td>
+                <td><span class="tag" :class="STATUS_CLASS[task.status]">{{ STATUS_TEXT[task.status] }}</span></td>
+                <td>
+                  <template v-if="task.status === 'done'">
+                    {{ task.results.length }} 题 · 已处理 {{ task.results.filter((row) => row.decided).length }}
+                    <!-- 质检结论打标：超轮异常红、有提醒橙、通过绿 -->
+                    <span
+                      v-if="verifySummaryByTaskId.get(task.id)"
+                      class="tag"
+                      :class="verifySummaryByTaskId.get(task.id)!.manual ? 'tag-red' : verifySummaryByTaskId.get(task.id)!.warn ? 'tag-orange' : 'tag-green'"
+                    >
+                      质检{{ verifySummaryByTaskId.get(task.id)!.manual ? '异常 · 需人工' : verifySummaryByTaskId.get(task.id)!.warn ? '有提醒' : '通过' }}
+                    </span>
+                  </template>
+                  <span v-else class="f-hint">{{ task.failReason ?? '—' }}</span>
+                </td>
+                <td>
+                  <div class="op-group">
+                    <button
+                      v-if="task.status === 'done'"
+                      class="mini-btn"
+                      @click="openConfirm(task)"
+                    >
+                      确认结果
+                    </button>
+                    <button v-if="task.status === 'failed'" class="mini-btn" @click="onRetry(task)">重新识别</button>
+                    <span v-if="task.status === 'recognizing'" class="f-hint">正在还原公式…</span>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- 结果确认三栏：原图 | 结构化编辑 | 决策（FR-TM-019） -->
@@ -644,6 +647,12 @@ onMounted(load)
 .photo-layout { display: flex; flex-direction: column; gap: 14px; }
 
 .upload-panel { padding: 18px 20px; }
+/* 区块头是横向居中的行，.f-hint 自带的 5px 上边距会把说明文字顶歪
+   （全局只修了 .filter-bar / .list-toolbar 两处上下文） */
+.upload-panel .blk-head .f-hint { margin-top: 0; }
+/* 区块头：原来借用全局 .page-head（那是页面级页头，正在从 main.css 里删除），
+   这里换成面板内的局部类，几何沿用原来的 flex 两端对齐 */
+.blk-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
 .drop-zone {
   border: 2px dashed var(--border);
   border-radius: 14px;
@@ -661,7 +670,7 @@ onMounted(load)
 .drop-zone p { font-size: 13.5px; color: var(--ink-2); }
 .camera-btn { margin-top: 6px; }
 
-.pending-list { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.pending-list { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
 .pending-card {
   display: flex; align-items: center; gap: 8px;
   background: #fff; border: 1px solid var(--border); border-radius: 10px;
@@ -670,7 +679,23 @@ onMounted(load)
 .pending-thumb { width: 44px; height: 44px; border-radius: 7px; object-fit: cover; background: #f2f5f5; }
 .pending-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .pending-name { font-size: 12.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chip-x { display: flex; color: var(--sub); }
+/* 图标按钮：原先只有裸 display:flex（图标不居中、点击区只有图标大小，还带着原生 button 的
+   UA 边框 / 灰底，见 KnowledgeFilter 里 .kp-caret 的同类注释）——补成 22×22 的居中命中区 */
+.chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  padding: 0;
+  color: var(--sub);
+  transition: background 0.15s, color 0.15s;
+}
+.chip-x:hover { background: var(--brand-soft); color: var(--brand-deep); }
 
 .confirm-layout { display: grid; grid-template-columns: 300px 1fr; gap: 16px; }
 .pane-title { font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -688,7 +713,10 @@ onMounted(load)
   color: var(--sub); font-size: 13px;
 }
 
-.result-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.result-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+/* 操作行里混着按钮与说明文字（.op-group 是 align-items:center 的横向行），
+   .f-hint 的 5px 上边距会把文字顶歪 */
+.op-group .f-hint { margin-top: 0; }
 .rounds-pick {
   margin-left: auto;
   display: inline-flex; align-items: center; gap: 6px;
@@ -707,14 +735,22 @@ onMounted(load)
 .option-edit-list { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .option-edit-row { display: grid; grid-template-columns: 26px 1fr 24px; gap: 8px; align-items: start; width: 100%; }
 .option-letter { font-size: 13px; font-weight: 600; color: var(--ink-2); padding-top: 10px; }
-.option-edit-row .chip-x { display: flex; padding-top: 10px; }
+/* 与选项编辑器首行对齐：用 margin 而不是 padding，避免挤压缩小 22×22 的命中区 */
+.option-edit-row .chip-x { margin-top: 10px; }
 
-.struct-pane .result-tabs { display: flex; gap: 6px; }
+.struct-pane .result-tabs { display: flex; align-items: center; gap: 6px; }
 .rt-chip {
   border: 1.5px solid var(--border); border-radius: 7px; background: #fff;
   font-size: 12px; color: var(--sub); padding: 2px 9px;
 }
 .rt-chip.on { border-color: var(--brand); color: var(--brand-deep); background: var(--brand-soft); }
 .rt-chip.decided { color: var(--success); border-color: var(--success); }
-.decide-ops { display: flex; gap: 8px; margin-top: 14px; border-top: 1px dashed var(--border); padding-top: 12px; }
+.decide-ops {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  border-top: 1px dashed var(--border);
+  padding-top: 12px;
+}
 </style>

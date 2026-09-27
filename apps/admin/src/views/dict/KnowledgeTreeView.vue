@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { AppIcon, showToast, ApiError } from '@aiteach/shared'
-import type { DictItem, KnowledgeNode } from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, AppSearchInput, showToast, ApiError } from '@aiteach/shared'
+import type { DictItem, FilterRowDef, KnowledgeNode } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import { deleteKnowledgeNode, fetchDict, fetchKnowledge, saveKnowledgeNode, toggleKnowledgeNode } from '@/api/platform'
 
@@ -9,12 +9,17 @@ const MAX_DEPTH = 6
 
 const nodes = ref<KnowledgeNode[]>([])
 const subjects = ref<DictItem[]>([])
-const subjectFilter = ref('')
+const FILTERS = reactive<Record<string, string[]>>({ subject: [] })
 const keyword = ref('')
 const collapsedIds = ref<number[]>([])
 
 /** 学科选项统一取自全局字典，避免新增学科后此处漏配 */
 const enabledSubjects = computed(() => subjects.value.filter((item) => item.enabled))
+
+/* 学科候选项取自接口数据，故用 computed 而不是模块级常量 */
+const FILTER_ROWS = computed<FilterRowDef[]>(() => [
+  { key: 'subject', label: '学科', options: enabledSubjects.value.map((item) => item.name), multiple: false },
+])
 
 /** 编辑历史节点时，其学科可能已停用 —— 并入选项，避免保存时被静默改写成首项 */
 const formSubjects = computed(() => {
@@ -26,9 +31,10 @@ async function load() {
   ;[nodes.value, subjects.value] = await Promise.all([fetchKnowledge(), fetchDict('subject')])
 }
 
-const filtered = computed(() =>
-  subjectFilter.value ? nodes.value.filter((node) => node.subject === subjectFilter.value) : nodes.value,
-)
+const filtered = computed(() => {
+  const subject = FILTERS.subject[0]
+  return subject ? nodes.value.filter((node) => node.subject === subject) : nodes.value
+})
 
 interface TreeRow {
   node: KnowledgeNode
@@ -132,7 +138,7 @@ function openCreate(parentId: number | null) {
   }
   editing.value = { node: null, parentId }
   form.name = ''
-  form.subject = subjectFilter.value || enabledSubjects.value[0]?.name || ''
+  form.subject = FILTERS.subject[0] || enabledSubjects.value[0]?.name || ''
   formError.value = ''
 }
 
@@ -171,21 +177,22 @@ onMounted(load)
 
 <template>
   <div class="panel">
-    <div class="filter-bar">
-      <select v-model="subjectFilter" class="f-select" style="width: 120px">
-        <option value="">全部学科</option>
-        <option v-for="subject in enabledSubjects" :key="subject.id" :value="subject.name">{{ subject.name }}</option>
-      </select>
-      <div class="search-box">
-        <AppIcon name="search" :size="15" />
-        <input v-model="keyword" class="f-input" placeholder="搜索节点名称，自动定位高亮" />
-      </div>
-      <button class="btn btn-ghost btn-sm" @click="expandAll">展开全部</button>
-      <button class="btn btn-ghost btn-sm" @click="collapseAll">收起全部</button>
-      <button class="btn btn-primary btn-sm" style="margin-left: auto" @click="openCreate(null)">
-        <AppIcon name="plus" :size="15" /> 新增根节点
-      </button>
-    </div>
+    <AppFilterPanel v-model="FILTERS" :rows="FILTER_ROWS">
+      <template #extra>
+        <AppSearchInput v-model="keyword" placeholder="搜索节点名称，自动定位高亮" :width="260" />
+      </template>
+    </AppFilterPanel>
+    <AppListToolbar :searchable="false">
+      <template #left>
+        <button class="btn btn-ghost btn-sm" @click="expandAll">展开全部</button>
+        <button class="btn btn-ghost btn-sm" @click="collapseAll">收起全部</button>
+      </template>
+      <template #right>
+        <button class="btn btn-primary btn-sm" @click="openCreate(null)">
+          <AppIcon name="plus" :size="15" /> 新增根节点
+        </button>
+      </template>
+    </AppListToolbar>
 
     <div class="tree-body">
       <div v-if="rows.length === 0" class="tree-empty">暂无节点</div>
@@ -248,19 +255,8 @@ onMounted(load)
 </template>
 
 <style scoped>
-.search-box {
-  position: relative;
-  width: 260px;
-}
-.search-box .f-input { padding-left: 34px; height: 34px; }
-.search-box > :first-child {
-  position: absolute;
-  left: 11px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--sub);
-  pointer-events: none;
-}
+.panel :deep(.filter-panel) { margin: 14px 14px 12px; }
+
 .tree-body { padding: 8px 10px 12px; }
 .tree-empty { text-align: center; color: var(--sub); font-size: 13px; padding: 40px 0; }
 .tree-row {

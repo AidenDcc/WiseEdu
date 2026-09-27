@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppIcon, hueColor, showToast, ApiError } from '@aiteach/shared'
-import type { PackageRecord, TenantRecord } from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, hueColor, showToast, ApiError } from '@aiteach/shared'
+import type { FilterRowDef, PackageRecord, TenantRecord } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import {
@@ -27,14 +27,10 @@ const DURATIONS = [
   { key: 'year', label: '12 个月（9 折）', months: 12, discount: 0.9 },
 ]
 
-const filters = reactive({
-  status: '',
-  packageId: '',
-  orgType: '',
-  keyword: '',
-  expireFrom: '',
-  expireTo: '',
-})
+const FILTERS = reactive<Record<string, string[]>>({ status: [], package: [], orgType: [] })
+const keyword = ref('')
+const expireFrom = ref('')
+const expireTo = ref('')
 const page = ref(1)
 const pageSize = 10
 const total = ref(0)
@@ -42,10 +38,46 @@ const list = ref<TenantRecord[]>([])
 const loading = ref(false)
 const packages = ref<PackageRecord[]>([])
 
+const STATUS_META: Record<number, { text: string; tag: string }> = {
+  1: { text: '试用中', tag: 'tag-blue' },
+  2: { text: '正式', tag: 'tag-green' },
+  3: { text: '已到期', tag: 'tag-orange' },
+  4: { text: '已禁用', tag: 'tag-red' },
+}
+
+/* 套餐候选项来自接口数据，故用 computed 而不是模块级常量 */
+const FILTER_ROWS = computed<FilterRowDef[]>(() => [
+  { key: 'status', label: '状态', options: Object.values(STATUS_META).map((meta) => meta.text), multiple: false },
+  { key: 'package', label: '套餐', options: packages.value.map((pkg) => pkg.name), multiple: false },
+  { key: 'orgType', label: '类型', options: ORG_TYPES, multiple: false },
+])
+
+/** chip 文案 → 接口参数（status 为 1~4 的数字串） */
+function statusParam() {
+  const label = FILTERS.status[0]
+  if (!label) return ''
+  return Object.entries(STATUS_META).find(([, meta]) => meta.text === label)?.[0] ?? ''
+}
+
+function packageParam() {
+  const name = FILTERS.package[0]
+  if (!name) return ''
+  return String(packages.value.find((pkg) => pkg.name === name)?.id ?? '')
+}
+
 async function load() {
   loading.value = true
   try {
-    const result = await fetchTenants({ ...filters, page: page.value, pageSize })
+    const result = await fetchTenants({
+      status: statusParam(),
+      packageId: packageParam(),
+      orgType: FILTERS.orgType[0] ?? '',
+      keyword: keyword.value.trim(),
+      expireFrom: expireFrom.value,
+      expireTo: expireTo.value,
+      page: page.value,
+      pageSize,
+    })
     list.value = result.list
     total.value = result.total
   } finally {
@@ -59,19 +91,21 @@ function search() {
 }
 
 function resetFilters() {
-  Object.assign(filters, { status: '', packageId: '', orgType: '', keyword: '', expireFrom: '', expireTo: '' })
+  FILTERS.status = []
+  FILTERS.package = []
+  FILTERS.orgType = []
+  keyword.value = ''
+  expireFrom.value = ''
+  expireTo.value = ''
   search()
 }
 
+/* 筛选条件 / 关键词 / 到期区间变化即重新查询（原来是点「查询」按钮） */
+watch(FILTERS, search, { deep: true })
+watch([keyword, expireFrom, expireTo], search)
+
 function pkgName(id: number) {
   return packages.value.find((pkg) => pkg.id === id)?.name ?? `套餐 ${id}`
-}
-
-const STATUS_META: Record<number, { text: string; tag: string }> = {
-  1: { text: '试用中', tag: 'tag-blue' },
-  2: { text: '正式', tag: 'tag-green' },
-  3: { text: '已到期', tag: 'tag-orange' },
-  4: { text: '已禁用', tag: 'tag-red' },
 }
 
 function daysLeft(tenant: TenantRecord) {
@@ -326,42 +360,26 @@ async function submitCreate() {
   <div>
     <div class="panel">
       <!-- 筛选栏 -->
-      <div class="filter-bar">
-        <select v-model="filters.status" class="f-select" style="width: 120px" @change="search">
-          <option value="">全部状态</option>
-          <option value="1">试用中</option>
-          <option value="2">正式</option>
-          <option value="3">已到期</option>
-          <option value="4">已禁用</option>
-        </select>
-        <select v-model="filters.packageId" class="f-select" style="width: 130px" @change="search">
-          <option value="">全部套餐</option>
-          <option v-for="pkg in packages" :key="pkg.id" :value="String(pkg.id)">{{ pkg.name }}</option>
-        </select>
-        <select v-model="filters.orgType" class="f-select" style="width: 120px" @change="search">
-          <option value="">全部类型</option>
-          <option v-for="type in ORG_TYPES" :key="type" :value="type">{{ type }}</option>
-        </select>
-        <div class="range-box">
-          <input v-model="filters.expireFrom" class="f-input" type="date" @change="search" />
-          <span class="range-sep">至</span>
-          <input v-model="filters.expireTo" class="f-input" type="date" @change="search" />
-        </div>
-        <div class="search-box">
-          <AppIcon name="search" :size="15" />
-          <input
-            v-model="filters.keyword"
-            class="f-input"
-            placeholder="机构名称 / 编号"
-            @keyup.enter="search"
-          />
-        </div>
-        <button class="btn btn-primary btn-sm" @click="search">查询</button>
-        <button class="btn btn-ghost btn-sm" @click="resetFilters">重置</button>
-        <button class="btn btn-primary btn-sm add-btn" @click="openCreate">
-          <AppIcon name="plus" :size="15" /> 新增机构
-        </button>
-      </div>
+      <AppFilterPanel v-model="FILTERS" :rows="FILTER_ROWS">
+        <template #extra>
+          <div class="range-row">
+            <span class="range-label">到期时间</span>
+            <div class="range-box">
+              <input v-model="expireFrom" class="f-input" type="date" />
+              <span class="range-sep">至</span>
+              <input v-model="expireTo" class="f-input" type="date" />
+            </div>
+          </div>
+        </template>
+      </AppFilterPanel>
+      <AppListToolbar v-model="keyword" placeholder="机构名称 / 编号" :search-width="220">
+        <template #right>
+          <button class="btn btn-ghost btn-sm" @click="resetFilters">重置</button>
+          <button class="btn btn-primary btn-sm" @click="openCreate">
+            <AppIcon name="plus" :size="15" /> 新增机构
+          </button>
+        </template>
+      </AppListToolbar>
 
       <!-- 表格 -->
       <div class="data-table-wrap">
@@ -671,21 +689,13 @@ async function submitCreate() {
 </template>
 
 <style scoped>
-.search-box {
-  position: relative;
-  width: 200px;
-}
-.search-box .f-input { padding-left: 34px; height: 34px; }
-.search-box > :first-child {
-  position: absolute;
-  left: 11px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--sub);
-  pointer-events: none;
-}
+.panel > :deep(.filter-panel) { margin: 14px 14px 0; }
+.panel > :deep(.list-toolbar) { padding: 0 14px; }
+
+.range-row { display: flex; align-items: center; gap: 12px; }
+.range-label { width: 58px; flex-shrink: 0; font-size: 12.5px; font-weight: 600; color: var(--sub); }
 .range-box { display: flex; align-items: center; gap: 6px; }
-.range-box .f-input { width: 138px; height: 34px; }
+.range-box .f-input { width: 138px; height: var(--ctrl-h); }
 .range-sep { font-size: 12.5px; color: var(--sub); }
 
 .org-cell { display: flex; align-items: center; gap: 10px; }
@@ -772,7 +782,6 @@ async function submitCreate() {
   margin-bottom: 16px;
   line-height: 1.6;
 }
-.add-btn { margin-left: auto; }
 .create-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

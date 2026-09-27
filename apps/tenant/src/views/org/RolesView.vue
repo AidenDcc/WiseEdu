@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { AppIcon, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast } from '@aiteach/shared'
 import type { OrgRole } from '@aiteach/shared'
 import { deleteRole, fetchRoles, saveRole } from '@/api/org'
 
@@ -111,10 +111,7 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <h2>角色权限</h2>
-      <span class="f-hint">预置角色可改权限不可删；「管理员」锁定防自锁；自定义角色可增删</span>
-    </div>
+    <AppPageHeader desc="预置角色可改权限不可删；「管理员」锁定防自锁；自定义角色可增删" />
 
     <div class="roles-layout">
       <!-- 左：角色列表 -->
@@ -200,7 +197,7 @@ onMounted(load)
             </tbody>
           </table>
         </template>
-        <p v-else class="f-hint" style="padding: 30px">选择左侧角色</p>
+        <p v-else class="empty-row">选择左侧角色</p>
       </div>
     </div>
 
@@ -261,5 +258,5 @@ onMounted(load)
 .modal-box { width: 480px; padding: 20px 22px; }
 .modal-title { font-size: 16px; margin-bottom: 14px; }
 .perm-preview { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
-.modal-ops { display: flex; justify-content: flex-end; gap: 10px; }
+.modal-ops { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
 </style>

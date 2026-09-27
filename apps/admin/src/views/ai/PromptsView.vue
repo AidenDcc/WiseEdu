@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { AppIcon, showToast, ApiError, PROMPT_SCENES, PROMPT_VARIABLES } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, ApiError, PROMPT_SCENES, PROMPT_VARIABLES } from '@aiteach/shared'
 import type { PromptTemplate } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import { fetchPrompts, rollbackPrompt, savePrompt, setDefaultPrompt, testPrompt, togglePrompt } from '@/api/platform'
@@ -174,71 +174,74 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="panel">
-    <div class="filter-bar">
-      <span class="filter-label">变量占位符仅允许规定的 7 个；每个场景仅一个默认模板；停用回退默认</span>
-      <button class="btn btn-primary btn-sm" style="margin-left: auto" @click="openCreate">
-        <AppIcon name="plus" :size="15" /> 新增模板
-      </button>
-    </div>
+  <div>
+    <AppPageHeader desc="变量占位符仅允许规定的 7 个；每个场景仅一个默认模板；停用回退默认">
+      <template #actions>
+        <button class="btn btn-primary btn-sm" @click="openCreate">
+          <AppIcon name="plus" :size="15" /> 新增模板
+        </button>
+      </template>
+    </AppPageHeader>
 
-    <div class="data-table-wrap">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>模板名称</th>
-            <th>适用场景</th>
-            <th>状态</th>
-            <th>默认</th>
-            <th>最近更新</th>
-            <th style="width: 280px">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="loading && list.length === 0">
-            <td colspan="6" class="empty-row">加载中…</td>
-          </tr>
-          <tr v-else-if="list.length === 0">
-            <td colspan="6" class="empty-row">暂无模板</td>
-          </tr>
-          <template v-else>
-            <tr v-for="item in list" :key="item.id">
-              <td class="cell-strong">{{ item.name }}</td>
-              <td><span class="tag tag-blue">{{ item.scene }}</span></td>
-              <td><span class="tag" :class="STATUS_CLASS[item.status]">{{ STATUS_TEXT[item.status] }}</span></td>
-              <td>
-                <span v-if="item.isDefault" class="tag tag-green">默认</span>
-                <span v-else style="color: var(--sub)">—</span>
-              </td>
-              <td class="time-cell">{{ item.updatedAt }}</td>
-              <td>
-                <div class="op-group">
-                  <button class="mini-btn" type="button" @click="openEdit(item)">编辑</button>
-                  <button class="mini-btn" type="button" @click="openTest(item)">测试</button>
-                  <button
-                    v-if="!item.isDefault && item.status !== 'disabled'"
-                    class="mini-btn"
-                    type="button"
-                    @click="onSetDefault(item)"
-                  >
-                    设默认
-                  </button>
-                  <button class="mini-btn" type="button" @click="historyOpen = item">版本</button>
-                  <button
-                    v-if="item.status !== 'disabled'"
-                    class="mini-btn danger"
-                    type="button"
-                    @click="onToggle(item)"
-                  >
-                    停用
-                  </button>
-                  <button v-else class="mini-btn" type="button" @click="onToggle(item)">发布</button>
-                </div>
-              </td>
+    <div class="panel">
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>模板名称</th>
+              <th>适用场景</th>
+              <th>状态</th>
+              <th>默认</th>
+              <th>最近更新</th>
+              <th style="width: 280px">操作</th>
             </tr>
-          </template>
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            <tr v-if="loading && list.length === 0">
+              <td colspan="6" class="empty-row">加载中…</td>
+            </tr>
+            <tr v-else-if="list.length === 0">
+              <td colspan="6" class="empty-row">暂无模板</td>
+            </tr>
+            <template v-else>
+              <tr v-for="item in list" :key="item.id">
+                <td class="cell-strong">{{ item.name }}</td>
+                <td><span class="tag tag-blue">{{ item.scene }}</span></td>
+                <td><span class="tag" :class="STATUS_CLASS[item.status]">{{ STATUS_TEXT[item.status] }}</span></td>
+                <td>
+                  <span v-if="item.isDefault" class="tag tag-green">默认</span>
+                  <span v-else style="color: var(--sub)">—</span>
+                </td>
+                <td class="time-cell">{{ item.updatedAt }}</td>
+                <td>
+                  <div class="op-group">
+                    <button class="mini-btn" type="button" @click="openEdit(item)">编辑</button>
+                    <button class="mini-btn" type="button" @click="openTest(item)">测试</button>
+                    <button
+                      v-if="!item.isDefault && item.status !== 'disabled'"
+                      class="mini-btn"
+                      type="button"
+                      @click="onSetDefault(item)"
+                    >
+                      设默认
+                    </button>
+                    <button class="mini-btn" type="button" @click="historyOpen = item">版本</button>
+                    <button
+                      v-if="item.status !== 'disabled'"
+                      class="mini-btn danger"
+                      type="button"
+                      @click="onToggle(item)"
+                    >
+                      停用
+                    </button>
+                    <button v-else class="mini-btn" type="button" @click="onToggle(item)">发布</button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- 新增 / 编辑弹窗 -->
@@ -380,6 +383,7 @@ onMounted(load)
 }
 .test-stats {
   display: flex;
+  align-items: center;
   gap: 16px;
   margin-top: 10px;
   font-size: 12.5px;

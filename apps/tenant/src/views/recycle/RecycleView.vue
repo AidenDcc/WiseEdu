@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, showToast } from '@aiteach/shared'
-import type { RecycleItem } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, AppTabs, showToast } from '@aiteach/shared'
+import type { RecycleItem, TabDef } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import { fetchRecycle, purgeRecycle, restoreRecycle } from '@/api/org'
 
 type TabKey = RecycleItem['kind']
-const TABS: Array<{ key: TabKey; label: string }> = [
+const TABS: TabDef[] = [
   { key: '题目', label: '题目' },
   { key: '试卷', label: '试卷' },
   { key: '协同组卷任务', label: '协同组卷' },
@@ -33,6 +33,12 @@ async function load() {
   items.value = await fetchRecycle(tab.value)
   selected.value = []
   page.value = 1
+}
+
+/** AppTabs 回传 string，这里收窄回 TabKey；切换分类后重新拉取并清空选择 */
+function switchTab(value: string) {
+  tab.value = value as TabKey
+  load()
 }
 
 const rows = computed(() => items.value)
@@ -93,23 +99,9 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <h2>回收站</h2>
-      <span class="f-hint">删除内容保留 30 天，到期自动物理清除；彻底删除仅机构管理员可操作</span>
-    </div>
+    <AppPageHeader desc="删除内容保留 30 天，到期自动物理清除；彻底删除仅机构管理员可操作" />
 
-    <div class="tab-bar">
-      <button
-        v-for="t in TABS"
-        :key="t.key"
-        class="tab-btn"
-        :class="{ on: tab === t.key }"
-        type="button"
-        @click="tab = t.key; load()"
-      >
-        {{ t.label }}
-      </button>
-    </div>
+    <AppTabs :tabs="TABS" :model-value="tab" @update:model-value="switchTab" />
 
     <div class="panel">
       <div class="batch-bar">
@@ -126,42 +118,46 @@ onMounted(load)
         <span class="f-hint" style="margin-left: auto">单次批量操作 ≤100 项</span>
       </div>
 
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th style="width: 40px"></th>
-            <th>名称</th>
-            <th>类型</th>
-            <th>删除人</th>
-            <th>删除时间</th>
-            <th>剩余保留</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="rows.length === 0">
-            <td colspan="7" class="empty-row">该分类下暂无回收内容</td>
-          </tr>
-          <template v-else>
-            <tr v-for="row in rows" :key="row.id" :class="{ picked: isSelected(row.id) }">
-              <td><input type="checkbox" :checked="isSelected(row.id)" @change="toggleRow(row.id)" /></td>
-              <td class="cell-strong">{{ row.name }}</td>
-              <td><span class="tag tag-gray">{{ row.kind }}</span></td>
-              <td>{{ row.deletedBy }}</td>
-              <td>{{ row.deletedAt }}</td>
-              <td>
-                <span class="remain" :class="{ urgent: row.remainDays <= 7 }">{{ row.remainDays }} 天</span>
-              </td>
-              <td>
-                <div class="op-group">
-                  <button class="mini-btn" @click="onRestore([row.id])">还原</button>
-                  <button v-if="IS_ORG_ADMIN" class="mini-btn danger" @click="selected = [row.id]; openPurge()">彻底删除</button>
-                </div>
-              </td>
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th class="pick-col"></th>
+              <th>名称</th>
+              <th>类型</th>
+              <th>删除人</th>
+              <th>删除时间</th>
+              <th>剩余保留</th>
+              <th>操作</th>
             </tr>
-          </template>
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            <tr v-if="rows.length === 0">
+              <td colspan="7" class="empty-row">该分类下暂无回收内容</td>
+            </tr>
+            <template v-else>
+              <tr v-for="row in rows" :key="row.id" :class="{ picked: isSelected(row.id) }">
+                <td class="pick-col">
+                  <input type="checkbox" :checked="isSelected(row.id)" @change="toggleRow(row.id)" />
+                </td>
+                <td class="cell-strong">{{ row.name }}</td>
+                <td><span class="tag tag-gray">{{ row.kind }}</span></td>
+                <td>{{ row.deletedBy }}</td>
+                <td>{{ row.deletedAt }}</td>
+                <td>
+                  <span class="remain" :class="{ urgent: row.remainDays <= 7 }">{{ row.remainDays }} 天</span>
+                </td>
+                <td>
+                  <div class="op-group">
+                    <button class="mini-btn" @click="onRestore([row.id])">还原</button>
+                    <button v-if="IS_ORG_ADMIN" class="mini-btn danger" @click="selected = [row.id]; openPurge()">彻底删除</button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
       <AppPagination :total="rows.length" v-model:page="page" :page-size="20" />
     </div>
 
@@ -184,13 +180,9 @@ onMounted(load)
 </template>
 
 <style scoped>
-.tab-bar { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
-.tab-btn {
-  border: none; background: transparent; padding: 9px 16px;
-  font-size: 13.5px; color: var(--sub); border-bottom: 2.5px solid transparent;
-  margin-bottom: -1px;
-}
-.tab-btn.on { color: var(--brand-deep); font-weight: 600; border-bottom-color: var(--brand); }
+/* 复选框列：表头与单元格都居中，复选框在单元格里垂直居中（默认基线对齐会偏上） */
+.pick-col { width: 40px; text-align: center; }
+.pick-col input[type='checkbox'] { vertical-align: middle; }
 
 .batch-bar {
   display: flex; align-items: center; gap: 10px;

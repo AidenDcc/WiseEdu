@@ -65,7 +65,7 @@ onMounted(load)
     <div class="panel queue-panel">
       <div class="section-title">待人工审核（{{ pending.length }}）</div>
       <div class="queue-list">
-        <p v-if="pending.length === 0" class="f-hint" style="padding: 12px">队列已清空 🎉</p>
+        <p v-if="pending.length === 0" class="empty-row">队列已清空 🎉</p>
         <button
           v-for="row in pending"
           :key="row.id"
@@ -121,7 +121,7 @@ onMounted(load)
           </div>
         </div>
       </template>
-      <p v-else class="f-hint" style="padding: 30px">暂无待审试卷</p>
+      <p v-else class="empty-row">暂无待审试卷</p>
     </div>
 
     <!-- 右：AI 检测报告 + 终审 -->
@@ -151,7 +151,7 @@ onMounted(load)
           <button class="btn btn-danger" :disabled="busy" @click="decide(false)">驳回</button>
         </div>
       </template>
-      <p v-else class="f-hint" style="padding: 30px">选择左侧试卷开始审核</p>
+      <p v-else class="empty-row">选择左侧试卷开始审核</p>
     </div>
   </div>
 </template>
@@ -170,7 +170,7 @@ onMounted(load)
 .queue-item.on { border-color: var(--brand); background: var(--brand-soft); }
 .qi-stem { font-size: 13px; color: var(--ink); font-weight: 600; }
 .qi-meta { font-size: 11.5px; color: var(--sub); }
-.queue-list.reviewed { flex-direction: row; flex-wrap: wrap; }
+.queue-list.reviewed { flex-direction: row; flex-wrap: wrap; align-items: center; }
 .rv-chip { font-size: 11.5px; border-radius: 999px; padding: 2px 9px; background: #f2f5f5; color: var(--sub); }
 .rv-chip.approved { background: var(--success-soft); color: var(--success); }
 .rv-chip.rejected { background: var(--danger-soft); color: var(--danger); }
@@ -197,5 +197,5 @@ onMounted(load)
   display: flex; align-items: flex-start; gap: 7px; font-size: 12.5px; color: var(--warn);
   background: var(--warn-soft); border-radius: 8px; padding: 7px 10px; margin-bottom: 6px;
 }
-.decide-ops { display: flex; gap: 10px; margin-top: 12px; }
+.decide-ops { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
 </style>

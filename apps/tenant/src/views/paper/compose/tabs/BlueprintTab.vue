@@ -476,7 +476,7 @@ function cellState(cell: BlueprintCell): 'full' | 'partial' | 'empty' | 'idle' {
 .bp-stat { font-size: 12.5px; color: var(--sub); }
 .bp-stat b { color: var(--ink); font-size: 14px; }
 .bp-stat.ok b { color: var(--success); }
-.bp-bar-ops { margin-left: auto; display: flex; gap: 6px; }
+.bp-bar-ops { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 .bp-bar-ops .btn { display: inline-flex; align-items: center; gap: 5px; }
 
 .bp-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 12px 14px; overflow: auto; }
@@ -507,12 +507,18 @@ function cellState(cell: BlueprintCell): 'full' | 'partial' | 'empty' | 'idle' {
 .bp-kp-name { overflow: hidden; text-overflow: ellipsis; }
 .bp-th-ops { font-weight: 700; color: var(--sub); font-size: 12px; }
 
+/* 图标按钮：inline-flex + 双向居中，让 × 落在正中；22×22 保证点击区够大。
+   inline-flex（而非 flex）才不会把按钮挤到标题文字的下一行。 */
 .bp-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
   border: none;
   background: none;
   color: #c3cad8;
-  display: flex;
-  padding: 1px;
   border-radius: 4px;
 }
 .bp-x:hover { color: var(--danger); background: var(--danger-soft); }

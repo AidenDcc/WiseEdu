@@ -1,8 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppIcon, RichTextViewer, showToast, ApiError, QUESTION_STATUS_TEXT, hasImage, toPlainText, truncateRich } from '@aiteach/shared'
-import type { OrgQuestion } from '@aiteach/shared'
+import {
+  AppIcon,
+  AppFilterPanel,
+  AppListToolbar,
+  AppSegmented,
+  RichTextViewer,
+  showToast,
+  ApiError,
+  QUESTION_STATUS_TEXT,
+  toPlainText,
+  truncateRich,
+} from '@aiteach/shared'
+import type { FilterRowDef, OrgQuestion } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppDrawer from '@/components/ui/AppDrawer.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
@@ -15,6 +26,7 @@ import {
 } from '@/api/org'
 import { useScope } from '@/composables/useScope'
 import { useComposeBasket } from '@/composables/useComposeBasket'
+import { answerLetters, difficultyClass, needsFigure } from '@/utils/question-card'
 
 const router = useRouter()
 const route = useRoute()
@@ -54,14 +66,18 @@ function onKnowledgeChange(tags: string[] | null) {
 }
 
 /* ================= 右上：可折叠筛选条件 ================= */
-interface FilterRowDef {
+/**
+ * 本页的筛选行定义。候选项大多来自租户字典，字典是异步到达的，所以这里只描述「去哪个字典取」，
+ * 运行时再展开成共享组件要的 `FilterRowDef`（见 filterRows）。
+ */
+interface BankFilterRow {
   key: 'type' | 'difficulty' | 'grade' | 'subject' | 'term' | 'examType'
   label: string
   dict?: string
   options?: string[]
 }
 
-const FILTER_ROWS: FilterRowDef[] = [
+const FILTER_ROWS: BankFilterRow[] = [
   { key: 'type', label: '题型', dict: 'questionType' },
   { key: 'difficulty', label: '难度', dict: 'difficulty' },
   { key: 'grade', label: '年级', dict: 'grade' },
@@ -70,7 +86,7 @@ const FILTER_ROWS: FilterRowDef[] = [
   { key: 'examType', label: '考试类型', dict: 'examType' },
 ]
 
-const filterSel = reactive<Record<FilterRowDef['key'], string[]>>({
+const filterSel = reactive<Record<BankFilterRow['key'], string[]>>({
   type: [],
   difficulty: [],
   grade: [],
@@ -79,32 +95,22 @@ const filterSel = reactive<Record<FilterRowDef['key'], string[]>>({
   examType: [],
 })
 const filterOptions = reactive<Record<string, string[]>>({})
-const filterOpen = ref(true)
-/** 折叠态每个已选条件值串的最大展示长度（超出省略） */
-const COLLAPSE_MAX = 18
 
-const activeFilterRows = computed(() =>
-  FILTER_ROWS.filter((row) => filterSel[row.key].length > 0).map((row) => ({
-    ...row,
-    text: filterSel[row.key].join('、'),
-    overflow: filterSel[row.key].join('、').length > COLLAPSE_MAX,
-  })),
+/** 展开给共享 AppFilterPanel 的行定义（选项为空的字典行由组件显示「暂无可选项」） */
+const filterRows = computed<FilterRowDef[]>(() =>
+  FILTER_ROWS.map((row) => ({ key: row.key, label: row.label, options: rowOptions(row) })),
 )
 
-function toggleOption(key: FilterRowDef['key'], option: string) {
-  const bucket = filterSel[key]
-  const index = bucket.indexOf(option)
-  if (index >= 0) bucket.splice(index, 1)
-  else bucket.push(option)
+/** AppFilterPanel 回传的是整份筛选值（覆盖式回写，不做级联） */
+function onFiltersChange(next: Record<string, string[]>) {
+  FILTER_ROWS.forEach((row) => {
+    filterSel[row.key] = next[row.key] ?? []
+  })
 }
 
-function rowOptions(row: FilterRowDef): string[] {
+function rowOptions(row: BankFilterRow): string[] {
   if (row.options) return row.options
   return filterOptions[row.dict ?? ''] ?? []
-}
-
-function clearFilters() {
-  FILTER_ROWS.forEach((row) => (filterSel[row.key] = []))
 }
 
 /* ================= 顶部栏全局年级 / 学科 → 筛选默认值 ================= */
@@ -135,9 +141,19 @@ watch(
   },
 )
 const viewMode = ref<'table' | 'detail'>('table')
+/** 表格 / 详细两种展示（互斥，始终有选中项）→ 共享 AppSegmented */
+const VIEW_MODES = [
+  { value: 'table', label: '表格', icon: 'grid' },
+  { value: 'detail', label: '详细', icon: 'file' },
+]
+/** AppSegmented 回传 string，这里收窄回 viewMode 的联合类型 */
+function setViewMode(value: string) {
+  viewMode.value = value as 'table' | 'detail'
+}
+
 const page = ref(1)
 
-const FIELD_OF: Record<FilterRowDef['key'], (row: OrgQuestion) => string> = {
+const FIELD_OF: Record<BankFilterRow['key'], (row: OrgQuestion) => string> = {
   type: (row) => row.type,
   difficulty: (row) => row.difficulty,
   grade: (row) => row.grade,
@@ -167,17 +183,8 @@ watch([activeTags, () => JSON.stringify(filterSel), keyword, viewMode], () => {
   page.value = 1
 })
 
-/** 图形占位框：题干提到配图、且题内确实没有嵌入图片时才显示 */
-function needsFigure(row: OrgQuestion): boolean {
-  if (hasImage(row.stem)) return false
-  const text = toPlainText(row.stem)
-  return text.includes('如图') || text.includes('图）')
-}
-
-/** 选项答案字母（选择题高亮正确项） */
-function answerLetters(row: OrgQuestion): string[] {
-  return row.options.length > 0 ? [...new Set(row.answer.toUpperCase().replace(/[^A-F]/g, '').split(''))] : []
-}
+/* needsFigure / answerLetters / difficultyClass 与 AI 生成结果列表同源，
+   已收敛到 @/utils/question-card，避免两处各改一份 */
 
 /* ===== 详细列表：解析展开 ===== */
 const analysisOpen = ref<number[]>([])
@@ -298,62 +305,20 @@ onMounted(() => {
 
     <!-- 右侧 -->
     <div class="right-col">
-      <!-- 搜索条件（可折叠） -->
-      <div class="panel filter-panel">
-        <div class="fp-head" @click="filterOpen = !filterOpen">
-          <span class="fp-title">
-            搜索条件
-            <span v-if="!filterOpen" class="fp-summary">
-              <template v-if="activeFilterRows.length">
-                <span v-for="row in activeFilterRows" :key="row.key" class="fp-chip">
-                  <b>{{ row.label }}</b>
-                  <span class="fp-values" :class="{ overflow: row.overflow }" :title="row.text">{{ row.text }}</span>
-                </span>
-              </template>
-              <span v-else class="fp-none">暂无筛选条件</span>
-            </span>
-          </span>
-          <span class="fp-toggle">
-            <button v-if="activeFilterRows.length" class="mini-btn" type="button" @click.stop="clearFilters">清空</button>
-            {{ filterOpen ? '收起' : '展开' }}
-            <AppIcon name="chevron-down" :size="15" class="fp-caret" :class="{ up: filterOpen }" />
-          </span>
-        </div>
-        <div v-if="filterOpen" class="fp-body">
-          <div v-for="def in FILTER_ROWS" :key="def.key" class="cf-row">
-            <span class="cf-label">{{ def.label }}</span>
-            <div class="cf-opts">
-              <button
-                v-for="option in rowOptions(def)"
-                :key="option"
-                class="opt-chip"
-                :class="{ on: filterSel[def.key].includes(option) }"
-                type="button"
-                @click="toggleOption(def.key, option)"
-              >
-                {{ option }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <!-- 搜索条件（可折叠；行渲染 / 折叠汇总 / 清空由共享组件 AppFilterPanel 负责） -->
+      <AppFilterPanel
+        :rows="filterRows"
+        :model-value="filterSel"
+        @update:model-value="onFiltersChange"
+      />
 
       <!-- 试题列表 -->
       <div class="panel table-panel">
-        <div class="list-toolbar">
-          <div class="search-box">
-            <AppIcon name="search" :size="15" />
-            <input v-model="keyword" class="f-input" placeholder="题干关键词 / 题目编号" />
-          </div>
-          <div class="mode-toggle">
-            <button :class="{ on: viewMode === 'table' }" type="button" @click="viewMode = 'table'">
-              <AppIcon name="grid" :size="14" /> 表格
-            </button>
-            <button :class="{ on: viewMode === 'detail' }" type="button" @click="viewMode = 'detail'">
-              <AppIcon name="file" :size="14" /> 详细
-            </button>
-          </div>
-        </div>
+        <AppListToolbar v-model="keyword" placeholder="题干关键词 / 题目编号" :search-width="240">
+          <template #right>
+            <AppSegmented :options="VIEW_MODES" :model-value="viewMode" @update:model-value="setViewMode" />
+          </template>
+        </AppListToolbar>
 
         <!-- 表格显示 -->
         <div v-if="viewMode === 'table'" class="data-table-wrap">
@@ -411,12 +376,12 @@ onMounted(() => {
 
         <!-- 详细列表：完整面板卡片 -->
         <div v-else class="detail-list">
-          <p v-if="paged.length === 0" class="empty-row" style="padding: 30px 0; text-align: center">暂无符合条件的题目</p>
+          <p v-if="paged.length === 0" class="empty-row">暂无符合条件的题目</p>
           <article v-for="row in paged" :key="row.id" class="q-card">
             <div class="qc-meta">
               <span class="qc-id">#{{ row.id }}</span>
               <span class="tag tag-blue">{{ row.type }}</span>
-              <span class="tag" :class="row.difficulty === '困难' || row.difficulty === '较难' ? 'tag-red' : row.difficulty === '中等' ? 'tag-orange' : 'tag-green'">{{ row.difficulty }}</span>
+              <span class="tag" :class="difficultyClass(row.difficulty)">{{ row.difficulty }}</span>
               <span class="tag" :class="STATUS_CLASS[row.status]">{{ QUESTION_STATUS_TEXT[row.status] }}</span>
               <span class="qc-kp">{{ row.knowledge.join('、') }}</span>
               <span class="qc-right">考试 {{ row.useCount }} 次 · {{ row.updatedAt.slice(5, 16) }}</span>
@@ -556,74 +521,14 @@ onMounted(() => {
   height: 100%;
 }
 
-/* ===== 筛选面板 ===== */
-.filter-panel { padding: 0; overflow: visible; flex-shrink: 0; }
-.fp-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 12px 16px;
-  cursor: pointer;
-  min-height: 46px;
-}
-.fp-title { font-size: 13.5px; font-weight: 700; color: var(--ink); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
-.fp-summary { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; overflow: hidden; font-weight: 400; }
-.fp-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  background: var(--brand-soft);
-  color: var(--brand-deep);
-  border-radius: 7px;
-  padding: 3px 9px;
-  font-size: 12px;
-  max-width: 200px;
-  min-width: 0;
-}
-.fp-chip b { font-weight: 700; flex-shrink: 0; }
-.fp-values { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fp-none { font-size: 12.5px; color: var(--sub); font-weight: 400; }
-.fp-toggle { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--sub); flex-shrink: 0; }
-.fp-caret { transition: transform 0.18s; }
-.fp-caret.up { transform: rotate(180deg); }
-.fp-body { border-top: 1px dashed var(--border); padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 10px; }
-
-.cf-row { display: flex; align-items: flex-start; gap: 12px; }
-.cf-label { width: 58px; flex-shrink: 0; font-size: 12.5px; font-weight: 600; color: var(--sub); line-height: 26px; }
-.cf-opts { display: flex; flex-wrap: wrap; gap: 7px; flex: 1; min-width: 0; }
-.opt-chip {
-  border: 1.5px solid var(--border);
-  border-radius: 8px;
-  background: #fff;
-  font-size: 12.5px;
-  color: var(--ink-2);
-  padding: 3px 12px;
-  transition: all 0.12s;
-}
-.opt-chip:hover { border-color: var(--brand); color: var(--brand-deep); }
-.opt-chip.on { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
+/* ===== 筛选面板 =====
+   面板外观 / 折叠汇总 / chip 行都搬到了共享组件 AppFilterPanel（只取设计令牌），
+   本页不再持有那套 .filter-panel / .fp-* / .cf-* / .opt-chip 规则。 */
 
 /* ===== 列表 =====
    面板撑满右栏剩余高度：工具栏、分页固定，仅题目列表区域滚动。
    面板自带内边距：搜索框 / 表格-详细显示切换不与面板边缘贴边 */
 .table-panel { min-width: 0; flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 14px 16px 12px; }
-.list-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-shrink: 0; }
-.search-box { position: relative; width: 240px; }
-.search-box .f-input { padding-left: 32px; height: 34px; width: 100%; }
-.search-box > :first-child { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--sub); pointer-events: none; }
-.mode-toggle { margin-left: auto; display: flex; border: 1.5px solid var(--border); border-radius: 9px; overflow: hidden; }
-.mode-toggle button {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  border: none;
-  background: #fff;
-  font-size: 12.5px;
-  color: var(--sub);
-  padding: 7px 14px;
-}
-.mode-toggle button.on { background: var(--brand-soft); color: var(--brand-deep); font-weight: 700; }
 
 /* 表格区独立滚动（表头全局样式已 sticky） */
 .data-table-wrap { flex: 1; min-height: 0; overflow: auto; }

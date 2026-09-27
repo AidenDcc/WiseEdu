@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, ORG_PROMPT_SCENES, showToast } from '@aiteach/shared'
-import type { OrgPrompt } from '@aiteach/shared'
+import { AppIcon, AppListToolbar, AppPageHeader, AppTabs, ORG_PROMPT_SCENES, showToast } from '@aiteach/shared'
+import type { OrgPrompt, TabDef } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppDrawer from '@/components/ui/AppDrawer.vue'
 import {
@@ -17,11 +17,16 @@ import {
 } from '@/api/org'
 
 type TabKey = 'platform' | 'org'
-const TABS: Array<{ key: TabKey; label: string }> = [
+const TABS: TabDef[] = [
   { key: 'platform', label: '平台标准模板' },
   { key: 'org', label: '机构自定义模板' },
 ]
 const tab = ref<TabKey>('platform')
+
+/** AppTabs 回传 string，这里收窄回 TabKey */
+function switchTab(value: string) {
+  tab.value = value as TabKey
+}
 
 /** 可用变量（FR-PM-003） */
 const VARS = ['{{subject}}', '{{grade}}', '{{type}}', '{{difficulty}}', '{{knowledge}}', '{{stem}}', '{{count}}']
@@ -138,100 +143,94 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <h2>提示词模板</h2>
-      <span class="f-hint">平台标准模板只读可复制；机构自定义模板支持版本 / 启停 / 默认 / 测试</span>
-    </div>
+    <AppPageHeader desc="平台标准模板只读可复制；机构自定义模板支持版本 / 启停 / 默认 / 测试" />
 
-    <div class="tab-bar">
-      <button
-        v-for="t in TABS"
-        :key="t.key"
-        class="tab-btn"
-        :class="{ on: tab === t.key }"
-        type="button"
-        @click="tab = t.key"
-      >
-        {{ t.label }}
-      </button>
-    </div>
+    <AppTabs :tabs="TABS" :model-value="tab" @update:model-value="switchTab" />
 
     <!-- 平台标准模板 -->
     <div v-if="tab === 'platform'" class="panel">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>模板名称</th>
-            <th>适用场景</th>
-            <th>内容摘要</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="row in platform" :key="row.id">
-            <td class="cell-strong">{{ row.name }}<span class="tag tag-blue" style="margin-left: 6px">平台</span></td>
-            <td>{{ row.scene }}</td>
-            <td class="content-cell">{{ row.content.slice(0, 56) }}…</td>
-            <td>
-              <div class="op-group">
-                <button class="mini-btn" @click="viewing = row">查看</button>
-                <button class="mini-btn success" @click="onCopy(row.id)">复制为机构模板</button>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>模板名称</th>
+              <th>适用场景</th>
+              <th>内容摘要</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in platform" :key="row.id">
+              <td class="cell-strong">{{ row.name }}<span class="tag tag-blue" style="margin-left: 6px">平台</span></td>
+              <td>{{ row.scene }}</td>
+              <td class="content-cell">{{ row.content.slice(0, 56) }}…</td>
+              <td>
+                <div class="op-group">
+                  <button class="mini-btn" @click="viewing = row">查看</button>
+                  <button class="mini-btn success" @click="onCopy(row.id)">复制为机构模板</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- 机构自定义模板 -->
     <div v-else class="panel">
-      <div class="filter-bar">
-        <span class="f-hint">{{ orgFiltered.length }} 个模板 · 每场景仅一个「默认启用」，供 AI 功能自动调用</span>
-        <button class="btn btn-primary btn-sm" style="margin-left: auto" @click="openCreate">
-          <AppIcon name="plus" :size="14" /> 新建模板
-        </button>
-      </div>
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>模板名称</th>
-            <th>场景</th>
-            <th>状态</th>
-            <th>更新时间</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="orgFiltered.length === 0">
-            <td colspan="5" class="empty-row">暂无机构模板，可从平台模板复制或新建</td>
-          </tr>
-          <template v-else>
-            <tr v-for="row in orgFiltered" :key="row.id">
-              <td class="cell-strong">
-                {{ row.name }}
-                <span v-if="row.isDefault" class="tag tag-green" style="margin-left: 6px">默认</span>
-              </td>
-              <td>{{ row.scene }}</td>
-              <td>
-                <span class="tag" :class="row.status === 'enabled' ? 'tag-green' : 'tag-gray'">
-                  {{ row.status === 'enabled' ? '启用' : '停用' }}
-                </span>
-              </td>
-              <td>{{ row.updatedAt }}</td>
-              <td>
-                <div class="op-group">
-                  <button class="mini-btn" @click="openEdit(row)">编辑</button>
-                  <button class="mini-btn" @click="testing = row; testResult = null">测试</button>
-                  <button class="mini-btn" @click="versionTarget = row">版本</button>
-                  <button class="mini-btn" @click="onToggle(row)">{{ row.status === 'enabled' ? '停用' : '启用' }}</button>
-                  <button v-if="!row.isDefault" class="mini-btn success" @click="onSetDefault(row)">设默认</button>
-                  <button class="mini-btn danger" @click="onDelete(row)">删除</button>
-                </div>
-              </td>
-            </tr>
+      <div class="list-head">
+        <AppListToolbar :searchable="false">
+          <span class="f-hint">{{ orgFiltered.length }} 个模板 · 每场景仅一个「默认启用」，供 AI 功能自动调用</span>
+          <template #right>
+            <button class="btn btn-primary btn-sm" @click="openCreate">
+              <AppIcon name="plus" :size="14" /> 新建模板
+            </button>
           </template>
-        </tbody>
-      </table>
+        </AppListToolbar>
+      </div>
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>模板名称</th>
+              <th>场景</th>
+              <th>状态</th>
+              <th>更新时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="orgFiltered.length === 0">
+              <td colspan="5" class="empty-row">暂无机构模板，可从平台模板复制或新建</td>
+            </tr>
+            <template v-else>
+              <tr v-for="row in orgFiltered" :key="row.id">
+                <td class="cell-strong">
+                  {{ row.name }}
+                  <span v-if="row.isDefault" class="tag tag-green" style="margin-left: 6px">默认</span>
+                </td>
+                <td>{{ row.scene }}</td>
+                <td>
+                  <span class="tag" :class="row.status === 'enabled' ? 'tag-green' : 'tag-gray'">
+                    {{ row.status === 'enabled' ? '启用' : '停用' }}
+                  </span>
+                </td>
+                <td>{{ row.updatedAt }}</td>
+                <td>
+                  <div class="op-group">
+                    <button class="mini-btn" @click="openEdit(row)">编辑</button>
+                    <button class="mini-btn" @click="testing = row; testResult = null">测试</button>
+                    <button class="mini-btn" @click="versionTarget = row">版本</button>
+                    <button class="mini-btn" @click="onToggle(row)">{{ row.status === 'enabled' ? '停用' : '启用' }}</button>
+                    <button v-if="!row.isDefault" class="mini-btn success" @click="onSetDefault(row)">设默认</button>
+                    <button class="mini-btn danger" @click="onDelete(row)">删除</button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- 查看平台模板 -->
@@ -302,13 +301,8 @@ onMounted(load)
 </template>
 
 <style scoped>
-.tab-bar { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
-.tab-btn {
-  border: none; background: transparent; padding: 9px 16px;
-  font-size: 13.5px; color: var(--sub); border-bottom: 2.5px solid transparent;
-  margin-bottom: -1px;
-}
-.tab-btn.on { color: var(--brand-deep); font-weight: 600; border-bottom-color: var(--brand); }
+/* 工具条嵌在面板顶部，表格保持满幅（贴面板边才能横向滚动） */
+.list-head { padding: 14px 18px 0; }
 
 .content-cell { max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -328,7 +322,7 @@ onMounted(load)
   color: var(--brand-deep); font-family: 'SF Mono', Menlo, monospace; font-size: 11.5px; padding: 2px 8px;
 }
 
-.test-meta { display: flex; gap: 14px; font-size: 12px; color: var(--sub); margin-bottom: 8px; }
+.test-meta { display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--sub); margin-bottom: 8px; }
 
 .version-row {
   display: flex; align-items: center; gap: 10px;

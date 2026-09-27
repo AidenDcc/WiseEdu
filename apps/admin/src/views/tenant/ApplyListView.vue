@@ -1,14 +1,22 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { AppIcon, showToast, ApiError } from '@aiteach/shared'
-import type { PackageRecord, TenantApply } from '@aiteach/shared'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { AppFilterPanel, AppIcon, AppListToolbar, showToast, ApiError } from '@aiteach/shared'
+import type { FilterRowDef, PackageRecord, TenantApply } from '@aiteach/shared'
 import AppDrawer from '@/components/ui/AppDrawer.vue'
 import AppModal from '@/components/ui/AppModal.vue'
 import { approveApply, fetchApplies, fetchPackages, rejectApply } from '@/api/tenant'
 
 /* ===== 列表 ===== */
 const ORG_TYPES = ['公立学校', '民办学校', '培训机构', '其他']
-const filters = reactive({ status: '', orgType: '', keyword: '' })
+const STATUS_OPTIONS = ['待审核', '已通过', '已驳回']
+
+const FILTER_ROWS: FilterRowDef[] = [
+  { key: 'status', label: '状态', options: STATUS_OPTIONS, multiple: false },
+  { key: 'orgType', label: '类型', options: ORG_TYPES, multiple: false },
+]
+
+const FILTERS = reactive<Record<string, string[]>>({ status: [], orgType: [] })
+const keyword = ref('')
 
 const list = ref<TenantApply[]>([])
 const loading = ref(false)
@@ -17,18 +25,26 @@ const packages = ref<PackageRecord[]>([])
 async function load() {
   loading.value = true
   try {
-    list.value = await fetchApplies({ ...filters })
+    list.value = await fetchApplies({
+      status: FILTERS.status[0] ?? '',
+      orgType: FILTERS.orgType[0] ?? '',
+      keyword: keyword.value.trim(),
+    })
   } finally {
     loading.value = false
   }
 }
 
 function resetFilters() {
-  filters.status = ''
-  filters.orgType = ''
-  filters.keyword = ''
+  FILTERS.status = []
+  FILTERS.orgType = []
+  keyword.value = ''
   load()
 }
+
+/* 筛选条件 / 关键词变化即重新查询（原来是点「查询」按钮） */
+watch(FILTERS, load, { deep: true })
+watch(keyword, load)
 
 const pendingCount = computed(() => list.value.filter((item) => item.status === '待审核').length)
 const overtimeCount = computed(
@@ -151,29 +167,12 @@ onMounted(async () => {
 
     <!-- 列表 -->
     <div class="panel">
-      <div class="filter-bar">
-        <select v-model="filters.status" class="f-select" style="width: 130px" @change="load">
-          <option value="">全部状态</option>
-          <option value="待审核">待审核</option>
-          <option value="已通过">已通过</option>
-          <option value="已驳回">已驳回</option>
-        </select>
-        <select v-model="filters.orgType" class="f-select" style="width: 130px" @change="load">
-          <option value="">全部类型</option>
-          <option v-for="type in ORG_TYPES" :key="type" :value="type">{{ type }}</option>
-        </select>
-        <div class="search-box">
-          <AppIcon name="search" :size="15" />
-          <input
-            v-model="filters.keyword"
-            class="f-input"
-            placeholder="机构名称 / 申请编号"
-            @keyup.enter="load"
-          />
-        </div>
-        <button class="btn btn-primary btn-sm" @click="load">查询</button>
-        <button class="btn btn-ghost btn-sm" @click="resetFilters">重置</button>
-      </div>
+      <AppFilterPanel v-model="FILTERS" :rows="FILTER_ROWS" />
+      <AppListToolbar v-model="keyword" placeholder="机构名称 / 申请编号" :search-width="220">
+        <template #right>
+          <button class="btn btn-ghost btn-sm" @click="resetFilters">重置</button>
+        </template>
+      </AppListToolbar>
 
       <div class="data-table-wrap">
         <table class="data-table">
@@ -375,7 +374,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.head-row { display: flex; gap: 14px; margin-bottom: 16px; }
+.head-row { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
 .head-card {
   display: flex;
   align-items: center;
@@ -389,19 +388,8 @@ onMounted(async () => {
 .head-card b { font-size: 22px; display: block; line-height: 1.1; }
 .head-card span { font-size: 12px; color: var(--sub); }
 
-.search-box {
-  position: relative;
-  width: 230px;
-}
-.search-box .f-input { padding-left: 34px; height: 34px; }
-.search-box > :first-child {
-  position: absolute;
-  left: 11px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--sub);
-  pointer-events: none;
-}
+.panel > :deep(.filter-panel) { margin: 14px 14px 0; }
+.panel > :deep(.list-toolbar) { padding: 0 14px; }
 
 .org-cell { display: flex; align-items: center; gap: 6px; }
 .org-name { color: var(--ink); font-weight: 600; }

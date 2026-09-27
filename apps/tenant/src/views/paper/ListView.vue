@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppIcon, PAPER_STATUS_TEXT, showToast } from '@aiteach/shared'
-import type { OrgPaper, OrgQuestion } from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, PAPER_STATUS_TEXT, showToast } from '@aiteach/shared'
+import type { FilterRowDef, OrgPaper, OrgQuestion } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import PaperPreviewModal from '@/components/paper/PaperPreviewModal.vue'
@@ -26,13 +26,17 @@ const STATUS_CLASS: Record<string, string> = {
 }
 
 /* ===== 筛选 ===== */
-const filter = reactive({ status: '', keyword: '' })
+const FILTER_ROWS: FilterRowDef[] = [
+  { key: 'status', label: '状态', options: Object.values(PAPER_STATUS_TEXT), multiple: false },
+]
+const filters = reactive<Record<string, string[]>>({ status: [] })
+const keyword = ref('')
 const page = ref(1)
 const filtered = computed(() =>
   papers.value.filter(
     (row) =>
-      (!filter.status || row.status === filter.status) &&
-      (!filter.keyword || row.name.includes(filter.keyword)),
+      (filters.status.length === 0 || filters.status.includes(PAPER_STATUS_TEXT[row.status])) &&
+      (!keyword.value || row.name.includes(keyword.value)),
   ),
 )
 const rows = computed(() => filtered.value.slice((page.value - 1) * 10, page.value * 10))
@@ -174,9 +178,8 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <h2>试卷库</h2>
-      <div class="op-group">
+    <AppPageHeader>
+      <template #actions>
         <button class="btn btn-primary" @click="router.push('/paper/collab')">
           <AppIcon name="plus" :size="15" /> 手动协同组卷
         </button>
@@ -186,64 +189,63 @@ onMounted(load)
         <button class="btn btn-ghost" @click="router.push('/paper/compose?tab=blueprint')">
           <AppIcon name="grid" :size="15" /> 细目表组卷
         </button>
-      </div>
-    </div>
+      </template>
+    </AppPageHeader>
+
+    <AppFilterPanel v-model="filters" :rows="FILTER_ROWS" />
 
     <div class="panel">
-      <div class="filter-bar">
-        <span class="filter-label">状态</span>
-        <select v-model="filter.status" class="f-select">
-          <option value="">全部</option>
-          <option v-for="(text, key) in PAPER_STATUS_TEXT" :key="key" :value="key">{{ text }}</option>
-        </select>
-        <span class="filter-label">关键词</span>
-        <input v-model="filter.keyword" class="f-input" placeholder="试卷名称" style="width: 200px" />
+      <!-- 工具条自带 14/18 的内边距，与下方表格的满幅排布配合（表格要贴着面板边才能横向滚动） -->
+      <div class="list-head">
+        <AppListToolbar v-model="keyword" placeholder="试卷名称" />
       </div>
 
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>试卷名称</th>
-            <th>状态</th>
-            <th>结构</th>
-            <th>总分</th>
-            <th>适用</th>
-            <th>创建人</th>
-            <th>更新时间</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="rows.length === 0">
-            <td colspan="8" class="empty-row">暂无试卷，点击右上角创建</td>
-          </tr>
-          <template v-else>
-            <tr v-for="row in rows" :key="row.id">
-              <td class="cell-strong">
-                {{ row.name }}
-                <span v-if="row.parallelOf" class="tag tag-blue" style="margin-left: 6px">平行卷</span>
-                <span v-if="row.sharedSquare" class="tag tag-gray" style="margin-left: 6px">已共享广场</span>
-              </td>
-              <td><span class="tag" :class="STATUS_CLASS[row.status]">{{ PAPER_STATUS_TEXT[row.status] }}</span></td>
-              <td>{{ totalCount(row) }} 题 / {{ row.sections.length }} 大题</td>
-              <td>{{ totalScore(row) }} 分</td>
-              <td>{{ row.grade }} · {{ row.duration }} 分钟</td>
-              <td>{{ row.owner }}</td>
-              <td>{{ row.updatedAt }}</td>
-              <td>
-                <div class="op-group">
-                  <button v-if="row.status === 'draft' || row.status === 'rejected'" class="mini-btn" @click="router.push(`/paper/edit?id=${row.id}`)">编辑</button>
-                  <button class="mini-btn" @click="preview = row">预览</button>
-                  <button v-if="row.status === 'draft' || row.status === 'rejected'" class="mini-btn success" @click="onSubmit(row)">提交审核</button>
-                  <button v-if="row.status === 'approved'" class="mini-btn" @click="openParallel(row)">平行卷</button>
-                  <button class="mini-btn" @click="openExport(row)">导出</button>
-                  <button class="mini-btn danger" @click="onDelete(row)">删除</button>
-                </div>
-              </td>
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>试卷名称</th>
+              <th>状态</th>
+              <th>结构</th>
+              <th>总分</th>
+              <th>适用</th>
+              <th>创建人</th>
+              <th>更新时间</th>
+              <th>操作</th>
             </tr>
-          </template>
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            <tr v-if="rows.length === 0">
+              <td colspan="8" class="empty-row">暂无试卷，点击右上角创建</td>
+            </tr>
+            <template v-else>
+              <tr v-for="row in rows" :key="row.id">
+                <td class="cell-strong">
+                  {{ row.name }}
+                  <span v-if="row.parallelOf" class="tag tag-blue" style="margin-left: 6px">平行卷</span>
+                  <span v-if="row.sharedSquare" class="tag tag-gray" style="margin-left: 6px">已共享广场</span>
+                </td>
+                <td><span class="tag" :class="STATUS_CLASS[row.status]">{{ PAPER_STATUS_TEXT[row.status] }}</span></td>
+                <td>{{ totalCount(row) }} 题 / {{ row.sections.length }} 大题</td>
+                <td>{{ totalScore(row) }} 分</td>
+                <td>{{ row.grade }} · {{ row.duration }} 分钟</td>
+                <td>{{ row.owner }}</td>
+                <td>{{ row.updatedAt }}</td>
+                <td>
+                  <div class="op-group">
+                    <button v-if="row.status === 'draft' || row.status === 'rejected'" class="mini-btn" @click="router.push(`/paper/edit?id=${row.id}`)">编辑</button>
+                    <button class="mini-btn" @click="preview = row">预览</button>
+                    <button v-if="row.status === 'draft' || row.status === 'rejected'" class="mini-btn success" @click="onSubmit(row)">提交审核</button>
+                    <button v-if="row.status === 'approved'" class="mini-btn" @click="openParallel(row)">平行卷</button>
+                    <button class="mini-btn" @click="openExport(row)">导出</button>
+                    <button class="mini-btn danger" @click="onDelete(row)">删除</button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
       <AppPagination :total="filtered.length" v-model:page="page" :page-size="10" />
     </div>
 
@@ -341,7 +343,11 @@ onMounted(load)
 </template>
 
 <style scoped>
+/* 列表工具条与面板同宽同边距：表格满幅贴边才能横向滚动，所以内边距给在工具条这一层 */
+.list-head { padding: 14px 18px 0; }
 .struct-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+/* 横向居中的行里，f-hint 自带的 5px 上边距会把文字顶歪 */
+.struct-row .f-hint { margin-top: 0; }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .f-check {
   display: inline-flex;

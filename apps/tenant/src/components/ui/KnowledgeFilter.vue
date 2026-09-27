@@ -11,7 +11,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ArrowRight } from '@element-plus/icons-vue'
-import { AppIcon } from '@aiteach/shared'
+import { AppFilterChips, AppIcon } from '@aiteach/shared'
 import type { OrgKnowledgeNode, TextbookOption } from '@aiteach/shared'
 import { fetchKnowledgeTree, fetchTextbookMatrix } from '@/api/org'
 import { useScope } from '@/composables/useScope'
@@ -69,6 +69,22 @@ function pickSubject(subject: string) {
 
 function pickVersion(version: string) {
   pick.version = version
+}
+
+/* 共享 chip 组件是 v-model 语义（回传整个数组），而这三个 pick 函数带**级联副作用**
+   （换年级会清掉失效的学科 / 版本），所以这里不用 v-model，改用 :model-value + 自己的 handler：
+   选中即调 pick，取消（回传空数组，单选组件里表示点已选项）保持原行为——本面板的三级选择
+   必须始终有值，不允许被取消。 */
+function onPickGrade(value: string[]) {
+  if (value[0]) pickGrade(value[0])
+}
+
+function onPickSubject(value: string[]) {
+  if (value[0]) pickSubject(value[0])
+}
+
+function onPickVersion(value: string[]) {
+  if (value[0]) pickVersion(value[0])
 }
 
 /** 确认教材选择：回写「年级 / 学科 / 教材名称」并加载对应知识点树 */
@@ -257,60 +273,47 @@ onBeforeUnmount(() => {
         <span class="tb-label">{{ tbLabel }}</span>
         <AppIcon name="chevron-down" :size="15" class="tb-caret" :class="{ up: tbOpen }" />
       </button>
-      <!-- 年级 / 学科 / 教材版本：每个维度一行，选项横向平铺 -->
+      <!-- 年级 / 学科 / 教材版本：每个维度一行，选项横向平铺（行渲染用共享的 AppFilterChips） -->
       <div v-if="tbOpen" class="tb-pop" @click.stop>
-        <div class="tb-row">
+        <AppFilterChips
+          v-if="tbMatrix.length"
+          label="年级"
+          :options="tbMatrix.map((row) => row.grade)"
+          :model-value="pick.grade ? [pick.grade] : []"
+          :multiple="false"
+          @update:model-value="onPickGrade"
+        />
+        <div v-else class="tb-row">
           <span class="tb-row-label">年级</span>
-          <div class="tb-opts">
-            <button
-              v-for="row in tbMatrix"
-              :key="row.grade"
-              class="tb-opt"
-              :class="{ on: pick.grade === row.grade }"
-              type="button"
-              @click="pickGrade(row.grade)"
-            >
-              {{ row.grade }}
-            </button>
-            <span v-if="tbMatrix.length === 0" class="tb-empty">暂无年级</span>
-          </div>
+          <div class="tb-opts"><span class="tb-empty">暂无年级</span></div>
         </div>
-        <div class="tb-row">
+
+        <AppFilterChips
+          v-if="tbGradeRow?.subjects.length"
+          label="学科"
+          :options="tbGradeRow.subjects.map((subject) => subject.name)"
+          :model-value="pick.subject ? [pick.subject] : []"
+          :multiple="false"
+          @update:model-value="onPickSubject"
+        />
+        <div v-else class="tb-row">
           <span class="tb-row-label">学科</span>
-          <div class="tb-opts">
-            <template v-if="tbGradeRow">
-              <button
-                v-for="subject in tbGradeRow.subjects"
-                :key="subject.name"
-                class="tb-opt"
-                :class="{ on: pick.subject === subject.name }"
-                type="button"
-                @click="pickSubject(subject.name)"
-              >
-                {{ subject.name }}
-              </button>
-            </template>
-            <span v-else class="tb-empty">请先选择年级</span>
-          </div>
+          <div class="tb-opts"><span class="tb-empty">请先选择年级</span></div>
         </div>
-        <div class="tb-row">
+
+        <AppFilterChips
+          v-if="tbSubjectRow?.versions.length"
+          label="教材版本"
+          :options="tbSubjectRow.versions"
+          :model-value="pick.version ? [pick.version] : []"
+          :multiple="false"
+          @update:model-value="onPickVersion"
+        />
+        <div v-else class="tb-row">
           <span class="tb-row-label">教材版本</span>
-          <div class="tb-opts">
-            <template v-if="tbSubjectRow">
-              <button
-                v-for="version in tbSubjectRow.versions"
-                :key="version"
-                class="tb-opt"
-                :class="{ on: pick.version === version }"
-                type="button"
-                @click="pickVersion(version)"
-              >
-                {{ version }}
-              </button>
-            </template>
-            <span v-else class="tb-empty">请先选择学科</span>
-          </div>
+          <div class="tb-opts"><span class="tb-empty">请先选择学科</span></div>
         </div>
+
         <div class="tb-foot">
           <button class="tb-apply" type="button" :disabled="!pick.version" @click="applyTextbook">
             确定
@@ -407,7 +410,8 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 7px;
 }
-/* 单个维度：标签 + 横向平铺的选项 */
+/* 选项行的 chip 由共享 AppFilterChips 渲染（.chip-row / .chip-label / .chip-opts / .opt-chip）；
+   下面这套 .tb-row / .tb-opts 只在「当前维度还无可选项」时兜底，保留原来的空态文案 */
 .tb-row { display: flex; align-items: flex-start; gap: 10px; }
 .tb-row-label {
   width: 58px;
@@ -426,20 +430,17 @@ onBeforeUnmount(() => {
   max-height: 118px;
   overflow-y: auto;
 }
-.tb-opt {
-  border: 1.5px solid var(--border);
-  border-radius: 8px;
-  background: #fff;
-  font-size: 12.5px;
-  color: var(--ink-2);
-  padding: 3px 11px;
-  line-height: 18px;
-  transition: all 0.12s;
-}
-.tb-opt:hover { border-color: var(--brand); color: var(--brand-deep); }
-.tb-opt.on { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
+/* 共享 chip 行沿用本面板原有的高度上限（版本多的学科不至于把下拉撑爆） */
+.tb-pop :deep(.chip-opts) { max-height: 118px; overflow-y: auto; }
 .tb-empty { font-size: 12px; color: var(--sub); line-height: 26px; }
-.tb-foot { display: flex; justify-content: flex-end; border-top: 1px dashed var(--border); padding-top: 8px; }
+/* 底部确定条：有 justify-content 就必须有 align-items，否则按钮与分隔线不垂直居中 */
+.tb-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  border-top: 1px dashed var(--border);
+  padding-top: 8px;
+}
 .tb-apply {
   border: none;
   border-radius: 8px;
@@ -468,7 +469,22 @@ onBeforeUnmount(() => {
 .kp-search:focus-within { border-color: var(--brand); }
 .kp-search > :first-child { color: var(--sub); }
 .kp-search input { flex: 1; border: none; outline: none; font-size: 12.5px; height: 100%; background: transparent; padding: 0 6px; }
-.kp-clear { display: flex; color: var(--sub); }
+/* 图标按钮：原先只有裸 display:flex，图标既不居中、点击区也只有图标本身大小；
+   这里补居中、撑成 22×22 命中区，并清掉原生 button 的 UA 边框 / 灰底 */
+.kp-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  padding: 0;
+  color: var(--sub);
+}
+.kp-clear:hover { background: var(--brand-soft); color: var(--brand-deep); }
 .kp-hint { font-size: 11.5px; color: var(--sub); padding: 6px 4px 0; flex-shrink: 0; }
 
 /* 知识点树：占满面板剩余高度，仅树自身滚动 */

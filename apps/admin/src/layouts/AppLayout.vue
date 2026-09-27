@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppIcon, showToast, hueColor, resolveApiMode, getAppConfig } from '@aiteach/shared'
+import { AppIcon, showToast, hueColor, resolveApiMode, getAppConfig, buildBreadcrumb } from '@aiteach/shared'
 import type { MenuItem } from '@/menu'
 import { menus } from '@/menu'
 import { useAuthStore } from '@/stores/auth'
@@ -71,7 +71,8 @@ function onGroupHeadClick(item: MenuItem, event: MouseEvent) {
 
 onBeforeUnmount(() => clearTimeout(flyoutTimer))
 
-const pageTitle = computed(() => (route.meta.title as string) ?? '')
+/* 页面名不再单独显示，改由面包屑承担（层级取自 menu.ts，路由本身是平铺的） */
+const crumbs = computed(() => buildBreadcrumb(menus, route.path, route.meta.title as string))
 const isMockMode = resolveApiMode('/__probe__') === 'mock'
 
 /* ===== 用户菜单 ===== */
@@ -204,7 +205,14 @@ async function onLogout() {
           >
             <AppIcon name="menu" />
           </button>
-          <h1 class="page-title">{{ pageTitle }}</h1>
+          <!-- 面包屑：超管端路由也是平铺的，层级从 menu.ts 的菜单树推导（buildBreadcrumb） -->
+          <nav v-if="crumbs.length" class="crumb" aria-label="面包屑">
+            <template v-for="(crumb, i) in crumbs" :key="`${crumb.label}-${i}`">
+              <AppIcon v-if="i > 0" class="crumb-sep" name="chevron-right" :size="13" />
+              <RouterLink v-if="crumb.to" class="crumb-link" :to="crumb.to">{{ crumb.label }}</RouterLink>
+              <span v-else class="crumb-current" :title="crumb.label">{{ crumb.label }}</span>
+            </template>
+          </nav>
           <span v-if="isMockMode" class="mock-badge" title="当前使用 Mock 数据，环境变量可切换至真实后端">演示数据</span>
         </div>
         <div class="topbar-right">
@@ -412,7 +420,19 @@ async function onLogout() {
   padding: 0 26px;
 }
 .topbar-left { display: flex; align-items: center; gap: 12px; }
-.page-title { font-size: 17px; font-weight: 700; }
+/* 面包屑：末项为当前页，不可点 */
+.crumb { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 13.5px; }
+.crumb-sep { color: #c3cad8; flex-shrink: 0; }
+.crumb-link { color: var(--sub); font-weight: 500; transition: color 0.15s; }
+.crumb-link:hover { color: var(--brand); }
+.crumb-current {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .mock-badge {
   padding: 3px 10px;
   border-radius: 999px;

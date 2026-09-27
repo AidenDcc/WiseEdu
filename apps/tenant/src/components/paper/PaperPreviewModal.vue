@@ -803,7 +803,7 @@ onBeforeUnmount(() => {
 .pp-style-name { display: flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; color: var(--ink); }
 .pp-style.on .pp-style-name { color: var(--brand-deep); }
 .pp-style-desc { font-size: 11.5px; color: var(--sub); line-height: 1.5; }
-.pp-style-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.pp-style-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
 .pp-style-tags i {
   font-style: normal;
   font-size: 10.5px;
@@ -813,7 +813,9 @@ onBeforeUnmount(() => {
   padding: 0 5px;
 }
 .pp-facts { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--ink-2); }
-.pp-facts li { display: flex; gap: 8px; line-height: 1.5; }
+/* 标签 + 值：值在 244px 侧栏里会折到两行，用 baseline 让标签与值首行同基线
+   （center 会在多行值时把标签拽到中间，反而错位） */
+.pp-facts li { display: flex; align-items: baseline; gap: 8px; line-height: 1.5; }
 .pp-facts span { color: var(--sub); flex-shrink: 0; width: 42px; }
 .pp-side-warn {
   display: flex;

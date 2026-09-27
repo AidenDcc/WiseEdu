@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, showToast, ApiError } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, ApiError } from '@aiteach/shared'
 import type { AgentConfig, AiModel } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
@@ -77,12 +77,14 @@ onMounted(load)
 
 <template>
   <div v-if="config">
+    <AppPageHeader desc="多智能体检测项（8 项）：启用项必须绑定已启用模型，OCR 类仅可选多模态 / OCR 模型">
+      <template #actions>
+        <span class="tag tag-blue">当前版本 v{{ config.version }}</span>
+      </template>
+    </AppPageHeader>
+
     <!-- 检测项（FR-PT-020） -->
     <div class="panel" style="margin-bottom: 14px">
-      <div class="filter-bar">
-        <span class="filter-label">多智能体检测项（8 项）：启用项必须绑定已启用模型，OCR 类仅可选多模态 / OCR 模型</span>
-        <span class="tag tag-blue" style="margin-left: auto">当前版本 v{{ config.version }}</span>
-      </div>
       <div class="data-table-wrap">
         <table class="data-table">
           <thead>
@@ -225,7 +227,7 @@ onMounted(load)
 .dual { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
 .rule-panel { padding: 18px 20px; }
 
-.fix-types { display: flex; flex-wrap: wrap; gap: 10px 18px; }
+.fix-types { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 18px; }
 .fix-chip {
   display: inline-flex;
   align-items: center;
@@ -255,6 +257,7 @@ onMounted(load)
 
 .action-bar {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 10px;
   margin-top: 14px;

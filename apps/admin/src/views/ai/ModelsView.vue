@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { AppIcon, showToast, ApiError, AI_MODEL_TYPE_TEXT } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, ApiError, AI_MODEL_TYPE_TEXT } from '@aiteach/shared'
 import type { AiModel, AiModelType } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
@@ -143,61 +143,64 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="panel">
-    <div class="filter-bar">
-      <span class="filter-label">大模型接入与限流计费配置；停用前请确保存在同类型备用模型</span>
-      <button class="btn btn-primary btn-sm" style="margin-left: auto" @click="openCreate">
-        <AppIcon name="plus" :size="15" /> 新增模型
-      </button>
-    </div>
+  <div>
+    <AppPageHeader desc="大模型接入与限流计费配置；停用前请确保存在同类型备用模型">
+      <template #actions>
+        <button class="btn btn-primary btn-sm" @click="openCreate">
+          <AppIcon name="plus" :size="15" /> 新增模型
+        </button>
+      </template>
+    </AppPageHeader>
 
-    <div class="data-table-wrap">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>模型名称</th>
-            <th>类型</th>
-            <th>提供方</th>
-            <th>状态</th>
-            <th>限流 QPS</th>
-            <th>本月调用量</th>
-            <th>本月费用</th>
-            <th>最近健康检测</th>
-            <th style="width: 200px">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="loading && list.length === 0">
-            <td colspan="9" class="empty-row">加载中…</td>
-          </tr>
-          <tr v-else-if="list.length === 0">
-            <td colspan="9" class="empty-row">暂无接入模型</td>
-          </tr>
-          <template v-else>
-            <tr v-for="model in list" :key="model.id">
-              <td class="cell-strong">{{ model.name }}</td>
-              <td><span class="tag tag-blue">{{ AI_MODEL_TYPE_TEXT[model.type] }}</span></td>
-              <td>{{ model.provider }}</td>
-              <td><AppSwitch :model-value="model.enabled" @update:model-value="onToggle(model)" /></td>
-              <td>{{ model.qps }}</td>
-              <td>{{ model.callsThisMonth.toLocaleString('zh-CN') }}</td>
-              <td>¥{{ model.costThisMonth.toLocaleString('zh-CN', { minimumFractionDigits: 1 }) }}</td>
-              <td>
-                <span v-if="model.lastCheckAt" class="check-result" :class="model.lastCheckOk ? 'ok' : 'bad'">
-                  {{ model.lastCheckOk ? '正常' : '异常' }} · {{ model.lastCheckAt.slice(5, 16) }}
-                </span>
-                <span v-else style="color: var(--sub)">未检测</span>
-              </td>
-              <td>
-                <div class="op-group">
-                  <button class="mini-btn" type="button" @click="onHealthCheck(model)">健康检测</button>
-                  <button class="mini-btn" type="button" @click="openEdit(model)">编辑</button>
-                </div>
-              </td>
+    <div class="panel">
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>模型名称</th>
+              <th>类型</th>
+              <th>提供方</th>
+              <th>状态</th>
+              <th>限流 QPS</th>
+              <th>本月调用量</th>
+              <th>本月费用</th>
+              <th>最近健康检测</th>
+              <th style="width: 200px">操作</th>
             </tr>
-          </template>
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            <tr v-if="loading && list.length === 0">
+              <td colspan="9" class="empty-row">加载中…</td>
+            </tr>
+            <tr v-else-if="list.length === 0">
+              <td colspan="9" class="empty-row">暂无接入模型</td>
+            </tr>
+            <template v-else>
+              <tr v-for="model in list" :key="model.id">
+                <td class="cell-strong">{{ model.name }}</td>
+                <td><span class="tag tag-blue">{{ AI_MODEL_TYPE_TEXT[model.type] }}</span></td>
+                <td>{{ model.provider }}</td>
+                <td><AppSwitch :model-value="model.enabled" @update:model-value="onToggle(model)" /></td>
+                <td>{{ model.qps }}</td>
+                <td>{{ model.callsThisMonth.toLocaleString('zh-CN') }}</td>
+                <td>¥{{ model.costThisMonth.toLocaleString('zh-CN', { minimumFractionDigits: 1 }) }}</td>
+                <td>
+                  <span v-if="model.lastCheckAt" class="check-result" :class="model.lastCheckOk ? 'ok' : 'bad'">
+                    {{ model.lastCheckOk ? '正常' : '异常' }} · {{ model.lastCheckAt.slice(5, 16) }}
+                  </span>
+                  <span v-else style="color: var(--sub)">未检测</span>
+                </td>
+                <td>
+                  <div class="op-group">
+                    <button class="mini-btn" type="button" @click="onHealthCheck(model)">健康检测</button>
+                    <button class="mini-btn" type="button" @click="openEdit(model)">编辑</button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- 新增 / 编辑弹窗 -->

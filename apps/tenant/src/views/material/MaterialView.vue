@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { AppIcon, MATERIAL_STATUS_TEXT, RichTextViewer, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, MATERIAL_STATUS_TEXT, RichTextViewer, showToast } from '@aiteach/shared'
 import type { OrgMaterial } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import { decideExample, deleteMaterial, fetchMaterials, finishMaterial, reRecognizeMaterial, uploadMaterial } from '@/api/org'
@@ -99,64 +99,66 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <h2>教辅资料</h2>
-      <span class="f-hint">上传 pdf / 图片教辅 → AI 结构化（章节树 / 知识点 / 例题）→ 人工校对一键入题库</span>
-      <button class="btn btn-primary" style="margin-left: auto" @click="uploadOpen = true">
-        <AppIcon name="upload" :size="15" /> 上传教辅
-      </button>
-    </div>
+    <AppPageHeader desc="上传 pdf / 图片教辅 → AI 结构化（章节树 / 知识点 / 例题）→ 人工校对一键入题库">
+      <template #actions>
+        <button class="btn btn-primary" @click="uploadOpen = true">
+          <AppIcon name="upload" :size="15" /> 上传教辅
+        </button>
+      </template>
+    </AppPageHeader>
 
     <div class="panel">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>教辅名称</th>
-            <th>类型</th>
-            <th>学科</th>
-            <th>大小</th>
-            <th>状态</th>
-            <th>章节 / 例题</th>
-            <th>上传人</th>
-            <th>上传时间</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="materials.length === 0">
-            <td colspan="9" class="empty-row">暂无教辅资料</td>
-          </tr>
-          <template v-else>
-            <tr v-for="row in materials" :key="row.id">
-              <td class="cell-strong">{{ row.name }}</td>
-              <td><span class="tag tag-gray">{{ row.type }}</span></td>
-              <td>{{ row.subject }}</td>
-              <td>{{ row.sizeMb }} MB</td>
-              <td>
-                <span class="tag" :class="STATUS_CLASS[row.status]">{{ MATERIAL_STATUS_TEXT[row.status as keyof typeof MATERIAL_STATUS_TEXT] }}</span>
-                <p v-if="row.failReason" class="f-err" style="margin-top: 4px">{{ row.failReason }}</p>
-              </td>
-              <td>
-                {{ row.chapters.length }} 章 /
-                {{ row.chapters.reduce((s, ch) => s + ch.examples.length, 0) }} 例题
-                <span v-if="row.status === 'proofreading'" class="tag tag-orange" style="margin-left: 4px">
-                  待处理 {{ row.chapters.reduce((s, ch) => s + ch.examples.filter((ex) => ex.status === 'pending').length, 0) }}
-                </span>
-              </td>
-              <td>{{ row.owner }}</td>
-              <td>{{ row.createdAt }}</td>
-              <td>
-                <div class="op-group">
-                  <button v-if="row.status === 'proofreading'" class="mini-btn success" @click="openProof(row)">校对</button>
-                  <button v-if="row.status === 'done'" class="mini-btn" @click="onExport(row)">导出</button>
-                  <button v-if="row.status === 'failed' || row.status === 'done'" class="mini-btn" @click="onReRecognize(row)">重新识别</button>
-                  <button class="mini-btn danger" @click="onDelete(row)">删除</button>
-                </div>
-              </td>
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>教辅名称</th>
+              <th>类型</th>
+              <th>学科</th>
+              <th>大小</th>
+              <th>状态</th>
+              <th>章节 / 例题</th>
+              <th>上传人</th>
+              <th>上传时间</th>
+              <th>操作</th>
             </tr>
-          </template>
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            <tr v-if="materials.length === 0">
+              <td colspan="9" class="empty-row">暂无教辅资料</td>
+            </tr>
+            <template v-else>
+              <tr v-for="row in materials" :key="row.id">
+                <td class="cell-strong">{{ row.name }}</td>
+                <td><span class="tag tag-gray">{{ row.type }}</span></td>
+                <td>{{ row.subject }}</td>
+                <td>{{ row.sizeMb }} MB</td>
+                <td>
+                  <span class="tag" :class="STATUS_CLASS[row.status]">{{ MATERIAL_STATUS_TEXT[row.status as keyof typeof MATERIAL_STATUS_TEXT] }}</span>
+                  <p v-if="row.failReason" class="f-err" style="margin-top: 4px">{{ row.failReason }}</p>
+                </td>
+                <td>
+                  {{ row.chapters.length }} 章 /
+                  {{ row.chapters.reduce((s, ch) => s + ch.examples.length, 0) }} 例题
+                  <span v-if="row.status === 'proofreading'" class="tag tag-orange" style="margin-left: 4px">
+                    待处理 {{ row.chapters.reduce((s, ch) => s + ch.examples.filter((ex) => ex.status === 'pending').length, 0) }}
+                  </span>
+                </td>
+                <td>{{ row.owner }}</td>
+                <td>{{ row.createdAt }}</td>
+                <td>
+                  <div class="op-group">
+                    <button v-if="row.status === 'proofreading'" class="mini-btn success" @click="openProof(row)">校对</button>
+                    <button v-if="row.status === 'done'" class="mini-btn" @click="onExport(row)">导出</button>
+                    <button v-if="row.status === 'failed' || row.status === 'done'" class="mini-btn" @click="onReRecognize(row)">重新识别</button>
+                    <button class="mini-btn danger" @click="onDelete(row)">删除</button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- 上传弹窗 -->

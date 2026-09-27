@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, showToast } from '@aiteach/shared'
+import { AppIcon, AppListToolbar, AppPageHeader, showToast } from '@aiteach/shared'
 import type { StaffMember } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import { deleteStaff, fetchCampuses, fetchRoles, fetchStaff, saveStaff, toggleStaff } from '@/api/org'
@@ -84,68 +84,65 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <h2>员工账号</h2>
-      <span class="f-hint">套餐额度 {{ staff.length }} / {{ quota.max }} 个账号 · 停用账号保留数据但冻结入口</span>
-    </div>
-
-    <div class="panel">
-      <div class="filter-bar">
-        <input v-model="keyword" class="f-input" placeholder="搜索姓名 / 手机号" style="width: 200px" />
+    <AppPageHeader :desc="`套餐额度 ${staff.length} / ${quota.max} 个账号 · 停用账号保留数据但冻结入口`">
+      <template #actions>
         <button class="btn btn-ghost btn-sm" @click="onImport"><AppIcon name="upload" :size="14" /> 批量导入</button>
-        <button
-          class="btn btn-primary btn-sm"
-          style="margin-left: auto"
-          :class="{ disabled: quotaFull }"
-          @click="openCreate"
-        >
+        <button class="btn btn-primary btn-sm" :class="{ disabled: quotaFull }" @click="openCreate">
           <AppIcon name="plus" :size="14" /> 新增员工
         </button>
+      </template>
+    </AppPageHeader>
+
+    <div class="panel">
+      <div class="list-head">
+        <AppListToolbar v-model="keyword" placeholder="搜索姓名 / 手机号" :search-width="200" />
       </div>
 
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>姓名</th>
-            <th>手机号</th>
-            <th>角色</th>
-            <th>校区</th>
-            <th>状态</th>
-            <th>待审任务</th>
-            <th>最近登录</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="filtered.length === 0">
-            <td colspan="8" class="empty-row">无匹配员工</td>
-          </tr>
-          <template v-else>
-            <tr v-for="row in filtered" :key="row.id">
-              <td class="cell-strong">{{ row.name }}</td>
-              <td>{{ row.phone }}</td>
-              <td><span class="tag" :class="row.role === '管理员' ? 'tag-blue' : 'tag-gray'">{{ row.role }}</span></td>
-              <td>{{ row.campus }}</td>
-              <td>
-                <span class="tag" :class="row.enabled ? 'tag-green' : 'tag-red'">{{ row.enabled ? '启用' : '停用' }}</span>
-              </td>
-              <td>
-                <span v-if="row.pendingReviews > 0" class="tag tag-orange">{{ row.pendingReviews }} 项</span>
-                <span v-else class="f-hint">—</span>
-              </td>
-              <td>{{ row.lastLoginAt }}</td>
-              <td>
-                <div class="op-group">
-                  <button class="mini-btn" @click="openEdit(row)">编辑</button>
-                  <button class="mini-btn" @click="onResetPwd(row)">重置密码</button>
-                  <button class="mini-btn" @click="onToggle(row)">{{ row.enabled ? '停用' : '启用' }}</button>
-                  <button class="mini-btn danger" @click="onDelete(row)">删除</button>
-                </div>
-              </td>
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>姓名</th>
+              <th>手机号</th>
+              <th>角色</th>
+              <th>校区</th>
+              <th>状态</th>
+              <th>待审任务</th>
+              <th>最近登录</th>
+              <th>操作</th>
             </tr>
-          </template>
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            <tr v-if="filtered.length === 0">
+              <td colspan="8" class="empty-row">无匹配员工</td>
+            </tr>
+            <template v-else>
+              <tr v-for="row in filtered" :key="row.id">
+                <td class="cell-strong">{{ row.name }}</td>
+                <td>{{ row.phone }}</td>
+                <td><span class="tag" :class="row.role === '管理员' ? 'tag-blue' : 'tag-gray'">{{ row.role }}</span></td>
+                <td>{{ row.campus }}</td>
+                <td>
+                  <span class="tag" :class="row.enabled ? 'tag-green' : 'tag-red'">{{ row.enabled ? '启用' : '停用' }}</span>
+                </td>
+                <td>
+                  <span v-if="row.pendingReviews > 0" class="tag tag-orange">{{ row.pendingReviews }} 项</span>
+                  <span v-else class="f-hint">—</span>
+                </td>
+                <td>{{ row.lastLoginAt }}</td>
+                <td>
+                  <div class="op-group">
+                    <button class="mini-btn" @click="openEdit(row)">编辑</button>
+                    <button class="mini-btn" @click="onResetPwd(row)">重置密码</button>
+                    <button class="mini-btn" @click="onToggle(row)">{{ row.enabled ? '停用' : '启用' }}</button>
+                    <button class="mini-btn danger" @click="onDelete(row)">删除</button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <AppModal v-if="editing" :title="editing.id ? '编辑员工' : '新增员工'" :width="460" @close="editing = null">
@@ -183,6 +180,8 @@ onMounted(load)
 </template>
 
 <style scoped>
+/* 工具条嵌在面板顶部，表格保持满幅（贴面板边才能横向滚动） */
+.list-head { padding: 14px 18px 0; }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .btn.disabled { opacity: 0.5; }
 </style>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { AppIcon, showToast } from '@aiteach/shared'
-import type { ErrorLog, LoginLog, OperationLog } from '@aiteach/shared'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { AppFilterPanel, AppIcon, AppListToolbar, showToast } from '@aiteach/shared'
+import type { ErrorLog, FilterRowDef, LoginLog, OperationLog } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import { fetchErrorLogs, fetchLoginLogs, fetchOperationLogs } from '@/api/platform'
@@ -20,7 +20,9 @@ const errorLogs = ref<ErrorLog[]>([])
 const loading = ref(false)
 
 const loginKeyword = ref('')
-const opModule = ref('')
+const opFilter = reactive<Record<string, string[]>>({ module: [] })
+
+const currentHint = computed(() => TABS.find((tab) => tab.key === activeTab.value)?.hint ?? '')
 
 async function load() {
   loading.value = true
@@ -39,17 +41,25 @@ const filteredLogin = computed(() => {
   const kw = loginKeyword.value.trim()
   return kw ? loginLogs.value.filter((row) => row.account.includes(kw) || row.ip.includes(kw)) : loginLogs.value
 })
-const filteredOps = computed(() =>
-  opModule.value ? operationLogs.value.filter((row) => row.module === opModule.value) : operationLogs.value,
-)
+const filteredOps = computed(() => {
+  const module = opFilter.module[0]
+  return module ? operationLogs.value.filter((row) => row.module === module) : operationLogs.value
+})
 const opModules = computed(() => [...new Set(operationLogs.value.map((row) => row.module))])
+/* 模块候选项来自接口返回的数据，故用 computed 而不是模块级常量 */
+const OP_FILTER_ROWS = computed<FilterRowDef[]>(() => [
+  { key: 'module', label: '模块', options: opModules.value, multiple: false },
+])
 
 /* ===== 分页（三个 Tab 共用 page 状态，切换时重置） ===== */
 const page = ref(1)
 const pageSize = 10
 
-function switchTab(tab: TabKey) {
-  activeTab.value = tab
+watch(loginKeyword, () => (page.value = 1))
+watch(opFilter, () => (page.value = 1), { deep: true })
+
+function switchTab(tab: string) {
+  activeTab.value = tab as TabKey
   page.value = 1
 }
 
@@ -76,31 +86,25 @@ onMounted(load)
 
 <template>
   <div class="panel">
-    <div class="tab-row">
-      <button
-        v-for="tab in TABS"
-        :key="tab.key"
-        class="tab-btn"
-        :class="{ active: activeTab === tab.key }"
-        type="button"
-        @click="switchTab(tab.key)"
-      >
-        {{ tab.label }}
-      </button>
-      <span class="filter-label" style="margin-left: 14px">
-        {{ TABS.find((tab) => tab.key === activeTab)?.hint }}
-      </span>
-      <button class="btn btn-ghost btn-sm" style="margin-left: auto" @click="onExport">
-        <AppIcon name="download" :size="14" /> 导出
-      </button>
+    <div class="tabs-wrap">
+      <AppTabs :tabs="TABS" :model-value="activeTab" @update:model-value="switchTab" />
+    </div>
+    <div class="tabs-tools">
+      <AppListToolbar :searchable="false">
+        <template #left>
+          <span class="tab-hint">{{ currentHint }}</span>
+        </template>
+        <template #right>
+          <button class="btn btn-ghost btn-sm" @click="onExport">
+            <AppIcon name="download" :size="14" /> 导出
+          </button>
+        </template>
+      </AppListToolbar>
     </div>
 
     <!-- 登录日志 -->
     <div v-if="activeTab === 'login'" class="tab-body">
-      <div class="filter-bar">
-        <input v-model="loginKeyword" class="f-input" style="width: 220px" placeholder="账号 / IP 检索" />
-        <button class="btn btn-ghost btn-sm" @click="page = 1">检索</button>
-      </div>
+      <AppListToolbar v-model="loginKeyword" placeholder="账号 / IP 检索" :search-width="220" />
       <div class="data-table-wrap">
         <table class="data-table">
           <thead>
@@ -138,12 +142,7 @@ onMounted(load)
 
     <!-- 操作日志 -->
     <div v-else-if="activeTab === 'operation'" class="tab-body">
-      <div class="filter-bar">
-        <select v-model="opModule" class="f-select" style="width: 150px">
-          <option value="">全部模块</option>
-          <option v-for="module in opModules" :key="module" :value="module">{{ module }}</option>
-        </select>
-      </div>
+      <AppFilterPanel v-model="opFilter" :rows="OP_FILTER_ROWS" />
       <div class="data-table-wrap">
         <table class="data-table">
           <thead>
@@ -228,28 +227,11 @@ onMounted(load)
 </template>
 
 <style scoped>
-.tab-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  border-bottom: 1px solid var(--border);
-  padding: 0 16px;
-}
-.tab-btn {
-  border: none;
-  background: transparent;
-  color: var(--sub);
-  font-size: 13.5px;
-  font-weight: 500;
-  padding: 14px 16px;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  transition: color 0.15s;
-}
-.tab-btn:hover { color: var(--ink); }
-.tab-btn.active { color: var(--brand); font-weight: 600; border-bottom-color: var(--brand); }
-.tab-body { padding: 14px 16px 0; }
+.tabs-wrap { padding: 0 16px; }
+.tabs-tools { padding: 0 16px; }
+.tab-hint { font-size: 12.5px; color: var(--sub); }
+.tab-body { padding: 0 16px; }
+.tab-body :deep(.filter-panel) { margin-bottom: 12px; }
 
 .time-cell { font-size: 12.5px; color: var(--sub); white-space: nowrap; }
 .ip-chip {

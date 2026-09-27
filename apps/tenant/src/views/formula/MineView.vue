@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
-import { AppIcon, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, AppSegmented, showToast } from '@aiteach/shared'
 import type { OrgFormula } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import FormulaPickerModal from '@/components/ui/FormulaPickerModal.vue'
@@ -21,6 +21,12 @@ onMounted(async () => {
   formulas.value = rows
   subjects.value = dict.map((item) => item.name)
 })
+
+/** 学科学页签：互斥分段控件（「全部」由空值表示） */
+const SUBJECT_OPTIONS = computed(() => [
+  { value: '', label: '全部' },
+  ...subjects.value.map((name) => ({ value: name, label: name })),
+])
 
 /** 我的公式（scope === 'mine'，未分享），按学科学页签过滤 */
 const mine = computed(() =>
@@ -99,63 +105,53 @@ function onCopy(row: OrgFormula) {
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <h2>我的公式</h2>
-      <span class="f-hint">个人常用公式，用公式编辑器录入、经 LaTeX 校验后保存；分享需机构审核</span>
-      <button class="btn btn-primary" style="margin-left: auto" @click="openCreate">
-        <AppIcon name="plus" :size="15" /> 新建公式
-      </button>
-    </div>
+    <AppPageHeader desc="个人常用公式，用公式编辑器录入、经 LaTeX 校验后保存；分享需机构审核">
+      <template #actions>
+        <button class="btn btn-primary" @click="openCreate">
+          <AppIcon name="plus" :size="15" /> 新建公式
+        </button>
+      </template>
+    </AppPageHeader>
 
     <div class="panel">
-      <div class="subject-tabs">
-        <button class="subj-tab" :class="{ on: subject === '' }" type="button" @click="subject = ''">
-          全部
-        </button>
-        <button
-          v-for="name in subjects"
-          :key="name"
-          class="subj-tab"
-          :class="{ on: subject === name }"
-          type="button"
-          @click="subject = name"
-        >
-          {{ name }}
-        </button>
+      <div class="subject-switch">
+        <AppSegmented v-model="subject" :options="SUBJECT_OPTIONS" />
       </div>
 
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>公式名称</th>
-            <th style="width: 76px">学科</th>
-            <th class="th-preview">公式</th>
-            <th style="width: 100px">更新时间</th>
-            <th style="width: 260px">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="mine.length === 0">
-            <td colspan="5" class="empty-row">{{ subject ? `「${subject}」暂无个人公式` : '暂无个人公式，点击右上角新建' }}</td>
-          </tr>
-          <template v-else>
-            <tr v-for="row in mine" :key="row.id">
-              <td class="cell-strong">{{ row.name }}</td>
-              <td><span class="tag tag-gray">{{ row.subject }}</span></td>
-              <td><span class="cell-preview" v-html="renderPreview(row.latex)" /></td>
-              <td>{{ row.updatedAt }}</td>
-              <td>
-                <div class="op-group">
-                  <button class="mini-btn" @click="onCopy(row)">复制</button>
-                  <button class="mini-btn" @click="openEdit(row)">编辑</button>
-                  <button class="mini-btn success" @click="onShare(row)">分享到机构</button>
-                  <button class="mini-btn danger" @click="onDelete(row)">删除</button>
-                </div>
-              </td>
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>公式名称</th>
+              <th style="width: 76px">学科</th>
+              <th class="th-preview">公式</th>
+              <th style="width: 100px">更新时间</th>
+              <th style="width: 260px">操作</th>
             </tr>
-          </template>
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            <tr v-if="mine.length === 0">
+              <td colspan="5" class="empty-row">{{ subject ? `「${subject}」暂无个人公式` : '暂无个人公式，点击右上角新建' }}</td>
+            </tr>
+            <template v-else>
+              <tr v-for="row in mine" :key="row.id">
+                <td class="cell-strong">{{ row.name }}</td>
+                <td><span class="tag tag-gray">{{ row.subject }}</span></td>
+                <td><span class="cell-preview" v-html="renderPreview(row.latex)" /></td>
+                <td>{{ row.updatedAt }}</td>
+                <td>
+                  <div class="op-group">
+                    <button class="mini-btn" @click="onCopy(row)">复制</button>
+                    <button class="mini-btn" @click="openEdit(row)">编辑</button>
+                    <button class="mini-btn success" @click="onShare(row)">分享到机构</button>
+                    <button class="mini-btn danger" @click="onDelete(row)">删除</button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- 新建 / 编辑表单 -->
@@ -202,19 +198,7 @@ function onCopy(row: OrgFormula) {
 </template>
 
 <style scoped>
-.subject-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
-.subj-tab {
-  border: 1.5px solid var(--border);
-  border-radius: 9px;
-  background: #fff;
-  color: var(--ink-2);
-  font-size: 13px;
-  font-weight: 600;
-  padding: 6px 14px;
-  transition: all 0.15s;
-}
-.subj-tab:hover { border-color: var(--brand); color: var(--brand-deep); }
-.subj-tab.on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-deep); }
+.subject-switch { padding: 14px 18px 4px; }
 
 .th-preview { min-width: 260px; }
 .cell-preview {

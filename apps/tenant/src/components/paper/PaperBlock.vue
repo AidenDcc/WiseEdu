@@ -436,7 +436,7 @@ const answerIsPlain = computed(() => !!item.value && item.value.options.length >
 .pc-fill { display: grid; gap: calc(var(--pp-size) * 0.5) 8px; padding: 4px 0; }
 .pc-fill-item { display: flex; align-items: center; gap: 6px; font-size: calc(var(--pp-size) * 0.95); }
 .pc-fill-no { min-width: calc(var(--pp-size) * 1.9); text-align: right; font-weight: 700; font-family: var(--pp-head-font); }
-.pc-bubs { display: flex; gap: 5px; }
+.pc-bubs { display: flex; align-items: center; gap: 5px; }
 .pc-bub {
   width: calc(var(--pp-size) * 1.35);
   height: calc(var(--pp-size) * 1.35);

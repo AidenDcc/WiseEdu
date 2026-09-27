@@ -174,16 +174,16 @@ onMounted(load)
 }
 .queue-item:hover { border-color: var(--brand); }
 .queue-item.on { border-color: var(--brand); background: var(--brand-soft); }
-.qi-top { display: flex; gap: 6px; }
+.qi-top { display: flex; align-items: center; gap: 6px; }
 .qi-stem { font-size: 13px; color: var(--ink); line-height: 1.5; }
 .qi-meta { font-size: 11.5px; color: var(--sub); }
-.queue-list.reviewed { flex-direction: row; flex-wrap: wrap; }
+.queue-list.reviewed { flex-direction: row; flex-wrap: wrap; align-items: center; }
 .rv-chip { font-size: 11.5px; border-radius: 999px; padding: 2px 9px; background: #f2f5f5; color: var(--sub); }
 .rv-chip.approved { background: var(--success-soft); color: var(--success); }
 .rv-chip.rejected { background: var(--danger-soft); color: var(--danger); }
 
 .preview-panel { padding: 18px 20px; }
-.pv-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.pv-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .pv-stem { font-size: 14.5px; color: var(--ink); line-height: 1.8; margin-bottom: 12px; }
 .pv-options { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 .pv-options li { background: #f7fafa; border-radius: 8px; padding: 9px 12px; font-size: 13.5px; color: var(--ink-2); }

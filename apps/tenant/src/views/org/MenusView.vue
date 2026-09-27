@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast } from '@aiteach/shared'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import { fetchOrgMenus, saveOrgMenus } from '@/api/org'
 import type { OrgMenuNodeApi } from '@/api/org'
@@ -62,10 +62,7 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <h2>菜单权限</h2>
-      <span class="f-hint">控制员工端可见的侧边栏菜单；带 🔒 标记受超管套餐约束</span>
-    </div>
+    <AppPageHeader desc="控制员工端可见的侧边栏菜单；带 🔒 标记受超管套餐约束" />
 
     <div class="panel menu-panel">
       <div class="menu-stats">
@@ -139,7 +136,7 @@ onMounted(load)
 .child-title { flex: 1; font-size: 13px; color: var(--ink-2); }
 
 .menu-foot {
-  display: flex; justify-content: flex-end; gap: 10px;
+  display: flex; align-items: center; justify-content: flex-end; gap: 10px;
   border-top: 1px solid var(--border); margin-top: 16px; padding-top: 14px;
 }
 </style>

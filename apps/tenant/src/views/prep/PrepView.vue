@@ -12,13 +12,16 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
+  AppFilterPanel,
   AppIcon,
+  AppListToolbar,
+  AppPageHeader,
   PREP_TASK_STATUS_TEXT,
   TEACH_KIND_TEXT,
   showToast,
   truncateRich,
 } from '@aiteach/shared'
-import type { PrepMember, PrepTask, StaffMember, TeachDoc, TeachDocKind } from '@aiteach/shared'
+import type { FilterRowDef, PrepMember, PrepTask, StaffMember, TeachDoc, TeachDocKind } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import RichTextEditor from '@/components/ui/RichTextEditor.vue'
@@ -94,6 +97,29 @@ const filtered = computed(() =>
   ),
 )
 const rows = computed(() => filtered.value.slice((page.value - 1) * 9, page.value * 9))
+
+/* 筛选：chip 上显示的是文案，filter 里仍存业务值 */
+const PREP_FILTER_ROWS = computed<FilterRowDef[]>(() => [
+  { key: 'subject', label: '学科', options: subjects.value, multiple: false },
+  { key: 'grade', label: '年级', options: grades.value, multiple: false },
+  { key: 'status', label: '状态', options: Object.values(PREP_TASK_STATUS_TEXT), multiple: false },
+])
+
+function prepStatusKeyOf(text: string): '' | PrepTask['status'] {
+  return (Object.keys(PREP_TASK_STATUS_TEXT) as PrepTask['status'][]).find((k) => PREP_TASK_STATUS_TEXT[k] === text) ?? ''
+}
+
+const prepFilterModel = computed<Record<string, string[]>>(() => ({
+  subject: filter.subject ? [filter.subject] : [],
+  grade: filter.grade ? [filter.grade] : [],
+  status: filter.status ? [PREP_TASK_STATUS_TEXT[filter.status as PrepTask['status']]] : [],
+}))
+
+function onPrepFilterChange(next: Record<string, string[]>) {
+  filter.subject = next.subject?.[0] ?? ''
+  filter.grade = next.grade?.[0] ?? ''
+  filter.status = prepStatusKeyOf(next.status?.[0] ?? '')
+}
 
 async function loadList() {
   tasks.value = await fetchPrepTasks()
@@ -371,7 +397,7 @@ onMounted(() => void load())
 
 <template>
   <!-- ================= 任务工作台 ================= -->
-  <div v-if="task && taskId" class="pv-page">
+  <div v-if="task && taskId" class="page">
     <div class="pv-head panel">
       <button class="pv-back" type="button" @click="router.push('/prep')">
         <AppIcon name="chevron-left" :size="15" />
@@ -388,7 +414,7 @@ onMounted(() => void load())
         <span class="tag" :class="canFinalize ? 'tag-green' : 'tag-blue'">进度 {{ submittedCount }}/{{ totalCount }}</span>
         <span class="pv-identity">
           <span class="f-hint">当前身份</span>
-          <select v-model="activeName" class="f-select" style="width: 120px; height: 34px">
+          <select v-model="activeName" class="f-select">
             <option v-for="m in task.members" :key="m.name" :value="m.name">{{ m.name }}</option>
           </select>
         </span>
@@ -507,33 +533,16 @@ onMounted(() => void load())
 
   <!-- ================= 列表 ================= -->
   <div v-else-if="!taskId" class="page">
-    <div class="page-head">
-      <div>
-        <h2 style="font-size: 18px; font-weight: 700">集体备课</h2>
-        <p class="f-hint" style="margin-top: 4px">共备一份教案 / 课件，分工撰写、互相批注、版本对比、研讨定稿。</p>
-      </div>
-      <button class="btn btn-primary" @click="openCreate"><AppIcon name="plus" :size="15" /> 新建备课任务</button>
-    </div>
+    <AppPageHeader desc="共备一份教案 / 课件，分工撰写、互相批注、版本对比、研讨定稿。">
+      <template #actions>
+        <button class="btn btn-primary" @click="openCreate"><AppIcon name="plus" :size="15" /> 新建备课任务</button>
+      </template>
+    </AppPageHeader>
+
+    <AppFilterPanel :model-value="prepFilterModel" :rows="PREP_FILTER_ROWS" @update:model-value="onPrepFilterChange" />
 
     <div class="panel">
-      <div class="filter-bar">
-        <span class="filter-label">学科</span>
-        <select v-model="filter.subject" class="f-select" style="width: 118px">
-          <option value="">全部</option>
-          <option v-for="s in subjects" :key="s" :value="s">{{ s }}</option>
-        </select>
-        <span class="filter-label">年级</span>
-        <select v-model="filter.grade" class="f-select" style="width: 118px">
-          <option value="">全部</option>
-          <option v-for="g in grades" :key="g" :value="g">{{ g }}</option>
-        </select>
-        <span class="filter-label">状态</span>
-        <select v-model="filter.status" class="f-select" style="width: 118px">
-          <option value="">全部</option>
-          <option v-for="(t, k) in PREP_TASK_STATUS_TEXT" :key="k" :value="k">{{ t }}</option>
-        </select>
-        <input v-model="filter.keyword" class="f-input" placeholder="名称 / 课题" style="width: 190px" />
-      </div>
+      <AppListToolbar v-model="filter.keyword" placeholder="名称 / 课题" class="pv-toolbar" />
 
       <div class="pv-grid">
         <div v-for="row in rows" :key="row.id" class="pv-card">
@@ -560,7 +569,7 @@ onMounted(() => void load())
           </div>
         </div>
       </div>
-      <p v-if="!rows.length" class="f-hint" style="padding: 30px; text-align: center">
+      <p v-if="!rows.length" class="empty-row">
         {{ loading ? '正在载入…' : '暂无备课任务，点击右上角新建' }}
       </p>
       <AppPagination :total="filtered.length" v-model:page="page" :page-size="9" />
@@ -642,7 +651,7 @@ onMounted(() => void load())
             <span class="pv-avatar sm">{{ r.name.slice(0, 1) }}</span>
             <b>{{ r.name }}</b>
           </label>
-          <select v-model="r.duty" class="f-select" :disabled="!r.checked" style="flex: 1">
+          <select v-model="r.duty" class="f-select" :disabled="!r.checked">
             <option value="">选择分工</option>
             <option v-for="d in DUTY_OPTIONS" :key="d" :value="d">{{ d }}</option>
           </select>
@@ -655,11 +664,10 @@ onMounted(() => void load())
     </AppModal>
   </div>
 
-  <div v-else class="panel" style="padding: 40px; text-align: center; color: var(--sub)">正在载入任务…</div>
+  <p v-else class="panel empty-row">正在载入任务…</p>
 </template>
 
 <style scoped>
-.pv-page { display: flex; flex-direction: column; gap: 12px; }
 .pv-head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; }
 .pv-back {
   width: 34px; height: 34px; flex-shrink: 0;
@@ -672,6 +680,8 @@ onMounted(() => void load())
 .pv-head-main h2 { font-size: 16.5px; font-weight: 700; }
 .pv-head-ops { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex-shrink: 0; }
 .pv-identity { display: inline-flex; align-items: center; gap: 6px; }
+/* .f-select 全局是 width:100%，放进横向工具条里必须就地收窄 */
+.pv-identity .f-select { width: auto; min-width: 110px; flex-shrink: 0; height: var(--ctrl-h); }
 
 .pv-body { display: grid; grid-template-columns: 268px minmax(0, 1fr) 320px; gap: 12px; align-items: start; }
 
@@ -690,7 +700,7 @@ onMounted(() => void load())
 .pv-content { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .pv-content-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .pv-version-save { display: flex; gap: 8px; align-items: center; }
-.pv-version-save .f-input { flex: 1; }
+.pv-version-save .f-input { flex: 1; min-width: 0; height: var(--ctrl-h); }
 
 .pv-side { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 0; max-height: calc(100vh - 150px); overflow-y: auto; }
 .pv-discuss { padding: 14px; }
@@ -711,7 +721,8 @@ onMounted(() => void load())
 .pv-ver-head em { margin-left: auto; font-style: normal; font-size: 11px; color: var(--sub); }
 
 /* 列表 */
-.pv-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 16px; }
+.pv-toolbar { padding: 14px 16px 0; margin-bottom: 0; }
+.pv-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 14px 16px 4px; }
 .pv-card {
   border: 1.5px solid var(--border); border-radius: 12px;
   padding: 14px; display: flex; flex-direction: column; gap: 8px;
@@ -728,6 +739,7 @@ onMounted(() => void load())
 
 .pv-member-pick { display: flex; flex-direction: column; gap: 8px; max-height: 240px; overflow-y: auto; }
 .pv-pick-row { display: flex; align-items: center; gap: 10px; }
+.pv-pick-row .f-select { flex: 1; min-width: 0; height: var(--ctrl-h); }
 .pv-pick-check { display: flex; align-items: center; gap: 7px; width: 110px; flex-shrink: 0; }
 .pv-pick-check input { accent-color: var(--brand); }
 </style>

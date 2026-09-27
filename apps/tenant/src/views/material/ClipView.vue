@@ -6,7 +6,7 @@
  * 关联题目走抽屉。顶部可按知识点/关键字跨视频检索切片。
  */
 import { computed, onMounted, reactive, ref } from 'vue'
-import { AppIcon, showToast, truncateRich } from '@aiteach/shared'
+import { AppIcon, AppListToolbar, AppPageHeader, AppSearchInput, showToast, truncateRich } from '@aiteach/shared'
 import type { OrgMedia, OrgQuestion, VideoClip } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppDrawer from '@/components/ui/AppDrawer.vue'
@@ -238,26 +238,20 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="page clip-page">
-    <div class="page-head">
-      <div>
-        <h2 style="font-size: 18px; font-weight: 700">微课与视频切片</h2>
-        <p class="f-hint" style="margin-top: 4px">
-          在一条视频上按时间打点，标注知识点并关联题目，切片可作为课前预习 / 课堂素材复用。
-        </p>
-      </div>
-      <div class="op-group">
-        <input v-model="clipSearch.keyword" class="f-input" placeholder="检索切片标题 / 备注" style="width: 180px" />
-        <input v-model="clipSearch.knowledge" class="f-input" placeholder="知识点" style="width: 130px" />
+  <div class="page">
+    <AppPageHeader desc="在一条视频上按时间打点，标注知识点并关联题目，切片可作为课前预习 / 课堂素材复用。">
+      <template #actions>
+        <AppSearchInput v-model="clipSearch.keyword" placeholder="检索切片标题 / 备注" :width="200" />
+        <AppSearchInput v-model="clipSearch.knowledge" placeholder="知识点" :width="150" />
         <span v-if="searchActive" class="f-hint">命中 {{ searchResult.length }} 条</span>
-      </div>
-    </div>
+      </template>
+    </AppPageHeader>
 
     <div class="clip-body">
       <!-- 左：视频列表 -->
       <aside class="panel clip-videos">
         <div class="section-title" style="margin-bottom: 10px">视频资源（{{ videos.length }}）</div>
-        <p v-if="!videos.length" class="f-hint" style="padding: 16px; text-align: center">暂无视频资源</p>
+        <p v-if="!videos.length" class="empty-row">暂无视频资源</p>
         <div
           v-for="v in videos"
           :key="v.id"
@@ -306,7 +300,7 @@ onMounted(load)
         <!-- 跨视频检索结果 -->
         <div v-if="searchActive" class="panel clip-list">
           <div class="section-title" style="margin-bottom: 10px">跨视频检索结果（{{ searchResult.length }}）</div>
-          <p v-if="!searchResult.length" class="f-hint" style="padding: 16px; text-align: center">没有匹配的切片</p>
+          <p v-if="!searchResult.length" class="empty-row">没有匹配的切片</p>
           <div v-for="c in searchResult" :key="c.id" class="cl-row" @click="c.mediaId && selectVideo(c.mediaId)">
             <div class="cl-head">
               <b>{{ c.title }}</b>
@@ -321,8 +315,8 @@ onMounted(load)
           <div class="section-title" style="margin-bottom: 10px">
             切片列表（{{ clips.length }}）<template v-if="selectedVideo"> · {{ selectedVideo.name }}</template>
           </div>
-          <p v-if="!selectedVideo" class="f-hint" style="padding: 16px; text-align: center">请选择左侧视频</p>
-          <p v-else-if="!clips.length" class="f-hint" style="padding: 16px; text-align: center">该视频暂无切片，点上方「新建切片」</p>
+          <p v-if="!selectedVideo" class="empty-row">请选择左侧视频</p>
+          <p v-else-if="!clips.length" class="empty-row">该视频暂无切片，点上方「新建切片」</p>
           <div v-for="c in clips" :key="c.id" class="cl-row">
             <span class="cl-bar" :style="{ background: colorOf(c) }" />
             <div class="cl-main">
@@ -379,17 +373,18 @@ onMounted(load)
 
     <!-- 关联题目 -->
     <AppDrawer v-if="linkOpen" :title="`关联题目 · ${linkClip?.title ?? ''}`" :width="620" @close="linkOpen = false">
-      <div class="f-field row3">
-        <select v-model="bankFilter.type" class="f-select">
-          <option value="">全部题型</option>
-          <option v-for="t in ['单选题', '多选题', '判断题', '填空题', '解答题']" :key="t" :value="t">{{ t }}</option>
-        </select>
-        <select v-model="bankFilter.difficulty" class="f-select">
-          <option value="">全部难度</option>
-          <option v-for="d in ['容易', '较易', '中等', '较难', '困难']" :key="d" :value="d">{{ d }}</option>
-        </select>
-        <input v-model="bankFilter.keyword" class="f-input" placeholder="搜索题干" />
-      </div>
+      <AppListToolbar v-model="bankFilter.keyword" placeholder="搜索题干">
+        <template #left>
+          <select v-model="bankFilter.type" class="f-select">
+            <option value="">全部题型</option>
+            <option v-for="t in ['单选题', '多选题', '判断题', '填空题', '解答题']" :key="t" :value="t">{{ t }}</option>
+          </select>
+          <select v-model="bankFilter.difficulty" class="f-select">
+            <option value="">全部难度</option>
+            <option v-for="d in ['容易', '较易', '中等', '较难', '困难']" :key="d" :value="d">{{ d }}</option>
+          </select>
+        </template>
+      </AppListToolbar>
       <p class="f-hint" style="margin-bottom: 8px">已选 {{ linkSelected.length }} 题</p>
       <div class="link-list">
         <div v-for="row in bankPool" :key="row.id" class="link-card" :class="{ on: linkSelected.includes(row.id) }">
@@ -399,7 +394,7 @@ onMounted(load)
           </label>
           <span class="f-hint">{{ row.type }} · {{ row.difficulty }}</span>
         </div>
-        <p v-if="!bankPool.length" class="f-hint" style="padding: 16px; text-align: center">题库暂无匹配题目</p>
+        <p v-if="!bankPool.length" class="empty-row">题库暂无匹配题目</p>
       </div>
       <template #footer>
         <button class="btn btn-ghost" @click="linkOpen = false">取消</button>
@@ -421,7 +416,7 @@ onMounted(load)
 .cv-row.on { border-color: var(--brand); background: var(--brand-soft); }
 .cv-thumb {
   width: 40px; height: 40px; flex-shrink: 0; border-radius: 9px;
-  background: linear-gradient(135deg, #4f6ef7, #6a5df0); color: #fff;
+  background: var(--brand-grad); color: #fff;
   display: flex; align-items: center; justify-content: center;
 }
 .cv-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -463,7 +458,6 @@ onMounted(load)
 .cl-meta { font-size: 12px; color: var(--sub); margin-top: 4px; }
 
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 
 .link-list { display: flex; flex-direction: column; gap: 8px; }
 .link-card {

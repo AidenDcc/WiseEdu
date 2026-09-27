@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { AppIcon, showToast, ApiError, ADMIN_ROLE_TEXT } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, ApiError, ADMIN_ROLE_TEXT } from '@aiteach/shared'
 import type { AdminAccount, AdminRole } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
@@ -81,62 +81,65 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="panel">
-    <div class="filter-bar">
-      <span class="filter-label">平台端管理员账号；最后一个超级管理员不可停用 / 删除（服务端强校验）</span>
-      <button class="btn btn-primary btn-sm" style="margin-left: auto" @click="openCreate">
-        <AppIcon name="plus" :size="15" /> 新增账号
-      </button>
-    </div>
+  <div>
+    <AppPageHeader desc="平台端管理员账号；最后一个超级管理员不可停用 / 删除（服务端强校验）">
+      <template #actions>
+        <button class="btn btn-primary btn-sm" @click="openCreate">
+          <AppIcon name="plus" :size="15" /> 新增账号
+        </button>
+      </template>
+    </AppPageHeader>
 
-    <div class="data-table-wrap">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>账号</th>
-            <th>姓名</th>
-            <th>角色</th>
-            <th>最近登录</th>
-            <th>状态</th>
-            <th style="width: 220px">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="loading && list.length === 0">
-            <td colspan="6" class="empty-row">加载中…</td>
-          </tr>
-          <tr v-else-if="list.length === 0">
-            <td colspan="6" class="empty-row">暂无账号</td>
-          </tr>
-          <template v-else>
-            <tr v-for="item in list" :key="item.id">
-              <td class="cell-strong"><code class="account-chip">{{ item.account }}</code></td>
-              <td>{{ item.name }}</td>
-              <td>
-                <span class="tag" :class="item.role === 'super' ? 'tag-blue' : 'tag-gray'">
-                  {{ ADMIN_ROLE_TEXT[item.role] }}
-                </span>
-              </td>
-              <td class="time-cell">{{ item.lastLoginAt }}</td>
-              <td><AppSwitch :model-value="item.enabled" @update:model-value="onToggle(item)" /></td>
-              <td>
-                <div class="op-group">
-                  <button class="mini-btn" type="button" @click="onResetPassword(item)">重置密码</button>
-                  <button
-                    v-if="item.enabled"
-                    class="mini-btn danger"
-                    type="button"
-                    @click="onToggle(item)"
-                  >
-                    停用
-                  </button>
-                  <button v-else class="mini-btn" type="button" @click="onToggle(item)">启用</button>
-                </div>
-              </td>
+    <div class="panel">
+      <div class="data-table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>账号</th>
+              <th>姓名</th>
+              <th>角色</th>
+              <th>最近登录</th>
+              <th>状态</th>
+              <th style="width: 220px">操作</th>
             </tr>
-          </template>
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            <tr v-if="loading && list.length === 0">
+              <td colspan="6" class="empty-row">加载中…</td>
+            </tr>
+            <tr v-else-if="list.length === 0">
+              <td colspan="6" class="empty-row">暂无账号</td>
+            </tr>
+            <template v-else>
+              <tr v-for="item in list" :key="item.id">
+                <td class="cell-strong"><code class="account-chip">{{ item.account }}</code></td>
+                <td>{{ item.name }}</td>
+                <td>
+                  <span class="tag" :class="item.role === 'super' ? 'tag-blue' : 'tag-gray'">
+                    {{ ADMIN_ROLE_TEXT[item.role] }}
+                  </span>
+                </td>
+                <td class="time-cell">{{ item.lastLoginAt }}</td>
+                <td><AppSwitch :model-value="item.enabled" @update:model-value="onToggle(item)" /></td>
+                <td>
+                  <div class="op-group">
+                    <button class="mini-btn" type="button" @click="onResetPassword(item)">重置密码</button>
+                    <button
+                      v-if="item.enabled"
+                      class="mini-btn danger"
+                      type="button"
+                      @click="onToggle(item)"
+                    >
+                      停用
+                    </button>
+                    <button v-else class="mini-btn" type="button" @click="onToggle(item)">启用</button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
     </div>
 
     <!-- 新增弹窗 -->

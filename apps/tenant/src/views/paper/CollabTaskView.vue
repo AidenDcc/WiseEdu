@@ -343,7 +343,7 @@ onMounted(async () => {
         </span>
         <span class="ct-identity">
           <span class="f-hint">当前身份</span>
-          <select v-model="activeName" class="f-select" style="width: 132px; height: 34px">
+          <select v-model="activeName" class="f-select">
             <option v-for="member in task.members" :key="member.name" :value="member.name">
               {{ member.name }}
             </option>
@@ -679,6 +679,8 @@ onMounted(async () => {
 .ct-head-main h2 { font-size: 16.5px; font-weight: 700; }
 .ct-head-ops { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex-shrink: 0; }
 .ct-identity { display: inline-flex; align-items: center; gap: 6px; }
+/* 自写横向工具条里的下拉：全局 .f-select 是 width:100%，会把这一行撑满（见规范第 4 条） */
+.ct-identity .f-select { width: auto; min-width: 132px; height: var(--ctrl-h); flex-shrink: 0; }
 
 .ct-req { padding: 14px 16px; }
 .ct-req-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 12px; }
@@ -706,10 +708,16 @@ onMounted(async () => {
 .ct-pool { padding: 14px; display: flex; flex-direction: column; position: sticky; top: 0; max-height: calc(100vh - 150px); }
 .ct-pool-head { margin-bottom: 10px; }
 .ct-my-progress { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+/* 横向居中的行里，f-hint 自带的 5px 上边距会把文字顶歪 */
+.ct-my-progress .f-hint,
+.ct-section-head .f-hint,
+.ct-q-ops .f-hint,
+.ct-pool-foot .f-hint,
+.ct-paper-head .f-hint { margin-top: 0; }
 .ct-pool-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
 .ct-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-2); margin: 8px 0; }
 .ct-check input { accent-color: var(--brand); }
-.ct-pool-ops { display: flex; gap: 8px; margin-bottom: 10px; }
+.ct-pool-ops { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .ct-pool-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
 .ct-pool-card {
   border: 1.5px solid var(--border); border-radius: 10px; padding: 9px 11px;
@@ -721,8 +729,9 @@ onMounted(async () => {
 .ct-pool-meta { display: flex; align-items: center; gap: 5px; margin-bottom: 5px; flex-wrap: wrap; }
 .ct-tick {
   width: 15px; height: 15px; border-radius: 4px; border: 1.5px solid var(--border);
-  font-style: normal; font-size: 11px; line-height: 13px; text-align: center;
+  font-style: normal; font-size: 11px;
   color: var(--brand-deep); flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
 }
 .ct-pool-card.on .ct-tick { border-color: var(--brand); background: var(--brand); color: #fff; }
 .ct-pool-stem { font-size: 12.5px; color: var(--ink-2); line-height: 1.6; }
@@ -755,8 +764,10 @@ onMounted(async () => {
 
 /* 右侧 */
 .ct-side { display: flex; flex-direction: column; position: sticky; top: 0; max-height: calc(100vh - 150px); }
-.ct-tabs { display: flex; border-bottom: 1px solid var(--border); }
+/* 标签条：横向容器必须有 align-items，否则文字与下划线不居中（见规范第 4 条） */
+.ct-tabs { display: flex; align-items: center; border-bottom: 1px solid var(--border); }
 .ct-tabs button {
+  display: inline-flex; align-items: center; justify-content: center;
   flex: 1; border: none; background: transparent; font-size: 12.5px; color: var(--ink-2);
   padding: 11px 6px; border-bottom: 2px solid transparent;
 }

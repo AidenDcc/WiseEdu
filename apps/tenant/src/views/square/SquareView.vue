@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { AppIcon, showToast } from '@aiteach/shared'
-import type { SquareResource } from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, showToast } from '@aiteach/shared'
+import type { FilterRowDef, SquareResource } from '@aiteach/shared'
 import AppDrawer from '@/components/ui/AppDrawer.vue'
 import { collectSquare, downloadSquare, fetchSquare } from '@/api/org'
 import { useBaseData } from '@/composables/useBaseData'
@@ -19,7 +19,14 @@ const KIND_CLASS: Record<string, string> = {
   视频: 'tag-green',
 }
 
-const filter = reactive({ kind: '', subject: '', keyword: '' })
+/* 筛选条件行：类型 / 学科均互斥（原本是两个单选 <select>，「全部」由空值表示） */
+const FILTER_ROWS = computed<FilterRowDef[]>(() => [
+  { key: 'kind', label: '类型', options: KINDS, multiple: false },
+  { key: 'subject', label: '学科', options: subjects.value, multiple: false },
+])
+
+const filters = reactive<Record<string, string[]>>({ kind: [], subject: [] })
+const keyword = ref('')
 /** 「为你推荐」批次（换一批） */
 const batch = ref(0)
 
@@ -29,13 +36,15 @@ async function load() {
 }
 
 const filtered = computed(() => {
+  const kind = filters.kind[0] ?? ''
+  const subject = filters.subject[0] ?? ''
   let list = resources.value.filter(
     (row) =>
-      (!filter.kind || row.kind === filter.kind) &&
-      (!filter.subject || row.subject === filter.subject) &&
-      (!filter.keyword || row.title.includes(filter.keyword) || row.knowledge.includes(filter.keyword)),
+      (!kind || row.kind === kind) &&
+      (!subject || row.subject === subject) &&
+      (!keyword.value || row.title.includes(keyword.value) || row.knowledge.includes(keyword.value)),
   )
-  if (!filter.kind && !filter.subject && !filter.keyword) {
+  if (!kind && !subject && !keyword.value) {
     // 推荐流：按批次轮换起始位，模拟「换一批」
     const rotate = batch.value % Math.max(list.length, 1)
     list = [...list.slice(rotate), ...list.slice(0, rotate)]
@@ -73,31 +82,22 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <div class="page-head">
-      <h2>知识广场</h2>
-      <span class="f-hint">跨机构共享的优质资源 · 下载引用自动标注来源，尊重原创</span>
-      <button class="btn btn-ghost" style="margin-left: auto" @click="onRefresh">
-        <AppIcon name="sparkles" :size="15" /> 换一批
-      </button>
-    </div>
+    <AppPageHeader desc="跨机构共享的优质资源 · 下载引用自动标注来源，尊重原创">
+      <template #actions>
+        <button class="btn btn-ghost" @click="onRefresh">
+          <AppIcon name="sparkles" :size="15" /> 换一批
+        </button>
+      </template>
+    </AppPageHeader>
+
+    <AppFilterPanel v-model="filters" :rows="FILTER_ROWS" />
 
     <div class="panel">
-      <div class="filter-bar">
-        <span class="filter-label">类型</span>
-        <select v-model="filter.kind" class="f-select">
-          <option value="">全部</option>
-          <option v-for="k in KINDS" :key="k">{{ k }}</option>
-        </select>
-        <span class="filter-label">学科</span>
-        <select v-model="filter.subject" class="f-select">
-          <option value="">全部</option>
-          <option v-for="s in subjects" :key="s" :value="s">{{ s }}</option>
-        </select>
-        <input v-model="filter.keyword" class="f-input" placeholder="搜索标题 / 知识点" style="width: 220px" />
+      <div class="list-head">
+        <AppListToolbar v-model="keyword" placeholder="搜索标题 / 知识点" :search-width="220" />
       </div>
 
-      <div class="square-grid">
-        <p v-if="filtered.length === 0" class="f-hint" style="grid-column: 1 / -1; text-align: center; padding: 30px">无匹配资源</p>
+      <div v-if="filtered.length" class="square-grid">
         <div v-for="row in filtered" :key="row.id" class="square-card" @click="openDetail(row)">
           <div class="sc-top">
             <span class="tag" :class="KIND_CLASS[row.kind]">{{ row.kind }}</span>
@@ -122,22 +122,23 @@ onMounted(load)
           </div>
         </div>
       </div>
+      <p v-else class="empty-row">无匹配资源</p>
     </div>
 
     <!-- 详情 -->
     <AppDrawer v-if="detail" :title="detail.title" :subtitle="`${detail.org} · ${detail.sharer} 分享`" :width="480" @close="detail = null">
       <div class="detail-grid">
         <div class="detail-item">
-          <span class="d-label">类型</span>
-          <span class="d-value"><span class="tag" :class="KIND_CLASS[detail.kind]">{{ detail.kind }}</span></span>
+          <div class="d-label">类型</div>
+          <div class="d-value"><span class="tag" :class="KIND_CLASS[detail.kind]">{{ detail.kind }}</span></div>
         </div>
         <div class="detail-item">
-          <span class="d-label">学科 / 知识点</span>
-          <span class="d-value">{{ detail.subject }} · {{ detail.knowledge }}</span>
+          <div class="d-label">学科 / 知识点</div>
+          <div class="d-value">{{ detail.subject }} · {{ detail.knowledge }}</div>
         </div>
         <div class="detail-item">
-          <span class="d-label">收藏 / 下载</span>
-          <span class="d-value">{{ detail.collects }} 次 / {{ detail.downloads }} 次</span>
+          <div class="d-label">收藏 / 下载</div>
+          <div class="d-value">{{ detail.collects }} 次 / {{ detail.downloads }} 次</div>
         </div>
       </div>
       <p class="detail-desc">{{ detail.desc }}</p>
@@ -155,14 +156,21 @@ onMounted(load)
 </template>
 
 <style scoped>
-.square-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; padding: 4px 2px 8px; }
+/* 工具条嵌在面板顶部，卡片网格保持满幅内边距 */
+.list-head { padding: 14px 18px 0; }
+.square-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; padding: 14px 18px 16px; }
 .square-card {
   border: 1.5px solid var(--border); border-radius: 12px; padding: 13px 15px;
   background: #fff; cursor: pointer; transition: border-color 0.15s, transform 0.15s;
 }
 .square-card:hover { border-color: var(--brand); transform: translateY(-2px); }
 .sc-top { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
-.star-btn { border: none; background: transparent; color: #c6cfd8; display: flex; margin-left: auto; padding: 2px; }
+/* 纯图标按钮：撑成不小于 22×22 的命中区，图标在其中居中 */
+.star-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; flex-shrink: 0; margin-left: auto;
+  border: none; border-radius: 6px; background: transparent; color: #c6cfd8; padding: 0;
+}
 .star-btn.on { color: #f0a23c; }
 .sc-title { font-size: 14.5px; font-weight: 600; color: var(--ink); margin-bottom: 6px; }
 .sc-desc { font-size: 12.5px; color: var(--sub); line-height: 1.6; margin-bottom: 10px; min-height: 40px; }

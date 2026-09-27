@@ -96,8 +96,12 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
   overflow-y: auto;
   padding: 20px 24px;
 }
+/* 与 .modal-foot 一致靠右：全仓抽屉的按钮顺序都是「取消(ghost) → 主操作」，
+   即主操作在右。此前缺 justify-content，按钮贴在左边，同一个「取消/确定」在
+   弹窗里靠右、在抽屉里靠左。 */
 .drawer-foot {
   display: flex;
+  justify-content: flex-end;
   gap: 10px;
   padding: 14px 24px 20px;
   border-top: 1px solid var(--border);

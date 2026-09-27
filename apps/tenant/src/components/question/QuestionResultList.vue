@@ -3,11 +3,17 @@
  * AI 生成结果列表：按题库管理「详细」列表的卡片样式逐题展示
  * （标签行 / 题干 / 选项高亮 / 答案与解析 / 操作行）。
  *
- * 为什么复刻题库那张卡片、而不是抽成公共组件：题库卡片里的编号、状态标签、组卷篮、解析折叠
- * 都依赖 OrgQuestion（status / useCount / updatedAt / variantOf），而生成结果只有
+ * 为什么复用题库那套卡片外观、而不是抽成一个公共组件：题库卡片里的编号、状态标签、组卷篮、
+ * 解析折叠都依赖 OrgQuestion（status / useCount / updatedAt / variantOf），而生成结果只有
  * GeneratedQuestion（stem / options / answer / analysis / knowledge / difficulty），
  * 另外还多了质检结论与「已转入手动编辑」这类对方没有的状态 —— 抽成公共组件要挂一堆可选字段与插槽，
- * 两边都更难读。仓库既有做法就是各页 scoped 复制（见 BankView 的 .opt-chip、CreateView 的 .p-chip 注释）。
+ * 两边都更难读。所以**共用的是逻辑与样式规则，不是组件**：
+ * - 判定逻辑（answerLetters / difficultyClass / needsFigure）收敛在 `@/utils/question-card`，
+ *   与 BankView 同一份实现，改一处两边都生效；
+ * - 卡片外观沿用题库列表的 `.q-card` / `.qc-*` 类（同一套设计令牌，两端一致）；
+ * - 页面骨架（筛选面板 / 工具条 / 分段控件 / 分页）一律用 `@aiteach/shared` 的
+ *   AppFilterPanel / AppListToolbar / AppSegmented / 各页自己的 AppPagination，
+ *   不再各页 scoped 复制（原先 `.opt-chip` 在 BankView、`.p-chip` 在 CreateView 各写一份）。
  *
  * 与题库卡片的两点不同：
  * - 答案与解析默认展开：本列表的主任务是「看答案 → 决定采纳」，折起来等于多一次点击；
@@ -17,9 +23,10 @@
  * 采纳态 / 转入手动态 / 质检结论一律按**题目 id** 索引，不用下标 —— 丢弃中间一题时下标会整体错位，
  * 采纳标记与质检标签就会挂到别的题上。
  */
-import { AppIcon, RichTextViewer, hasImage, toPlainText } from '@aiteach/shared'
+import { AppIcon, RichTextViewer } from '@aiteach/shared'
 import type { GeneratedQuestion } from '@aiteach/shared'
 import type { VerifyIssue } from '@/api/ai-verify'
+import { answerLetters, difficultyClass, needsFigure } from '@/utils/question-card'
 
 const props = defineProps<{
   list: GeneratedQuestion[]
@@ -42,23 +49,8 @@ const emit = defineEmits<{
   discard: [id: string]
 }>()
 
-/** 客观题答案字母（选择题高亮正确项），与题库列表同一算法 */
-function answerLetters(item: GeneratedQuestion): string[] {
-  return item.options.length > 0 ? [...new Set(item.answer.toUpperCase().replace(/[^A-F]/g, '').split(''))] : []
-}
-
-/** 难度标签配色，与题库列表一致 */
-function difficultyClass(difficulty: string): string {
-  if (difficulty === '困难' || difficulty === '较难') return 'tag-red'
-  return difficulty === '中等' ? 'tag-orange' : 'tag-green'
-}
-
-/** 图形占位框：题干提到配图、且题内确实没有嵌入图片时才显示 */
-function needsFigure(item: GeneratedQuestion): boolean {
-  if (hasImage(item.stem)) return false
-  const text = toPlainText(item.stem)
-  return text.includes('如图') || text.includes('图）')
-}
+/* answerLetters / difficultyClass / needsFigure 见 @/utils/question-card
+   （与题库管理 BankView 共用同一份实现） */
 
 function issueOf(id: string): VerifyIssue | null {
   return props.issues[id] ?? null
@@ -204,4 +196,6 @@ function issueOf(id: string): VerifyIssue | null {
   border-top: 1px dashed var(--border);
   padding-top: 10px;
 }
+/* .f-hint 自带 5px 上边距（给纵向表单用的），在横向居中的操作行里会把文字顶歪 */
+.qc-ops .f-hint { margin-top: 0; }
 </style>
