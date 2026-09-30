@@ -59,7 +59,26 @@ export const menus: MenuItem[] = [
     children: [
       { path: '/exam/grading', title: '在线阅卷' },
       { path: '/exam/analysis', title: '试卷分析' },
+      { path: '/exam/profile', title: '学情画像' },
       { path: '/exam/mistake', title: '错题本' },
+    ],
+  },
+  {
+    path: '/student',
+    title: '班级学生',
+    icon: 'users',
+    children: [
+      { path: '/student/class', title: '班级管理' },
+      { path: '/student/archive', title: '学生档案' },
+    ],
+  },
+  {
+    path: '/ai-center',
+    title: 'AI 能力中心',
+    icon: 'cpu',
+    children: [
+      { path: '/ai-center/workbench', title: 'AI 工作台' },
+      { path: '/ai-center/review', title: 'AI 内容复核' },
     ],
   },
   { path: '/prep', title: '集体备课', icon: 'teamwork' },
@@ -108,6 +127,7 @@ export const menus: MenuItem[] = [
       { path: '/org/campus', title: '校区管理' },
       { path: '/org/logs', title: '日志管理' },
       { path: '/org/notify', title: '通知配置' },
+      { path: '/org/settings', title: '机构设置' },
     ],
   },
 ]

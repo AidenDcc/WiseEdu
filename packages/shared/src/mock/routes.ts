@@ -5,6 +5,8 @@ import { mockUsers, adminOverview, tenantOverview } from './data'
 import * as store from './tenant-store'
 import * as admin from './admin-store'
 import * as org from './org-store'
+import * as student from './student-store'
+import * as content from './content-store'
 import type { DictTypeKey, FeatureSwitches, PackageRecord, TenantRecord } from '../api/models'
 import type { SessionUser, MockUser } from './types'
 
@@ -190,9 +192,23 @@ const orgRoutes: MockRoute[] = [
   { method: 'GET', path: '/tenant/folders', handler: () => guard(() => org.folders) },
   { method: 'POST', path: '/tenant/folders/save', handler: ({ body }) => guard(() => org.saveFolder(body as never)) },
   { method: 'POST', path: '/tenant/folders/delete', handler: ({ body }) => guard(() => ({ moved: org.deleteFolder(Number(body.id)) })) },
+  { method: 'POST', path: '/tenant/folders/move', handler: ({ body }) => guard(() => org.moveFolder(Number(body.id), Number(body.targetId))) },
+  { method: 'POST', path: '/tenant/folders/pin', handler: ({ body }) => guard(() => org.setFolderPinned(Number(body.id), Boolean(body.pinned))) },
   { method: 'GET', path: '/tenant/files', handler: () => guard(() => ({ list: org.orgFiles, usage: org.storageUsage })) },
   { method: 'POST', path: '/tenant/files/upload', handler: ({ body }) => guard(() => org.uploadFiles(body.names as string[], Number(body.folderId ?? 0), body.sizes as number[] | undefined)) },
-  { method: 'POST', path: '/tenant/files/delete', handler: ({ body }) => guard(() => { org.deleteFile(Number(body.id)); return null }) },
+  { method: 'POST', path: '/tenant/files/create', handler: ({ body }) => guard(() => org.createFile({ name: String(body.name ?? ''), kind: (body.kind ?? 'doc') as never, folderId: Number(body.folderId ?? 0) })) },
+  { method: 'POST', path: '/tenant/files/rename', handler: ({ body }) => guard(() => org.renameFile(Number(body.id), String(body.name ?? ''))) },
+  { method: 'POST', path: '/tenant/files/move', handler: ({ body }) => guard(() => ({ moved: org.moveFiles(body.ids as number[], Number(body.targetId)) })) },
+  { method: 'POST', path: '/tenant/files/copy', handler: ({ body }) => guard(() => ({ copied: org.copyFiles(body.ids as number[], Number(body.targetId)).length })) },
+  { method: 'POST', path: '/tenant/files/duplicate', handler: ({ body }) => guard(() => org.duplicateFile(Number(body.id))) },
+  { method: 'POST', path: '/tenant/files/pin', handler: ({ body }) => guard(() => org.setFilePinned(Number(body.id), Boolean(body.pinned))) },
+  { method: 'POST', path: '/tenant/files/convert-courseware', handler: ({ body }) => guard(() => org.convertToCourseware(Number(body.id))) },
+  { method: 'POST', path: '/tenant/files/delete', handler: ({ body }) => guard(() => {
+    /* 兼容单个删除（id）与批量删除（ids）两种调用 */
+    const ids = body.ids != null ? (body.ids as number[]) : [Number(body.id)]
+    org.deleteFiles(ids)
+    return null
+  }) },
   { method: 'POST', path: '/tenant/files/recognize', handler: ({ body }) => guard(() => org.recognizeFile(Number(body.id))) },
   { method: 'POST', path: '/tenant/files/import-recognized', handler: ({ body }) => guard(() => org.importRecognizedFile(Number(body.id), { makePaper: Boolean(body.makePaper), paperName: String(body.paperName ?? ''), questions: body.questions as never })) },
 
@@ -732,6 +748,78 @@ export const mockRoutes: MockRoute[] = [
   },
   /* ================= 机构端业务（FR-TM / FR-PP / FR-JC / FR-FL / FR-FX / FR-PM / FR-SQ / FR-OS / FR-GN-030） ================= */
   ...orgRoutes,
+
+  /* ================= 机构端 · 班级与学生管理（T-08） ================= */
+  { method: 'GET', path: '/tenant/students/classes', handler: () => guard(() => student.classes) },
+  { method: 'POST', path: '/tenant/students/classes/save', handler: ({ body }) => guard(() => student.saveClass(body as never)) },
+  { method: 'POST', path: '/tenant/students/classes/toggle', handler: ({ body }) => guard(() => student.toggleClass(Number(body.id))) },
+  { method: 'GET', path: '/tenant/students', handler: ({ query }) => guard(() => student.listStudents(String(query.keyword ?? ''), String(query.className ?? ''))) },
+  { method: 'GET', path: '/tenant/students/detail', handler: ({ query }) => guard(() => student.getStudent(Number(query.id))) },
+  { method: 'POST', path: '/tenant/students/save', handler: ({ body }) => guard(() => student.saveStudent(body as never)) },
+  { method: 'POST', path: '/tenant/students/delete', handler: ({ body }) => guard(() => { student.deleteStudent(Number(body.id)); return null }) },
+  { method: 'GET', path: '/tenant/students/consents', handler: ({ query }) => guard(() => student.listConsents(String(query.keyword ?? ''))) },
+  { method: 'POST', path: '/tenant/students/consents/sign', handler: ({ body }) => guard(() => student.signConsent(Number(body.id), body.scopes as string[])) },
+  { method: 'POST', path: '/tenant/students/consents/withdraw', handler: ({ body }) => guard(() => student.withdrawConsent(Number(body.id))) },
+
+  /* ================= 机构端 · AI 学情画像（T-07-08 ~ 10） ================= */
+  { method: 'GET', path: '/tenant/profile/student', handler: ({ query }) => guard(() => student.getStudentProfile(Number(query.studentId))) },
+  { method: 'GET', path: '/tenant/profile/class', handler: ({ query }) => guard(() => student.getClassProfileReport(String(query.className))) },
+  { method: 'POST', path: '/tenant/profile/push', handler: ({ body }) => guard(() => student.pushPractice(Number(body.studentId), String(body.knowledge), Number(body.count ?? 8))) },
+  { method: 'GET', path: '/tenant/profile/pushes', handler: ({ query }) => guard(() => student.listPushes(Number(query.studentId))) },
+
+  /* ================= 机构端 · AI 能力中心（T-10） ================= */
+  { method: 'GET', path: '/tenant/ai-center/capabilities', handler: () => guard(() => student.AI_CAPABILITIES) },
+  { method: 'GET', path: '/tenant/ai-center/tasks', handler: ({ query }) => guard(() => student.listAiTasks(String(query.scene ?? ''))) },
+  { method: 'POST', path: '/tenant/ai-center/tasks/cancel', handler: ({ body }) => guard(() => { student.cancelAiTask(Number(body.id)); return null }) },
+  { method: 'GET', path: '/tenant/ai-center/artifacts', handler: ({ query }) => guard(() => student.listAiArtifacts(String(query.status ?? ''))) },
+  { method: 'POST', path: '/tenant/ai-center/artifacts/review', handler: ({ body }) => guard(() => student.reviewAiArtifact(Number(body.id), Boolean(body.pass))) },
+  { method: 'GET', path: '/tenant/ai-center/overview', handler: () => guard(() => student.studentOverview()) },
+
+  /* ================= 机构端 · 系统设置（T-11） ================= */
+  { method: 'GET', path: '/tenant/settings', handler: () => guard(() => student.orgSettings) },
+  { method: 'POST', path: '/tenant/settings/save', handler: ({ body }) => guard(() => student.saveOrgSettings(body as never)) },
+  { method: 'GET', path: '/tenant/settings/review-flows', handler: () => guard(() => student.reviewFlows) },
+  { method: 'POST', path: '/tenant/settings/review-flows/save', handler: ({ body }) => guard(() => student.saveReviewFlow(String(body.key) as never, body as never)) },
+
+  /* ================= 平台端 · 全局内容运营（P-03） ================= */
+  { method: 'GET', path: '/admin/platform/questions', handler: ({ query }) => guard(() => content.listPlatformQuestions(String(query.keyword ?? ''), String(query.subject ?? ''), String(query.status ?? ''))) },
+  { method: 'POST', path: '/admin/platform/questions/review', handler: ({ body }) => guard(() => content.reviewPlatformQuestion(Number(body.id), Boolean(body.pass))) },
+  { method: 'POST', path: '/admin/platform/questions/toggle', handler: ({ body }) => guard(() => content.togglePlatformQuestion(Number(body.id))) },
+  { method: 'GET', path: '/admin/platform/papers', handler: ({ query }) => guard(() => content.listPlatformPapers(String(query.keyword ?? ''), String(query.subject ?? ''))) },
+  { method: 'POST', path: '/admin/platform/papers/review', handler: ({ body }) => guard(() => content.reviewPlatformPaper(Number(body.id), Boolean(body.pass))) },
+  { method: 'GET', path: '/admin/content/distributions', handler: () => guard(() => content.listDistributions()) },
+  { method: 'POST', path: '/admin/content/distributions/create', handler: ({ body }) => guard(() => content.createDistribution(body as never)) },
+  { method: 'POST', path: '/admin/content/distributions/toggle', handler: ({ body }) => guard(() => content.toggleDistribution(Number(body.id))) },
+  { method: 'GET', path: '/admin/content/spot-checks', handler: () => guard(() => content.listSpotChecks()) },
+  { method: 'POST', path: '/admin/content/spot-checks/create', handler: ({ body }) => guard(() => content.createSpotCheck(String(body.scope ?? ''), Number(body.sampleCount ?? 200))) },
+  { method: 'POST', path: '/admin/content/spot-checks/close', handler: ({ body }) => guard(() => content.closeSpotCheck(Number(body.id))) },
+  { method: 'GET', path: '/admin/content/tickets', handler: ({ query }) => guard(() => content.listFeedbackTickets(String(query.status ?? ''))) },
+  { method: 'POST', path: '/admin/content/tickets/handle', handler: ({ body }) => guard(() => content.handleTicket(Number(body.id), body.action as never, String(body.reply ?? ''))) },
+
+  /* ================= 平台端 · AI 安全治理与计费（P-05-10 ~ 14） ================= */
+  { method: 'GET', path: '/admin/ai-governance/policies', handler: () => guard(() => content.listSensitivePolicies()) },
+  { method: 'POST', path: '/admin/ai-governance/policies/save', handler: ({ body }) => guard(() => content.saveSensitivePolicy(body as never)) },
+  { method: 'POST', path: '/admin/ai-governance/policies/toggle', handler: ({ body }) => guard(() => content.toggleSensitivePolicy(Number(body.id))) },
+  { method: 'POST', path: '/admin/ai-governance/policies/delete', handler: ({ body }) => guard(() => { content.deleteSensitivePolicy(Number(body.id)); return null }) },
+  { method: 'GET', path: '/admin/ai-governance/evals', handler: () => guard(() => content.listQualityEvals()) },
+  { method: 'POST', path: '/admin/ai-governance/evals/run', handler: ({ body }) => guard(() => content.runQualityEval(String(body.scene ?? ''))) },
+  { method: 'GET', path: '/admin/ai-governance/traces', handler: ({ query }) => guard(() => content.listTraceRecords(String(query.scene ?? ''), String(query.safety ?? ''))) },
+  { method: 'GET', path: '/admin/ai-billing/rules', handler: () => guard(() => content.listBillingRules()) },
+  { method: 'POST', path: '/admin/ai-billing/rules/save', handler: ({ body }) => guard(() => content.saveBillingRule(Number(body.id), body as never)) },
+  { method: 'GET', path: '/admin/ai-billing/tenant-switches', handler: () => guard(() => content.listTenantAiSwitches()) },
+  { method: 'POST', path: '/admin/ai-billing/tenant-switches/toggle', handler: ({ body }) => guard(() => content.toggleTenantAiCapability(Number(body.tenantId), String(body.capKey))) },
+
+  /* ================= 平台端 · 系统监控与配置（P-06-06 / P-07-04 ~ 07） ================= */
+  { method: 'GET', path: '/admin/system/health', handler: () => guard(() => content.listServiceHealth()) },
+  { method: 'GET', path: '/admin/system/params', handler: () => guard(() => content.listSystemParams()) },
+  { method: 'POST', path: '/admin/system/params/save', handler: ({ body }) => guard(() => content.saveSystemParam(String(body.key), String(body.value))) },
+  { method: 'GET', path: '/admin/system/message-templates', handler: () => guard(() => content.listMessageTemplates()) },
+  { method: 'POST', path: '/admin/system/message-templates/save', handler: ({ body }) => guard(() => content.saveMessageTemplate(body as never)) },
+  { method: 'POST', path: '/admin/system/message-templates/toggle', handler: ({ body }) => guard(() => content.toggleMessageTemplate(Number(body.id))) },
+  { method: 'GET', path: '/admin/system/storage', handler: () => guard(() => content.listStoragePolicies()) },
+  { method: 'POST', path: '/admin/system/storage/save', handler: ({ body }) => guard(() => content.saveStoragePolicy(String(body.key), body as never)) },
+  { method: 'GET', path: '/admin/system/backups', handler: () => guard(() => content.listBackups()) },
+  { method: 'POST', path: '/admin/system/backups/create', handler: ({ body }) => guard(() => content.createBackup(String(body.scope ?? '全平台'))) },
 ]
 
 /** 从 /admin/dict/{type}/... 中解析字典类型 */

@@ -66,6 +66,37 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/dict/TextbookView.vue'),
         meta: { title: '教材版本' },
       },
+      // 内容运营（P-03）
+      {
+        path: 'content/questions',
+        name: 'content-questions',
+        component: () => import('@/views/content/QuestionBankView.vue'),
+        meta: { title: '公共题库' },
+      },
+      {
+        path: 'content/papers',
+        name: 'content-papers',
+        component: () => import('@/views/content/PaperBankView.vue'),
+        meta: { title: '公共试卷库' },
+      },
+      {
+        path: 'content/distribution',
+        name: 'content-distribution',
+        component: () => import('@/views/content/DistributionView.vue'),
+        meta: { title: '内容分发' },
+      },
+      {
+        path: 'content/compliance',
+        name: 'content-compliance',
+        component: () => import('@/views/content/ComplianceView.vue'),
+        meta: { title: '内容合规抽检' },
+      },
+      {
+        path: 'content/feedback',
+        name: 'content-feedback',
+        component: () => import('@/views/content/FeedbackView.vue'),
+        meta: { title: '内容问题反馈' },
+      },
       // AI 服务配置
       {
         path: 'ai/models',
@@ -84,6 +115,18 @@ const routes: RouteRecordRaw[] = [
         name: 'ai-prompts',
         component: () => import('@/views/ai/PromptsView.vue'),
         meta: { title: '全局 Prompt 模板' },
+      },
+      {
+        path: 'ai/safety',
+        name: 'ai-safety',
+        component: () => import('@/views/ai/SafetyView.vue'),
+        meta: { title: 'AI 安全治理' },
+      },
+      {
+        path: 'ai/billing',
+        name: 'ai-billing',
+        component: () => import('@/views/ai/BillingView.vue'),
+        meta: { title: 'AI 计费与能力开关' },
       },
       // 数据审计
       {
@@ -104,6 +147,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/audit/AuditLogsView.vue'),
         meta: { title: '日志审计' },
       },
+      {
+        path: 'audit/health',
+        name: 'audit-health',
+        component: () => import('@/views/system/HealthView.vue'),
+        meta: { title: '服务健康监控' },
+      },
       // 系统管理
       {
         path: 'system/accounts',
@@ -117,6 +166,24 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/system/TenantMenusView.vue'),
         meta: { title: '机构菜单权限' },
       },
+      {
+        path: 'system/params',
+        name: 'system-params',
+        component: () => import('@/views/system/ParamsView.vue'),
+        meta: { title: '系统参数' },
+      },
+      {
+        path: 'system/messages',
+        name: 'system-messages',
+        component: () => import('@/views/system/MessageTemplateView.vue'),
+        meta: { title: '消息模板' },
+      },
+      {
+        path: 'system/storage',
+        name: 'system-storage',
+        component: () => import('@/views/system/StorageView.vue'),
+        meta: { title: '存储与备份' },
+      },
       // 其余菜单统一注册为「开发中」占位页
       ...flattenMenus(menus)
         .filter(
@@ -124,6 +191,7 @@ const routes: RouteRecordRaw[] = [
             item.path !== '/dashboard' &&
             !item.path.startsWith('/tenant/') &&
             !item.path.startsWith('/dict/') &&
+            !item.path.startsWith('/content/') &&
             !item.path.startsWith('/ai/') &&
             !item.path.startsWith('/audit/') &&
             !item.path.startsWith('/system/'),

@@ -603,7 +603,7 @@ const estimate = computed(() => ai.count)
 const remain = computed(() => quota.value.quota - quota.value.used)
 const insufficient = computed(() => estimate.value > remain.value)
 
-/** 检查轮次（0=关闭，1~3）。注意这是**全局键**：与拍照识题、文档识别共用同一份设置 */
+/** 检查轮次（0=关闭，1~3）。注意这是**全局键**：与拍照识题共用同一份设置（我的文件不做复核） */
 const checkRounds = ref(getCheckRounds())
 function onRoundsChange() {
   setCheckRounds(checkRounds.value)
@@ -1078,7 +1078,7 @@ onMounted(load)
           <div class="ai-field">
             <label
               class="f-label"
-              title="生成后自动复核答案 / 解析的轮数；此项为全局设置，与拍照识题、文档识别共用；超轮仍有异常将提醒人工介入"
+              title="生成后自动复核答案 / 解析的轮数；此项为全局设置，与拍照识题共用；超轮仍有异常将提醒人工介入"
             >
               AI 检查轮次
             </label>

@@ -32,6 +32,18 @@ export const menus: MenuItem[] = [
     ],
   },
   {
+    path: '/content',
+    title: '内容运营',
+    icon: 'book',
+    children: [
+      { path: '/content/questions', title: '公共题库' },
+      { path: '/content/papers', title: '公共试卷库' },
+      { path: '/content/distribution', title: '内容分发' },
+      { path: '/content/compliance', title: '合规抽检' },
+      { path: '/content/feedback', title: '反馈工单' },
+    ],
+  },
+  {
     path: '/ai',
     title: 'AI 服务配置',
     icon: 'cpu',
@@ -39,6 +51,8 @@ export const menus: MenuItem[] = [
       { path: '/ai/models', title: '模型接入管理' },
       { path: '/ai/agents', title: '多智能体编排' },
       { path: '/ai/prompts', title: '全局 Prompt 模板' },
+      { path: '/ai/safety', title: 'AI 安全治理' },
+      { path: '/ai/billing', title: 'AI 计费与能力开关' },
     ],
   },
   {
@@ -49,6 +63,7 @@ export const menus: MenuItem[] = [
       { path: '/audit/ai-logs', title: 'AI 调用日志' },
       { path: '/audit/resources', title: '平台资源总库' },
       { path: '/audit/logs', title: '日志审计' },
+      { path: '/audit/health', title: '服务健康监控' },
     ],
   },
   {
@@ -58,6 +73,9 @@ export const menus: MenuItem[] = [
     children: [
       { path: '/system/accounts', title: '管理员账号' },
       { path: '/system/menus', title: '机构菜单权限' },
+      { path: '/system/params', title: '系统参数' },
+      { path: '/system/messages', title: '消息模板' },
+      { path: '/system/storage', title: '存储与备份' },
     ],
   },
 ]

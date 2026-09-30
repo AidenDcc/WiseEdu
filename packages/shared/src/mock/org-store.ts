@@ -4900,8 +4900,6 @@ export function generateAiDrawDraft(input: { mediaType: DrawEditorType; userProm
 
 /* ================= 我的文件（FR-FL-001 ~ 005） ================= */
 
-let fileSeq = 400
-let folderSeq = 90
 export const folders: FileFolder[] = [
   { id: 0, name: '全部文件', parentId: null },
   { id: 91, name: '期末备考', parentId: 0 },
@@ -4909,14 +4907,38 @@ export const folders: FileFolder[] = [
   { id: 93, name: '2025 真题', parentId: 92 },
 ]
 
+/* 17 种类型各来一条：类型筛选的每一档都得有东西可筛，否则演示时点下去全是空列表 */
 export const orgFiles: OrgFile[] = [
-  { id: 401, name: '2026 期中数学试卷（教师版）.pdf', kind: 'pdf', folderId: 91, sizeMb: 3.2, recognize: 'done', owner: '陈明远', uploadedAt: nowStr(-28) },
-  { id: 402, name: '函数专题练习.docx', kind: 'word', folderId: 91, sizeMb: 1.1, recognize: 'none', owner: '李文博', uploadedAt: nowStr(-96) },
-  { id: 403, name: '月考答题卡扫描 01.jpg', kind: 'image', folderId: 92, sizeMb: 4.6, recognize: 'none', owner: '李文博', uploadedAt: nowStr(-150) },
-  { id: 404, name: '历年真题打包.zip', kind: 'zip', folderId: 0, sizeMb: 78.9, recognize: 'none', owner: '陈明远', uploadedAt: nowStr(-300) },
+  /* ---- 文档类型 ---- */
+  { id: 401, name: '2026 期中数学试卷（教师版）', kind: 'paper', folderId: 91, sizeMb: 3.2, recognize: 'done', owner: '陈明远', uploadedAt: nowStr(-28), updatedAt: nowStr(-26) },
+  { id: 402, name: '期中复习提纲', kind: 'doc', folderId: 91, sizeMb: 0, recognize: 'none', owner: '陈明远', uploadedAt: nowStr(-96), updatedAt: nowStr(-96) },
+  { id: 403, name: '数列求和专题讲义', kind: 'lecture', folderId: 91, sizeMb: 2.8, recognize: 'none', owner: '陈明远', uploadedAt: nowStr(-120), updatedAt: nowStr(-46) },
+  { id: 404, name: '三角函数专项练习（AI 组卷 10 题）', kind: 'aiPaper', folderId: 91, sizeMb: 0.7, recognize: 'none', owner: '陈明远', uploadedAt: nowStr(-40), updatedAt: nowStr(-40) },
+  { id: 405, name: '立体几何单元测（组卷工作台）', kind: 'composePaper', folderId: 93, sizeMb: 0.8, recognize: 'none', owner: '陈明远', uploadedAt: nowStr(-74), updatedAt: nowStr(-70) },
+  /* ---- 课件类型 ---- */
+  { id: 406, name: '「函数的单调性」新授课课件', kind: 'courseware', folderId: 91, sizeMb: 5.4, recognize: 'none', owner: '陈明远', uploadedAt: nowStr(-52), updatedAt: nowStr(-20) },
+  /* ---- 其他类型 ---- */
+  { id: 407, name: '人教版必修一电子教辅', kind: 'book', folderId: 91, sizeMb: 12.6, recognize: 'none', owner: '陈明远', uploadedAt: nowStr(-210), updatedAt: nowStr(-200) },
+  { id: 408, name: '本学期教学进度安排.docx', kind: 'word', folderId: 0, sizeMb: 0.2, recognize: 'none', owner: '陈明远', uploadedAt: nowStr(-8), updatedAt: nowStr(-2) },
+  { id: 409, name: '开学第一课主题班会.pptx', kind: 'ppt', folderId: 0, sizeMb: 6.8, recognize: 'none', owner: '陈明远', uploadedAt: nowStr(-64), updatedAt: nowStr(-64) },
+  { id: 410, name: '2025 学年高一数学期末试卷（扫描件）.pdf', kind: 'pdf', folderId: 93, sizeMb: 2.4, recognize: 'done', owner: '陈明远', uploadedAt: nowStr(-320), updatedAt: nowStr(-310) },
+  /* 别人分享进来的两条：owner 是分享者，列表「创建者」列显示姓名 + 分享标志 */
+  { id: 411, name: '二次函数图象变换微课.mp4', kind: 'video', folderId: 0, sizeMb: 126.5, recognize: 'none', owner: '赵雅琴', shared: true, uploadedAt: nowStr(-240), updatedAt: nowStr(-240) },
+  { id: 412, name: '英语听力训练 Unit 3.mp3', kind: 'audio', folderId: 0, sizeMb: 8.2, recognize: 'none', owner: '陈明远', uploadedAt: nowStr(-88), updatedAt: nowStr(-88) },
+  { id: 413, name: '「勾股定理」互动 H5', kind: 'h5', folderId: 0, sizeMb: 1.4, recognize: 'none', owner: '陈明远', uploadedAt: nowStr(-132), updatedAt: nowStr(-132) },
+  { id: 414, name: '月考答题卡扫描 01.jpg', kind: 'image', folderId: 92, sizeMb: 4.6, recognize: 'none', owner: '李文博', shared: true, uploadedAt: nowStr(-150), updatedAt: nowStr(-150) },
+  { id: 415, name: '二次函数开口系数演示小程序', kind: 'miniapp', folderId: 0, sizeMb: 1.1, recognize: 'none', owner: '陈明远', uploadedAt: nowStr(-170), updatedAt: nowStr(-170) },
+  { id: 416, name: '2025 教学资料打包.zip', kind: 'other', folderId: 92, sizeMb: 46.3, recognize: 'none', owner: '陈明远', uploadedAt: nowStr(-180), updatedAt: nowStr(-180) },
+  { id: 417, name: '「圆锥曲线」动画演示', kind: 'animation', folderId: 0, sizeMb: 3.9, recognize: 'none', owner: '陈明远', uploadedAt: nowStr(-104), updatedAt: nowStr(-104) },
 ]
 
 export const storageUsage = { usedGb: 18.6, quotaGb: 50 }
+
+/* 自增 id 从种子数据之上续号。写死常量（原为 folderSeq=90 / fileSeq=400）会在
+   种子扩容后与既有 id 撞号 —— 撞号时 find() 命中的是种子对象，新建/移动/删除
+   全都作用到错误的记录上。 */
+let folderSeq = folders.reduce((max, row) => Math.max(max, row.id), 0)
+let fileSeq = orgFiles.reduce((max, row) => Math.max(max, row.id), 0)
 
 export function saveFolder(input: { id?: number; name: string; parentId: number | null }): FileFolder {
   if (input.id != null) {
@@ -4936,50 +4958,271 @@ export function saveFolder(input: { id?: number; name: string; parentId: number 
   return item
 }
 
-export function deleteFolder(id: number): number {
+/** 目录及其全部子孙目录的 id（含自身）；边遍历边展开，深度不限 */
+export function subtreeFolderIds(id: number): number[] {
+  const ids = [id]
+  /* seen 是防环保险：moveFolder 已挡住「移进自己的子孙」，但一旦数据出现自环，
+     边遍历边 push 会无限增长直至 RangeError 卡死页面 */
+  const seen = new Set([id])
+  for (let i = 0; i < ids.length; i += 1) {
+    folders
+      .filter((row) => row.parentId === ids[i] && !seen.has(row.id))
+      .forEach((child) => {
+        seen.add(child.id)
+        ids.push(child.id)
+      })
+  }
+  return ids
+}
+
+/** candidate 是否落在 folderId 的子树内（含自身）——移动目录时用它挡住「移进自己的子孙」 */
+function isInSubtree(candidate: number, folderId: number): boolean {
+  let cursor: FileFolder | undefined = folders.find((row) => row.id === candidate)
+  while (cursor) {
+    if (cursor.id === folderId) return true
+    cursor = cursor.parentId === null ? undefined : folders.find((row) => row.id === cursor!.parentId)
+  }
+  return false
+}
+
+export function moveFolder(id: number, targetId: number): FileFolder {
   const item = folders.find((row) => row.id === id)
   if (!item) throw new Error('文件夹不存在')
-  const inner = orgFiles.filter((row) => row.folderId === id)
+  if (id === 0) throw new Error('根目录不可移动')
+  if (!folders.some((row) => row.id === targetId)) throw new Error('目标文件夹不存在')
+  if (isInSubtree(targetId, id)) throw new Error('不能移动到自身或其子文件夹内')
+  if (folders.some((row) => row.id !== id && row.parentId === targetId && row.name === item.name)) {
+    throw new Error('目标目录已存在同名文件夹')
+  }
+  item.parentId = targetId
+  return item
+}
+
+export function deleteFolder(id: number): number {
+  if (id === 0) throw new Error('根目录不可删除')
+  const item = folders.find((row) => row.id === id)
+  if (!item) throw new Error('文件夹不存在')
+  /* 递归：早期只删直接子文件，子目录里的文件会变成孤儿（folderId 指向已删目录，列表里凭空消失） */
+  const ids = subtreeFolderIds(id)
+  const inner = orgFiles.filter((row) => ids.includes(row.folderId))
   inner.forEach((row) => toRecycle('文件', row.name))
-  orgFiles.filter((row) => row.folderId === id).forEach((row) => orgFiles.splice(orgFiles.indexOf(row), 1))
-  folders.splice(folders.indexOf(item), 1)
+  inner.forEach((row) => orgFiles.splice(orgFiles.indexOf(row), 1))
+  ids.forEach((fid) => {
+    const row = folders.find((f) => f.id === fid)
+    if (row) folders.splice(folders.indexOf(row), 1)
+  })
   return inner.length
 }
 
-/** 扩展名 → 文件类型（真实上传的 jpg/docx 等也归到对应大类） */
+/**
+ * 扩展名 → 文件类型。
+ *
+ * 只列能靠扩展名确定的类型：Word / PDF / PPT / 图片 / 视频 / 音频。
+ * 认不出的扩展名（`.zip`、`.xlsx`、`.txt`…）一律落到 `other`「其它文件」——
+ * 类型表里有这一档，就不必再把 `.zip` 硬塞成「PDF文档」（老代码的 `?? 'pdf'` 兜底），
+ * 也不用拒绝用户上传：塞错或拒收都会让人找不到自己的文件。
+ */
 const FILE_KIND_BY_EXT: Record<string, OrgFile['kind']> = {
+  doc: 'word', docx: 'word', wps: 'word', rtf: 'word',
   pdf: 'pdf',
-  word: 'word', doc: 'word', docx: 'word',
-  ppt: 'ppt', pptx: 'ppt',
-  image: 'image', jpg: 'image', jpeg: 'image', png: 'image', webp: 'image', gif: 'image',
-  zip: 'zip',
+  ppt: 'ppt', pptx: 'ppt', pps: 'ppt', ppsx: 'ppt',
+  jpg: 'image', jpeg: 'image', png: 'image', webp: 'image', gif: 'image', bmp: 'image', heic: 'image',
+  mp4: 'video', mov: 'video', avi: 'video', mkv: 'video', webm: 'video', flv: 'video',
+  mp3: 'audio', wav: 'audio', m4a: 'audio', aac: 'audio', flac: 'audio', ogg: 'audio',
 }
 
+/** 能识别出具体类型的上传格式（弹窗提示用；其余格式也能传，归入「其它文件」） */
+export const UPLOAD_KIND_TEXT = 'Word（doc/docx）· PDF · PPT（ppt/pptx）· 图片 · 视频 · 音频'
+
 export function uploadFiles(names: string[], folderId: number, sizes?: number[]): OrgFile[] {
+  if (!folders.some((row) => row.id === folderId)) throw new Error('目标文件夹不存在')
   return names.map((name, i) => {
-    const ext = name.split('.').pop()?.toLowerCase() ?? 'pdf'
-    const kind = FILE_KIND_BY_EXT[ext] ?? 'pdf'
+    const ext = name.split('.').pop()?.toLowerCase() ?? ''
+    const kind = FILE_KIND_BY_EXT[ext] ?? 'other'
+    const at = nowStr()
     const item: OrgFile = {
       id: ++fileSeq,
       name,
       kind,
       folderId,
-      /* 真实上传（sizes 传入）用实际大小；模拟上传保持随机演示值 */
-      sizeMb: sizes?.[i] != null ? Math.round(sizes[i] * 10) / 10 : Math.round((1 + Math.random() * 20) * 10) / 10,
+      /* 真实上传（sizes 传入）用实际大小；模拟上传保持随机演示值。
+         保留 3 位小数：原来四舍五入到 0.1MB 会把几十 KB 的小文件压成 0，
+         而 0 在 formatFileSize 里是「无字节」的哨兵值，列表会显示成「—」 */
+      sizeMb: sizes?.[i] != null ? Math.round(sizes[i] * 1000) / 1000 : Math.round((1 + Math.random() * 20) * 10) / 10,
       recognize: 'none',
       owner: CURRENT.name,
-      uploadedAt: nowStr(),
+      uploadedAt: at,
+      updatedAt: at,
     }
     orgFiles.unshift(item)
     return item
   })
 }
 
-export function deleteFile(id: number): void {
+/** 新建文档（在线文档：正文存平台，没有本地副本，sizeMb 0，预览为占位） */
+export function createFile(input: { name: string; kind: OrgFile['kind']; folderId: number }): OrgFile {
+  const name = input.name.trim()
+  if (!name) throw new Error('名称不能为空')
+  if (!folders.some((row) => row.id === input.folderId)) throw new Error('目标文件夹不存在')
+  if (orgFiles.some((row) => row.folderId === input.folderId && row.name === name)) {
+    throw new Error('该目录下已存在同名文件')
+  }
+  const at = nowStr()
+  const item: OrgFile = {
+    id: ++fileSeq,
+    name,
+    kind: input.kind,
+    folderId: input.folderId,
+    sizeMb: 0,
+    recognize: 'none',
+    owner: CURRENT.name,
+    uploadedAt: at,
+    updatedAt: at,
+  }
+  orgFiles.unshift(item)
+  return item
+}
+
+export function renameFile(id: number, name: string): OrgFile {
   const item = orgFiles.find((row) => row.id === id)
   if (!item) throw new Error('文件不存在')
-  toRecycle('文件', item.name)
-  orgFiles.splice(orgFiles.indexOf(item), 1)
+  const next = name.trim()
+  if (!next) throw new Error('名称不能为空')
+  if (orgFiles.some((row) => row.id !== id && row.folderId === item.folderId && row.name === next)) {
+    throw new Error('该目录下已存在同名文件')
+  }
+  item.name = next
+  item.updatedAt = nowStr()
+  return item
+}
+
+export function moveFiles(ids: number[], targetId: number): number {
+  if (!folders.some((row) => row.id === targetId)) throw new Error('目标文件夹不存在')
+  const rows = orgFiles.filter((row) => ids.includes(row.id))
+  if (!rows.length) throw new Error('请选择要移动的文件')
+  const clash = rows.find((row) =>
+    orgFiles.some((other) => other.id !== row.id && other.folderId === targetId && other.name === row.name),
+  )
+  if (clash) throw new Error(`目标目录已存在《${clash.name}》`)
+  const at = nowStr()
+  rows.forEach((row) => {
+    row.folderId = targetId
+    row.updatedAt = at
+  })
+  return rows.length
+}
+
+/** 批量删除（回收站语义同单个删除；单个删除传 `[id]`） */
+export function deleteFiles(ids: number[]): number {
+  const rows = orgFiles.filter((row) => ids.includes(row.id))
+  rows.forEach((row) => {
+    toRecycle('文件', row.name)
+    orgFiles.splice(orgFiles.indexOf(row), 1)
+  })
+  return rows.length
+}
+
+/** 副本命名：`名（副本）.ext`，同目录重名时续号；taken 为该目录已占用的名字 */
+function copyName(name: string, taken: Set<string>): string {
+  /* 扩展名要留在最后：「函数专题（副本）.docx」而不是「函数专题.docx（副本）」 */
+  const dot = name.lastIndexOf('.')
+  const base = dot > 0 ? name.slice(0, dot) : name
+  const ext = dot > 0 ? name.slice(dot) : ''
+  let next = `${base}（副本）${ext}`
+  for (let n = 2; taken.has(next); n += 1) next = `${base}（副本${n}）${ext}`
+  return next
+}
+
+/** 复制到：保留原文件，在目标目录生成副本；目标目录已有同名时报错（与移动同口径） */
+export function copyFiles(ids: number[], targetId: number): OrgFile[] {
+  if (!folders.some((row) => row.id === targetId)) throw new Error('目标文件夹不存在')
+  const rows = orgFiles.filter((row) => ids.includes(row.id))
+  if (!rows.length) throw new Error('请选择要复制的文件')
+  const taken = new Set(orgFiles.filter((row) => row.folderId === targetId).map((row) => row.name))
+  /* 名字先全部算好再入库：算到一半抛错会留下半批副本，比一开始就整批拒绝更难收拾 */
+  const planned = rows.map((row) => {
+    /* 复制回原目录时不能沿用原名（同目录会出现两个同名文件），按资源管理器的习惯加「（副本）」 */
+    const name = targetId === row.folderId ? copyName(row.name, taken) : row.name
+    if (taken.has(name)) throw new Error(`目标目录已存在《${name}》`)
+    taken.add(name)
+    return { row, name }
+  })
+  const at = nowStr()
+  const copies = planned.map(({ row, name }) => ({
+    ...row,
+    id: ++fileSeq,
+    name,
+    folderId: targetId,
+    /* 副本是新记录：没被用户置顶过，也是自己复制出来的（不是别人分享的） */
+    pinned: false,
+    owner: CURRENT.name,
+    shared: false,
+    uploadedAt: at,
+    updatedAt: at,
+  }))
+  orgFiles.unshift(...copies)
+  return copies
+}
+
+/** 创建副本：原地复制一份，名称加「（副本）」后缀，重名时自动续号 */
+export function duplicateFile(id: number): OrgFile {
+  const item = orgFiles.find((row) => row.id === id)
+  if (!item) throw new Error('文件不存在')
+  const taken = new Set(orgFiles.filter((row) => row.folderId === item.folderId).map((row) => row.name))
+  const at = nowStr()
+  const copy: OrgFile = {
+    ...item,
+    id: ++fileSeq,
+    name: copyName(item.name, taken),
+    pinned: false,
+    owner: CURRENT.name,
+    /* 分享来的文件复制一份，副本就是自己的了 */
+    shared: false,
+    uploadedAt: at,
+    updatedAt: at,
+  }
+  orgFiles.unshift(copy)
+  return copy
+}
+
+/** 置顶 / 取消置顶（文件） */
+export function setFilePinned(id: number, pinned: boolean): OrgFile {
+  const item = orgFiles.find((row) => row.id === id)
+  if (!item) throw new Error('文件不存在')
+  item.pinned = pinned
+  return item
+}
+
+/** 置顶 / 取消置顶（文件夹） */
+export function setFolderPinned(id: number, pinned: boolean): FileFolder {
+  const item = folders.find((row) => row.id === id)
+  if (!item) throw new Error('文件夹不存在')
+  item.pinned = pinned
+  return item
+}
+
+/**
+ * 转为课件：文件类型改为课件，并在备课中心建一条同名课件记录。
+ *
+ * 课件由备课中心维护（见 TEACH_KIND_TEXT），只改 kind 会让「我的文件」里是课件、
+ * 备课中心里却找不到它，两边对不上；saveTeachDoc 的名称约束是 2-50 字，文件名可能超长，
+ * 这里截断后再建，建不出来也不该让「转为课件」整体失败。
+ */
+export function convertToCourseware(id: number): OrgFile {
+  const item = orgFiles.find((row) => row.id === id)
+  if (!item) throw new Error('文件不存在')
+  if (item.kind === 'courseware') throw new Error('该文件已经是课件')
+  item.kind = 'courseware'
+  item.updatedAt = nowStr()
+  const docName = item.name.replace(/\.[^.]+$/, '').trim().slice(0, 50)
+  if (docName.length >= 2) {
+    try {
+      saveTeachDoc({ kind: 'courseware', name: docName })
+    } catch {
+      /* 备课中心那条建不出来不影响文件本身已转为课件 */
+    }
+  }
+  return item
 }
 
 /** 文档识别入库（FR-FL-004/005）：返回生成的草稿试卷 id */
@@ -4988,6 +5231,7 @@ export function recognizeFile(id: number): { file: OrgFile; questionCount: numbe
   if (!item) throw new Error('文件不存在')
   consumeQuota(1)
   item.recognize = 'done'
+  item.updatedAt = nowStr()
   const count = 3
   const imported = Array.from({ length: count }, (_, i) => {
     const q = seedQuestion({
@@ -5118,6 +5362,7 @@ export function importRecognizedFile(
     paperId = paper.id
   }
   item.recognize = 'done'
+  item.updatedAt = nowStr()
   return { file: item, questionCount: imported.length, paperId }
 }
 

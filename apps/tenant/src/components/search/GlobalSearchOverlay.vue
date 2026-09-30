@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppIcon, MATERIAL_STATUS_TEXT, PAPER_STATUS_TEXT, showToast, toPlainText } from '@aiteach/shared'
+import { AppIcon, FILE_KIND_TEXT, MATERIAL_STATUS_TEXT, PAPER_STATUS_TEXT, showToast, toPlainText } from '@aiteach/shared'
 import type { OrgPaper, OrgSearchResult } from '@aiteach/shared'
 import { fetchGlobalSearch } from '@/api/org'
 import { searchImageEngine, searchKeywordFromImage } from '@/api/ai-search'
+import { formatFileSize } from '@/utils/file'
 
 /**
  * 全局搜索面板（FR-GN-026）：顶部搜索框为只读触发器，点击后弹出本面板。
@@ -189,7 +190,6 @@ function go(path: string) {
   router.push(path)
 }
 
-const fileSizeText = (sizeMb: number) => `${sizeMb.toFixed(1)} MB`
 const durationText = (seconds?: number) =>
   seconds ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` : ''
 function scoreOf(paper: OrgPaper) {
@@ -346,9 +346,9 @@ function questionCountOf(paper: OrgPaper) {
                 <span class="row-ico"><AppIcon name="folder" :size="15" /></span>
                 <span class="row-main">
                   <span class="row-title">{{ row.name }}</span>
-                  <span class="row-meta">{{ row.kind.toUpperCase() }} · {{ row.owner }} · {{ row.uploadedAt.slice(0, 10) }}</span>
+                  <span class="row-meta">{{ FILE_KIND_TEXT[row.kind] }} · {{ row.owner }} · {{ row.updatedAt.slice(0, 10) }}</span>
                 </span>
-                <span class="row-side">{{ fileSizeText(row.sizeMb) }}</span>
+                <span class="row-side">{{ formatFileSize(row.sizeMb) }}</span>
               </button>
             </template>
           </template>

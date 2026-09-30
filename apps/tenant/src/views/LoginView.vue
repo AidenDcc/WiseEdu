@@ -58,7 +58,9 @@ function onPending(name: string) {
     <!-- 品牌区 -->
     <aside class="brand-pane">
       <div class="brand-row">
-        <div class="brand-logo">☁️</div>
+        <div class="brand-logo">
+          <img src="/logo.png" alt="AI教学云平台" />
+        </div>
         <span class="brand-name">AI教学云平台</span>
       </div>
       <div class="hero">
@@ -175,11 +177,12 @@ function onPending(name: string) {
 .brand-logo {
   width: 42px; height: 42px;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.16);
-  backdrop-filter: blur(6px);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 22px;
+  background: #fff;
+  overflow: hidden;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.14);
+  flex-shrink: 0;
 }
+.brand-logo img { width: 100%; height: 100%; display: block; object-fit: contain; }
 .brand-name { font-size: 17px; font-weight: 700; letter-spacing: 1px; }
 
 .hero h1 { font-size: 34px; letter-spacing: 2px; }

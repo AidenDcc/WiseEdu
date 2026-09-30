@@ -139,7 +139,9 @@ onMounted(() => void ensureScope())
     <!-- ===== 侧边栏 ===== -->
     <aside class="sidebar">
       <div class="brand" :title="collapsed ? 'AI教学云平台' : undefined">
-        <div class="brand-logo">🏫</div>
+        <div class="brand-logo">
+          <img src="/logo.png" alt="AI教学云平台" />
+        </div>
         <div class="brand-text">
           <div class="brand-name">AI教学云平台</div>
           <div class="brand-sub">机构端 · {{ auth.user?.orgName ?? '' }}</div>
@@ -376,12 +378,12 @@ onMounted(() => void ensureScope())
 .brand-logo {
   width: 38px; height: 38px;
   border-radius: 11px;
-  background: var(--brand-grad);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 19px;
+  background: #fff;
+  overflow: hidden;
   box-shadow: 0 6px 14px rgba(0, 180, 166, 0.3);
   flex-shrink: 0;
 }
+.brand-logo img { width: 100%; height: 100%; display: block; object-fit: contain; }
 .brand-name { font-size: 15px; font-weight: 700; letter-spacing: 0.5px; }
 .brand-sub { font-size: 11.5px; color: var(--sub); margin-top: 2px; }
 .layout.collapsed .brand-text { display: none; }

@@ -26,6 +26,7 @@ import type {
   OrgCategory,
   OrgCollabTask,
   OrgFile,
+  OrgFileKind,
   OrgFormula,
   OrgKnowledgeNode,
   OrgMaterial,
@@ -354,14 +355,47 @@ export function saveFolder(data: { id?: number; name: string; parentId: number |
 export function deleteFolder(id: number) {
   return request<{ moved: number }>('/tenant/folders/delete', { method: 'POST', data: { id } })
 }
+/** 移动文件夹（目标为自身或子孙时后端拒绝） */
+export function moveFolder(id: number, targetId: number) {
+  return request<FileFolder>('/tenant/folders/move', { method: 'POST', data: { id, targetId } })
+}
+export function pinFolder(id: number, pinned: boolean) {
+  return request<FileFolder>('/tenant/folders/pin', { method: 'POST', data: { id, pinned } })
+}
 export function fetchFiles() {
   return request<{ list: OrgFile[]; usage: { usedGb: number; quotaGb: number } }>('/tenant/files')
 }
 export function uploadFiles(names: string[], folderId: number, sizes?: number[]) {
   return request<OrgFile[]>('/tenant/files/upload', { method: 'POST', data: { names, folderId, sizes } })
 }
-export function deleteFile(id: number) {
-  return request<null>('/tenant/files/delete', { method: 'POST', data: { id } })
+/** 新建在线文档（无实体字节） */
+export function createFile(data: { name: string; kind: OrgFileKind; folderId: number }) {
+  return request<OrgFile>('/tenant/files/create', { method: 'POST', data })
+}
+export function renameFile(id: number, name: string) {
+  return request<OrgFile>('/tenant/files/rename', { method: 'POST', data: { id, name } })
+}
+export function moveFiles(ids: number[], targetId: number) {
+  return request<{ moved: number }>('/tenant/files/move', { method: 'POST', data: { ids, targetId } })
+}
+/** 删除文件（支持批量；进回收站，保留 30 天） */
+export function deleteFiles(ids: number[]) {
+  return request<null>('/tenant/files/delete', { method: 'POST', data: { ids } })
+}
+/** 复制到：保留原文件，在目标目录生成副本 */
+export function copyFiles(ids: number[], targetId: number) {
+  return request<{ copied: number }>('/tenant/files/copy', { method: 'POST', data: { ids, targetId } })
+}
+/** 创建副本：原地复制一份，名称加「（副本）」 */
+export function duplicateFile(id: number) {
+  return request<OrgFile>('/tenant/files/duplicate', { method: 'POST', data: { id } })
+}
+export function pinFile(id: number, pinned: boolean) {
+  return request<OrgFile>('/tenant/files/pin', { method: 'POST', data: { id, pinned } })
+}
+/** 转为课件：文件类型改为课件，并在备课中心建同名课件记录 */
+export function convertToCourseware(id: number) {
+  return request<OrgFile>('/tenant/files/convert-courseware', { method: 'POST', data: { id } })
 }
 export function recognizeFile(id: number) {
   return request<{ file: OrgFile; questionCount: number; paperId: number }>('/tenant/files/recognize', { method: 'POST', data: { id } })

@@ -177,6 +177,24 @@ export type {
   RecycleItem,
   OrgMessage,
   GeneratedQuestion,
+  /* 班级与学生管理（T-08） */
+  OrgClass,
+  ConsentStatus,
+  ConsentRecord,
+  OrgStudent,
+  /* AI 学情画像（T-07-08 ~ 10） */
+  MasteryNode,
+  StudentProfile,
+  ClassProfileReport,
+  /* AI 能力中心（T-10） */
+  AiTaskStatus,
+  AiCenterTask,
+  AiCapabilityCard,
+  ArtifactReviewStatus,
+  AiArtifactReview,
+  /* 机构系统设置（T-11） */
+  OrgSettings,
+  ReviewFlowConfig,
 } from './api/models'
 
 /* 机构端业务常量与文本 */
@@ -190,12 +208,17 @@ export {
   TEACH_DOC_STATUS_TEXT,
   COLLAB_TASK_STATUS_TEXT,
   COLLAB_MEMBER_STATUS_TEXT,
+  UPLOAD_KIND_TEXT,
 } from './mock/org-store'
 /* 这几个字典定义在 models 里（与类型同源），值需单独导出给前端 */
 export {
   COLLAB_STATUS_TEXT,
   COLLAB_MEMBER_TEXT,
   TEACH_KIND_TEXT,
+  FILE_KIND_TEXT,
+  FILE_KIND_ICON,
+  FILE_KIND_COLOR,
+  FILE_KIND_GROUPS,
   LECTURE_BLOCK_TEXT,
   GUIDE_BLOCK_TEXT,
   BLOCK_KIND_TEXT,
@@ -208,6 +231,30 @@ export {
   RESOURCE_SCOPE_TEXT,
   APPROVAL_STATUS_TEXT,
   HOMEWORK_STATUS_TEXT,
+  CONSENT_STATUS_TEXT,
+  STUDENT_WARNING_TEXT,
+  AI_TASK_STATUS_TEXT,
+  ARTIFACT_REVIEW_STATUS_TEXT,
+  PLATFORM_CONTENT_STATUS_TEXT,
+} from './api/models'
+/* 平台端 · 内容运营 / AI 治理 / 系统配置（仅类型） */
+export type {
+  PlatformContentStatus,
+  PlatformQuestion,
+  PlatformPaper,
+  ContentDistribution,
+  ComplianceSpotCheck,
+  ContentFeedbackTicket,
+  SensitivePolicyGroup,
+  AiQualityEval,
+  AiTraceRecord,
+  AiBillingRule,
+  TenantAiSwitch,
+  ServiceHealthItem,
+  SystemParam,
+  MessageTemplate,
+  StoragePolicy,
+  BackupRecord,
 } from './api/models'
 /* 班级名册：阅卷、作业按班统计时需要，真实场景来自教务系统 */
 export { CLASS_NAMES } from './mock/org-store'

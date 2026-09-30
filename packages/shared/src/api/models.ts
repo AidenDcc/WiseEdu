@@ -630,9 +630,128 @@ export interface FileFolder {
   id: number
   name: string
   parentId: number | null
+  /** 置顶：排在同级目录/文件之前（列表与大图都按它先排） */
+  pinned?: boolean
 }
 
-export type OrgFileKind = 'pdf' | 'word' | 'image' | 'ppt' | 'zip'
+/**
+ * 「我的文件」的文件类型 —— 按资源形态分三组（见 FILE_KIND_GROUPS），共 17 种。
+ *
+ * 各类型的来路是固定的：
+ * - `doc`：平台内新建的在线文档（正文存平台，无本地副本）；
+ * - `word` / `pdf` / `ppt` / `video` / `audio`：上传的文件；
+ * - `image`：上传的图片，或 AI 产出（拍照识题、AI 配图）；
+ * - `paper`：试卷库收录的成卷；`aiPaper` / `composePaper`：智能组卷与组卷工作台产出；
+ * - `courseware` / `lecture`：备课中心的课件与讲义；
+ * - `book`：教辅资料；`miniapp` / `animation` / `h5`：多媒体资源；
+ * - `other`：认不出格式的其余文件（压缩包、表格、纯文本…），上传时的兜底档。
+ *
+ * 上传时不再拒绝陌生格式（见 mock/org-store 的 uploadFiles）：以前类型表里没有归宿，
+ * 只能找个相近的类型硬塞，`.zip` 会被显示成「PDF文档」；现在一律落到 `other`，
+ * 「其它文件」这个说法本身就是实情，用户按类型找得到自己的文件。
+ */
+export type OrgFileKind =
+  | 'doc'
+  | 'paper'
+  | 'lecture'
+  | 'aiPaper'
+  | 'composePaper'
+  | 'courseware'
+  | 'book'
+  | 'word'
+  | 'ppt'
+  | 'pdf'
+  | 'video'
+  | 'audio'
+  | 'h5'
+  | 'image'
+  | 'miniapp'
+  | 'other'
+  | 'animation'
+
+/** 文件类型中文名（列表「文件类型」列与筛选面板共用，勿在页面里另写一份） */
+export const FILE_KIND_TEXT: Record<OrgFileKind, string> = {
+  doc: '文档',
+  paper: '试卷',
+  lecture: '讲义',
+  aiPaper: '智能组卷',
+  composePaper: '组卷',
+  courseware: '课件',
+  book: 'Book',
+  word: 'Word',
+  ppt: 'PPT',
+  pdf: 'PDF',
+  video: '视频',
+  audio: '音频',
+  h5: 'H5游戏',
+  image: '图片',
+  miniapp: '小程序',
+  other: '其它文件',
+  animation: '动画',
+}
+
+/** 文件类型对应的图标名（AppIcon 图标集）；列表、卡片与预览共用 */
+export const FILE_KIND_ICON: Record<OrgFileKind, string> = {
+  doc: 'file',
+  paper: 'paper',
+  lecture: 'clipboard',
+  aiPaper: 'sparkles',
+  composePaper: 'layers',
+  courseware: 'presentation',
+  book: 'book',
+  word: 'word',
+  ppt: 'presentation',
+  pdf: 'pdf',
+  video: 'video',
+  audio: 'audio',
+  h5: 'play',
+  image: 'image',
+  miniapp: 'smartphone',
+  other: 'file',
+  animation: 'chart',
+}
+
+/**
+ * 文件类型的图标底色。
+ *
+ * 17 种类型逐个写 CSS 类会得到三十多条几乎一样的规则，这里改成一色一档、颜色跟着类型表走：
+ * 换色只改这一处，也不会出现「页面里的类和类型表对不上」。
+ */
+export const FILE_KIND_COLOR: Record<OrgFileKind, { background: string; color: string }> = {
+  doc: { background: '#e8eefc', color: '#2f6bd6' },
+  paper: { background: '#fdeee4', color: '#d9702b' },
+  lecture: { background: '#eef7e6', color: '#4e9420' },
+  aiPaper: { background: '#efeafc', color: '#6b4fd6' },
+  composePaper: { background: '#e6f6f4', color: '#0f9d92' },
+  courseware: { background: '#e9f1ff', color: '#2f8fd6' },
+  book: { background: '#f5eee3', color: '#a5762f' },
+  word: { background: '#e8eefc', color: '#2f6bd6' },
+  ppt: { background: '#e9f1ff', color: '#2f8fd6' },
+  pdf: { background: '#fdeaea', color: '#d64545' },
+  video: { background: '#efeafc', color: '#6b4fd6' },
+  audio: { background: '#fdeaf2', color: '#d6459b' },
+  h5: { background: '#e4f6f8', color: '#1a8fa8' },
+  image: { background: '#eaf7f4', color: '#17a08a' },
+  miniapp: { background: '#f2f8e4', color: '#6b9a1c' },
+  other: { background: '#eef1f8', color: '#6b7688' },
+  animation: { background: '#fff3dd', color: '#d69a1c' },
+}
+
+/**
+ * 类型分组：筛选面板按这三组排（数组顺序就是面板里的行顺序，组内顺序就是勾选项顺序）。
+ *
+ * 分组与「资源形态」对齐而不是与「格式」对齐 —— 文档类是平台产出的成品文档，
+ * 其他类是按格式分堆的上传件与媒体资源，课件独立成组。
+ */
+export const FILE_KIND_GROUPS: { key: string; text: string; kinds: OrgFileKind[] }[] = [
+  { key: 'doc', text: '文档类型', kinds: ['doc', 'paper', 'lecture', 'aiPaper', 'composePaper'] },
+  { key: 'courseware', text: '课件类型', kinds: ['courseware'] },
+  {
+    key: 'other',
+    text: '其他类型',
+    kinds: ['book', 'word', 'ppt', 'pdf', 'video', 'audio', 'h5', 'image', 'miniapp', 'other', 'animation'],
+  },
+]
 
 export interface OrgFile {
   id: number
@@ -641,8 +760,15 @@ export interface OrgFile {
   folderId: number
   sizeMb: number
   recognize: 'none' | 'recognizing' | 'done' | 'failed'
+  /** 创建者姓名：`shared` 为真时是分享者，为假时就是当前登录人自己 */
   owner: string
+  /** 由他人分享进来的文件 —— 「我的文件」里出现别人的文件只可能是这个来路，列表「创建者」列据此打分享标志 */
+  shared?: boolean
   uploadedAt: string
+  /** 最近一次变动时间（上传/新建 = uploadedAt；重命名、移动会刷新） */
+  updatedAt: string
+  /** 置顶：排在同级其他文件之前 */
+  pinned?: boolean
 }
 
 /* ================ 讲义课件（FR-JC-005 ~ 012） ================ */
@@ -1308,4 +1434,467 @@ export interface GeneratedQuestion {
   /** 拍照识别场景由模型判定的学科 / 年级（AI 出题场景由表单传入，不填） */
   subject?: string
   grade?: string
+}
+
+/* ================ 班级与学生管理（T-08） ================ */
+
+/** 教学班（机构端班级管理） */
+export interface OrgClass {
+  id: number
+  /** 班级名称，如「高一(1)班」 */
+  name: string
+  grade: string
+  /** 班主任 */
+  headTeacher: string
+  /** 助教 / 副班主任 */
+  assistant?: string
+  studentCount: number
+  /** 本学期开的学科 */
+  subjects: string[]
+  /** 教室 */
+  room?: string
+  enabled: boolean
+  createdAt: string
+}
+
+export type ConsentStatus = 'granted' | 'pending' | 'withdrawn'
+
+export const CONSENT_STATUS_TEXT: Record<ConsentStatus, string> = {
+  granted: '已同意',
+  pending: '待签署',
+  withdrawn: '已撤回',
+}
+
+/** 监护人知情同意记录（T-08-06，K12 合规红线） */
+export interface ConsentRecord {
+  id: number
+  studentId: number
+  studentName: string
+  /** 监护人姓名（脱敏展示：张*） */
+  guardianName: string
+  relation: '父亲' | '母亲' | '其他'
+  /** 知情同意书版本 */
+  docVersion: string
+  status: ConsentStatus
+  /** 同意范围 */
+  scopes: string[]
+  signedAt?: string
+  /** 撤回时间 */
+  withdrawnAt?: string
+}
+
+/** 学生档案（T-08-03/04/07/08） */
+export interface OrgStudent {
+  id: number
+  name: string
+  studentNo: string
+  className: string
+  grade: string
+  gender: '男' | '女'
+  /** 家长手机（列表默认脱敏展示，档案详情按权限展示全量） */
+  guardianPhone: string
+  guardianName: string
+  consentStatus: ConsentStatus
+  /** 画像标签（AI 学情） */
+  tags: string[]
+  /** 学习预警等级 */
+  warning: 'none' | 'watch' | 'risk'
+  /** 最近一次考试总分与班级分位 */
+  lastScore?: number
+  lastPercentile?: number
+  enrolledAt: string
+  status: '在读' | '转班' | '休学' | '退出'
+}
+
+export const STUDENT_WARNING_TEXT: Record<OrgStudent['warning'], string> = {
+  none: '正常',
+  watch: '关注',
+  risk: '预警',
+}
+
+/* ================ AI 学情画像（T-07-08 ~ 10） ================ */
+
+/** 单个知识点的掌握度 */
+export interface MasteryNode {
+  knowledge: string
+  /** 掌握度 0-100 */
+  mastery: number
+  /** 近期趋势：上升 / 持平 / 下降 */
+  trend: 'up' | 'flat' | 'down'
+  /** 练习次数 */
+  practices: number
+  /** 薄弱标记（掌握度 < 60） */
+  weak: boolean
+}
+
+/** 学生学情画像（T-07-08） */
+export interface StudentProfile {
+  studentId: number
+  studentName: string
+  className: string
+  /** 综合掌握度（加权平均） */
+  overall: number
+  /** 年级百分位 */
+  percentile: number
+  /** 掌握度明细（按学科分组） */
+  subjects: Array<{ subject: string; mastery: number; nodes: MasteryNode[] }>
+  /** AI 归因结论 */
+  diagnosis: string
+  /** AI 建议的下一步动作 */
+  suggestion: string
+  /** 个性化练习推送记录（T-07-10） */
+  pushes: Array<{ id: number; title: string; questionCount: number; weakPoints: string[]; pushedAt: string; done: number }>
+}
+
+/** 班级学情报告（T-07-09） */
+export interface ClassProfileReport {
+  className: string
+  studentCount: number
+  /** 各学科班级平均掌握度 */
+  subjectMastery: Array<{ subject: string; mastery: number; lastTerm: number }>
+  /** 知识点掌握度分布（薄弱知识点按掌握度升序） */
+  weakNodes: MasteryNode[]
+  /** 分数段分布（最近一次统考） */
+  scoreBands: Array<{ band: string; count: number }>
+  /** AI 班级诊断与教学建议（不做公开排名，仅分布与区间） */
+  advice: string[]
+}
+
+/* ================ AI 能力中心（T-10） ================ */
+
+export type AiTaskStatus = 'running' | 'success' | 'failed' | 'reviewing'
+
+export const AI_TASK_STATUS_TEXT: Record<AiTaskStatus, string> = {
+  running: '进行中',
+  success: '已完成',
+  failed: '失败',
+  reviewing: '待复核',
+}
+
+/** AI 任务中心的一条任务（T-10-02） */
+export interface AiCenterTask {
+  id: number
+  /** 场景：出题 / 组卷 / 讲义 / 课件 / 阅卷 / 学情 / 识题 / 识卷 */
+  scene: string
+  title: string
+  /** 发起人 */
+  creator: string
+  status: AiTaskStatus
+  /** 耗时秒 */
+  elapsed: number
+  /** token 消耗（计量计费用） */
+  tokens: number
+  /** 产物数量 */
+  outputCount: number
+  createdAt: string
+}
+
+/** AI 能力入口卡片（T-10-01） */
+export interface AiCapabilityCard {
+  key: string
+  title: string
+  desc: string
+  scene: string
+  /** 本月使用次数 */
+  monthUses: number
+  icon: string
+  /** 跳转路径 */
+  link: string
+}
+
+export type ArtifactReviewStatus = 'pending' | 'approved' | 'rejected'
+
+export const ARTIFACT_REVIEW_STATUS_TEXT: Record<ArtifactReviewStatus, string> = {
+  pending: '待复核',
+  approved: '已通过',
+  rejected: '已驳回',
+}
+
+/** AI 生成内容复核条目（T-10-08：AI 内容须经教师复核后方可发布） */
+export interface AiArtifactReview {
+  id: number
+  kind: '题目' | '试卷' | '讲义' | '课件' | '批改' | '画像'
+  title: string
+  scene: string
+  /** 生成来源模型 */
+  model: string
+  status: ArtifactReviewStatus
+  /** AI 自动质检结论 */
+  autoCheck: 'pass' | 'warn' | 'error'
+  autoCheckNote: string
+  /** AI 标识（合规要求：AI 生成内容必须显著标识） */
+  aiLabeled: boolean
+  createdAt: string
+  reviewer?: string
+  reviewedAt?: string
+}
+
+/* ================ 机构系统设置（T-11） ================ */
+
+/** 机构基础信息（T-11-01） */
+export interface OrgSettings {
+  name: string
+  shortName: string
+  contact: string
+  phone: string
+  address: string
+  intro: string
+  /** 学科范围（T-11-03） */
+  subjects: string[]
+  /** 年级范围（T-11-03） */
+  grades: string[]
+  /** 教材版本偏好 */
+  preferredTextbooks: string[]
+}
+
+/** 审核流程配置（T-11-02） */
+export interface ReviewFlowConfig {
+  key: 'question' | 'paper' | 'resource'
+  label: string
+  /** 是否启用审核 */
+  enabled: boolean
+  /** 审核级数（1 或 2） */
+  levels: 1 | 2
+  /** 一级审核人 */
+  level1Reviewers: string[]
+  /** 二级审核人（双级审核时生效） */
+  level2Reviewers: string[]
+  /** AI 预审：先跑自动质检再进人工队列 */
+  aiPrecheck: boolean
+}
+
+/* ================ 平台端 · 全局内容运营（P-03） ================ */
+
+export type PlatformContentStatus = 'draft' | 'pending' | 'published' | 'rejected' | 'offline'
+
+export const PLATFORM_CONTENT_STATUS_TEXT: Record<PlatformContentStatus, string> = {
+  draft: '草稿',
+  pending: '待审核',
+  published: '已上架',
+  rejected: '已驳回',
+  offline: '已下架',
+}
+
+/** 公共题库题目（P-03-01 ~ 03） */
+export interface PlatformQuestion {
+  id: number
+  stem: string
+  type: string
+  subject: string
+  grade: string
+  difficulty: string
+  knowledge: string[]
+  answer: string
+  analysis: string
+  status: PlatformContentStatus
+  /** 质量分级（P-03-07） */
+  quality: 'A' | 'B' | 'C'
+  source: string
+  /** 引用次数（P-03-24） */
+  refs: number
+  updatedAt: string
+}
+
+/** 公共试卷（P-03-11 ~ 13） */
+export interface PlatformPaper {
+  id: number
+  name: string
+  subject: string
+  grade: string
+  questionCount: number
+  fullScore: number
+  /** 来源：真题 / 教辅 / 投稿 */
+  source: string
+  status: PlatformContentStatus
+  refs: number
+  updatedAt: string
+}
+
+/** 内容分发记录（P-03-25：内容分发与租户授权） */
+export interface ContentDistribution {
+  id: number
+  contentType: '题目' | '试卷' | '教辅' | '素材'
+  contentName: string
+  /** 授权租户数 */
+  tenantCount: number
+  /** 分发范围：全部租户 / 指定套餐 / 指定租户 */
+  scopeType: 'all' | 'package' | 'tenant'
+  scopeText: string
+  status: 'syncing' | 'synced' | 'paused'
+  syncedAt: string
+}
+
+/** 内容合规抽检任务（P-03-23） */
+export interface ComplianceSpotCheck {
+  id: number
+  title: string
+  /** 抽检范围 */
+  scope: string
+  /** 抽检数量 */
+  sampleCount: number
+  /** AI 命中疑似问题数 */
+  flagged: number
+  /** 人工确认违规数 */
+  confirmed: number
+  status: 'running' | 'done' | 'closed'
+  createdAt: string
+  /** 抽检命中的样例 */
+  samples: Array<{ contentName: string; reason: string; level: 'high' | 'mid' | 'low' }>
+}
+
+/** 内容问题反馈工单（P-03-28） */
+export interface ContentFeedbackTicket {
+  id: number
+  title: string
+  contentType: string
+  contentName: string
+  reporter: string
+  tenantName: string
+  /** 问题类型：内容错误 / 版权争议 / 敏感内容 / 其他 */
+  kind: string
+  priority: 'high' | 'normal' | 'low'
+  status: 'open' | 'processing' | 'resolved' | 'rejected'
+  createdAt: string
+  resolvedAt?: string
+  reply?: string
+}
+
+/* ================ 平台端 · AI 安全治理与计费（P-05） ================ */
+
+/** 敏感词策略分组（P-05-10） */
+export interface SensitivePolicyGroup {
+  id: number
+  name: string
+  /** 命中动作：拒答 / 转人工 / 替换脱敏 */
+  action: 'block' | 'human' | 'mask'
+  words: string[]
+  /** 适用场景：学生问答 / 教师助手 / 出题 / 全部 */
+  scope: string
+  enabled: boolean
+  /** 近 30 天命中次数 */
+  hits30d: number
+}
+
+/** AI 输出质量评测记录（P-05-11） */
+export interface AiQualityEval {
+  id: number
+  scene: string
+  model: string
+  /** 评测集名称 */
+  dataset: string
+  sampleCount: number
+  /** 各维度得分 0-100 */
+  scores: { accuracy: number; completeness: number; gradeFit: number; safety: number }
+  /** 综合分 */
+  overall: number
+  /** 相对上一轮变化 */
+  delta: number
+  ranAt: string
+}
+
+/** AI 生成内容留痕记录（P-05-12） */
+export interface AiTraceRecord {
+  id: number
+  traceId: string
+  scene: string
+  model: string
+  tenantName: string
+  /** 产物类型与摘要 */
+  artifactKind: string
+  artifactTitle: string
+  /** 输入摘要（脱敏） */
+  inputDigest: string
+  /** 内容安全结论 */
+  safety: 'pass' | 'masked' | 'blocked'
+  createdAt: string
+}
+
+/** AI 计费规则（P-05-13） */
+export interface AiBillingRule {
+  id: number
+  scene: string
+  model: string
+  /** 计价单位：次 / 千 token */
+  unit: 'call' | '1k-token'
+  /** 单价（元） */
+  price: number
+  enabled: boolean
+}
+
+/** 租户 AI 能力开关（P-05-14） */
+export interface TenantAiSwitch {
+  tenantId: number
+  tenantName: string
+  /** 各 AI 能力开关 */
+  capabilities: Array<{ key: string; label: string; enabled: boolean }>
+  /** 本月用量（元） */
+  monthCost: number
+  /** 剩余额度（元） */
+  quotaLeft: number
+}
+
+/* ================ 平台端 · 系统监控与配置（P-06 / P-07） ================ */
+
+/** 服务健康项（P-06-06） */
+export interface ServiceHealthItem {
+  key: string
+  name: string
+  status: 'up' | 'degraded' | 'down'
+  /** 近 24h 可用率（%） */
+  uptime: number
+  /** 平均响应毫秒 */
+  latencyMs: number
+  /** CPU / 内存占用（%） */
+  cpu: number
+  memory: number
+  lastAlertAt?: string
+}
+
+/** 系统参数（P-07-04） */
+export interface SystemParam {
+  key: string
+  label: string
+  value: string
+  group: string
+  desc: string
+  editable: boolean
+}
+
+/** 消息模板（P-07-05） */
+export interface MessageTemplate {
+  id: number
+  name: string
+  scene: string
+  channels: string[]
+  content: string
+  enabled: boolean
+  updatedAt: string
+}
+
+/** 文件存储策略（P-07-06） */
+export interface StoragePolicy {
+  key: string
+  label: string
+  provider: string
+  bucket: string
+  /** 上传大小上限（MB） */
+  maxUploadMb: number
+  /** 允许的类型 */
+  acceptTypes: string[]
+  enabled: boolean
+  usedGb: number
+  quotaGb: number
+}
+
+/** 数据备份记录（P-07-07） */
+export interface BackupRecord {
+  id: number
+  name: string
+  kind: 'auto' | 'manual'
+  scope: string
+  sizeGb: number
+  status: 'running' | 'done' | 'failed'
+  startedAt: string
+  finishedAt?: string
+  restoreTimes: number
 }

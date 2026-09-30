@@ -143,6 +143,39 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/exam/MistakeView.vue'),
         meta: { title: '错题本' },
       },
+      /* ===== AI 学情画像（T-07-08 ~ 10） ===== */
+      {
+        path: 'exam/profile',
+        name: 'exam-profile',
+        component: () => import('@/views/exam/ProfileView.vue'),
+        meta: { title: '学情画像' },
+      },
+      /* ===== 班级与学生管理（T-08） ===== */
+      {
+        path: 'student/class',
+        name: 'student-class',
+        component: () => import('@/views/student/ClassView.vue'),
+        meta: { title: '班级管理' },
+      },
+      {
+        path: 'student/archive',
+        name: 'student-archive',
+        component: () => import('@/views/student/StudentView.vue'),
+        meta: { title: '学生档案' },
+      },
+      /* ===== AI 能力中心（T-10） ===== */
+      {
+        path: 'ai-center/workbench',
+        name: 'ai-workbench',
+        component: () => import('@/views/ai/WorkbenchView.vue'),
+        meta: { title: 'AI 工作台' },
+      },
+      {
+        path: 'ai-center/review',
+        name: 'ai-review',
+        component: () => import('@/views/ai/ReviewView.vue'),
+        meta: { title: 'AI 内容复核' },
+      },
       /* ===== 集体备课（协同教研） ===== */
       {
         path: 'prep',
@@ -281,6 +314,13 @@ const routes: RouteRecordRaw[] = [
         name: 'org-notify',
         component: () => import('@/views/org/NotifyView.vue'),
         meta: { title: '通知配置' },
+      },
+      /* ===== 机构系统设置（T-11） ===== */
+      {
+        path: 'org/settings',
+        name: 'org-settings',
+        component: () => import('@/views/org/SettingsView.vue'),
+        meta: { title: '机构设置' },
       },
       /* ===== 回收站 / 个人中心 ===== */
       {
