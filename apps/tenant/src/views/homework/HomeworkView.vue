@@ -26,7 +26,7 @@ import { useBaseData } from '@/composables/useBaseData'
 
 const route = useRoute()
 const router = useRouter()
-const { subjects, grades, questionTypes, difficulties, ensure, pick, withCurrent } = useBaseData()
+const { subjects, grades, questionTypesFor, difficulties, ensure, pick, withCurrent } = useBaseData()
 
 const homeworks = ref<Homework[]>([])
 const papers = ref<OrgPaper[]>([])
@@ -512,7 +512,8 @@ onMounted(async () => {
           <template #left>
             <select v-model="bankFilter.type" class="f-select">
               <option value="">全部题型</option>
-              <option v-for="t in questionTypes" :key="t" :value="t">{{ t }}</option>
+              <!-- 题型随作业学科收窄（英语才有完形填空 / 七选五 / 短文改错）；已选值并入，换学科不会渲染成空白 -->
+              <option v-for="t in withCurrent(questionTypesFor(hwForm.subject), bankFilter.type)" :key="t" :value="t">{{ t }}</option>
             </select>
             <select v-model="bankFilter.difficulty" class="f-select">
               <option value="">全部难度</option>

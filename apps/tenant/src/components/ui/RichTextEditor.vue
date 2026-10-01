@@ -5,7 +5,16 @@ import StarterKit from '@tiptap/starter-kit'
 import { Mathematics } from '@tiptap/extension-mathematics'
 import { Image } from '@tiptap/extension-image'
 import { ResizableNodeView } from '@tiptap/core'
-import { AppIcon, isRichContent, normalizeRichHtml, resolveMediaSrc, showToast, toPlainText } from '@aiteach/shared'
+import {
+  ANSWER_PAREN,
+  AppIcon,
+  FILL_BLANK,
+  isRichContent,
+  normalizeRichHtml,
+  resolveMediaSrc,
+  showToast,
+  toPlainText,
+} from '@aiteach/shared'
 import type { DrawEditorType, OrgMedia } from '@aiteach/shared'
 import FormulaPickerModal from './FormulaPickerModal.vue'
 import MediaPickerModal from './MediaPickerModal.vue'
@@ -144,6 +153,26 @@ function toEditorHtml(input: string): string {
   if (isRichContent(input)) return input
   const escaped = input.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   return `<p>${escaped.replace(/\n/g, '<br>')}</p>`
+}
+
+/* ===== 填空下横线 / 括号：录填空题与判断题时最常用的两个符号 =====
+ *
+ * 两者都插**纯文本字符**，不做带 class 的行内元素 —— sanitizeRichHtml 的属性白名单只有
+ * data-type / data-latex / title，class 会在预览与导出（paper-export 的 richHtml）里被剥掉，
+ * 落 class 等于只在编辑器里好看。字符口径取仓内既有约定，常量放在共享层
+ * （FILL_BLANK / ANSWER_PAREN），录题页判断题干是否已带作答括号时读的是同一个值。 */
+function insertFillBlank() {
+  editor.value?.chain().focus().insertContent(FILL_BLANK).run()
+}
+
+function insertParen() {
+  const instance = editor.value
+  if (!instance) return
+  /* 先记插入点：插入后 selection 会落到括号右侧，光标得手工挪回两个全角空格之间，
+     否则点一下「括号」再打字会跑到括号外面去 */
+  const from = instance.state.selection.from
+  instance.chain().focus().insertContent(ANSWER_PAREN).run()
+  instance.commands.setTextSelection(from + 2)
 }
 
 /* ===== 公式弹窗 ===== */
@@ -466,6 +495,17 @@ defineExpose({ isEmpty })
       </button>
       <button class="rte-btn" :class="{ on: editor.isActive('orderedList') }" type="button" title="有序列表" @click="editor.chain().focus().toggleOrderedList().run()">
         <AppIcon name="list-ol" :size="16" />
+      </button>
+
+      <span class="rte-sep" />
+
+      <button class="rte-btn" type="button" title="插入填空下横线（______）" @click="insertFillBlank">
+        <AppIcon name="minus" :size="16" />
+        <span class="rte-btn-text">填空线</span>
+      </button>
+      <button class="rte-btn" type="button" title="插入作答括号（　　），光标停在括号中间" @click="insertParen">
+        <AppIcon name="parentheses" :size="16" />
+        <span class="rte-btn-text">括号</span>
       </button>
 
       <span class="rte-sep" />

@@ -16,6 +16,35 @@ export function answerLetters(item: { options: readonly unknown[]; answer: strin
   return item.options.length > 0 ? [...new Set(item.answer.toUpperCase().replace(/[^A-F]/g, '').split(''))] : []
 }
 
+/**
+ * 「无选项判断题」：判断题不带「正确 / 错误」选项，学生直接在题干前的「（　　）」里写对错。
+ *
+ * 不设独立字段 —— 用 题型 + 选项是否为空 就地判定，存量数据不会误判，
+ * 判分 / 排版 / 展示各处只要问这一个函数，口径就不会分叉。
+ */
+export function isJudgeNoOptions(item: { type: string; options: readonly unknown[] }): boolean {
+  return item.type === '判断' && item.options.length === 0
+}
+
+/** 判断题答案归一到「对 / 错」，供无选项判断题展示（存量题存的是 A/B，也有存对/错/√/× 的） */
+export function judgeAnswerText(answer: string): string {
+  const text = answer.trim()
+  if (!text) return ''
+  return /^(A|T|√|对|正确|是|TRUE)/i.test(text) ? '对' : '错'
+}
+
+/**
+ * 选项排布列数：题目自身配置优先，缺省回落到调用方给的默认（试卷侧即纸张预设）。
+ * 非选择题（无选项）恒为 1，避免判断题 / 解答题拿到残留的列数。
+ */
+export function optionColumnsOf(
+  item: { options: readonly unknown[]; optionColumns?: 1 | 2 | 4 },
+  fallback: 1 | 2 | 4 = 1,
+): 1 | 2 | 4 {
+  if (item.options.length === 0) return 1
+  return item.optionColumns ?? fallback
+}
+
 /** 难度标签配色（对应全局 .tag-* 类） */
 export function difficultyClass(difficulty: string): string {
   if (difficulty === '困难' || difficulty === '较难') return 'tag-red'

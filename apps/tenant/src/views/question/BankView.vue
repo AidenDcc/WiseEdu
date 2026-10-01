@@ -6,42 +6,47 @@ import {
   AppFilterPanel,
   AppListToolbar,
   AppSegmented,
+  QUESTION_SOURCE_OPTIONS,
   RichTextViewer,
   showToast,
   ApiError,
-  QUESTION_STATUS_TEXT,
   toPlainText,
   truncateRich,
 } from '@aiteach/shared'
 import type { FilterRowDef, OrgQuestion } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
-import AppDrawer from '@/components/ui/AppDrawer.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import KnowledgeFilter from '@/components/ui/KnowledgeFilter.vue'
+import QuestionOptions from '@/components/question/QuestionOptions.vue'
+import QuestionPreviewDrawer from '@/components/question/QuestionPreviewDrawer.vue'
 import {
   deleteQuestions,
   fetchQuestions,
   fetchTenantDict,
+  toggleQuestionOffline,
   variantOf,
 } from '@/api/org'
+import type { TenantDictItem } from '@/api/org'
+import { scopedQuestionTypes } from '@/composables/useBaseData'
 import { useScope } from '@/composables/useScope'
-import { useComposeBasket } from '@/composables/useComposeBasket'
-import { answerLetters, difficultyClass, needsFigure } from '@/utils/question-card'
+import {
+  difficultyClass,
+  isJudgeNoOptions,
+  judgeAnswerText,
+  needsFigure,
+  optionColumnsOf,
+} from '@/utils/question-card'
 
 const router = useRouter()
 const route = useRoute()
 
-/** 顶部栏的全局年级 / 学科：作为筛选默认值，切换时同步 */
+/** 顶部栏的全局年级 / 学科：只用来给下面的 scope 一个初值，之后以左侧面板为准 */
 const { grade: scopeGrade, subject: scopeSubject, ensureScope } = useScope()
 
-const LIBRARY_TEXT: Record<string, string> = { personal: '个人题库', org: '机构公共', wrong: '错题库' }
-const STATUS_CLASS: Record<string, string> = {
-  draft: 'tag-gray',
-  checking: 'tag-blue',
-  pending: 'tag-orange',
-  approved: 'tag-green',
-  rejected: 'tag-red',
-}
+/* 列表只呈现这两种状态，中文标签同时就是筛选面板里的取值（见 FIELD_OF.status）。
+   草稿 / 校验中 / 待终审 / 已驳回属于审核流，去「题目审核」页看。 */
+const STATUS_LABEL: Record<string, string> = { approved: '已入库', offline: '已下架' }
+const VISIBLE_STATUS = Object.keys(STATUS_LABEL)
 
 /* ===== 数据 ===== */
 const list = ref<OrgQuestion[]>([])
@@ -50,9 +55,12 @@ const loading = ref(false)
 async function load() {
   loading.value = true
   try {
-    // 字典加载失败不阻断开列（顶部栏作用域退化为缓存值，筛选仍可手动调整）
+    /* 顶部栏作用域只作为 scope 的初值（左侧知识点面板随后会抛出它自己的年级 / 学科，
+       那里才是这两个维度的权威来源）；字典失败不阻断开列，退化为缓存值即可 */
     await ensureScope().catch(() => {})
-    applyScope()
+    if (!scope.value.grade && scopeGrade.value) {
+      scope.value = { grade: scopeGrade.value, subject: scopeSubject.value }
+    }
     list.value = await fetchQuestions()
   } finally {
     loading.value = false
@@ -65,68 +73,108 @@ function onKnowledgeChange(tags: string[] | null) {
   activeTags.value = tags
 }
 
+/**
+ * 年级 / 学科：不再单独出筛选行，改由左侧知识点面板的教材级联（年级 → 学科 → 版本）驱动 ——
+ * 知识点树本来就是按这两个维度加载的，两处各筛一次只会互相打架。面板默认跟随顶部栏作用域，
+ * 所以初始行为与从前一致。
+ */
+const scope = ref({ grade: '', subject: '' })
+function onScopeChange(next: { grade: string; subject: string }) {
+  scope.value = next
+  /*
+   * 换学科后，原学科专属题型（英语的完形填空 / 七选五 / 短文改错）不再是候选项。
+   * 这种选中值在筛选面板里渲染不出 chip（chips 只按 options 渲染），却仍在参与筛选 ——
+   * 结果恒为空且用户找不到地方取消，所以一并去掉。字典未到位时不动，免得误清空。
+   */
+  const types = scopedQuestionTypes(typeItems.value, next.subject)
+  if (!next.subject || !types.length) return
+  filterSel.type = filterSel.type.filter((type) => types.includes(type))
+}
+
 /* ================= 右上：可折叠筛选条件 ================= */
 /**
  * 本页的筛选行定义。候选项大多来自租户字典，字典是异步到达的，所以这里只描述「去哪个字典取」，
- * 运行时再展开成共享组件要的 `FilterRowDef`（见 filterRows）。
+ * 运行时再展开成共享组件要的 `FilterRowDef`（见 filterRows / moreFilterRows）。
  */
 interface BankFilterRow {
-  key: 'type' | 'difficulty' | 'grade' | 'subject' | 'term' | 'examType'
+  key: 'type' | 'difficulty' | 'examType' | 'competition' | 'status' | 'useCount' | 'region' | 'source' | 'term'
   label: string
   dict?: string
   options?: string[]
 }
 
+/** 使用次数没法按精确值做筛选项，按档给；档位边界贴着种子分布，保证每档都有题 */
+const USE_COUNT_BUCKETS: Array<{ label: string; match: (count: number) => boolean }> = [
+  { label: '从未使用', match: (count) => count === 0 },
+  { label: '1-9 次', match: (count) => count >= 1 && count <= 9 },
+  { label: '10-19 次', match: (count) => count >= 10 && count <= 19 },
+  { label: '20 次以上', match: (count) => count >= 20 },
+]
+
+/** 主条件：顺序即产品指定的顺序（题型 / 难度 / 考试类型 / 杯赛） */
 const FILTER_ROWS: BankFilterRow[] = [
   { key: 'type', label: '题型', dict: 'questionType' },
   { key: 'difficulty', label: '难度', dict: 'difficulty' },
-  { key: 'grade', label: '年级', dict: 'grade' },
-  { key: 'subject', label: '学科', dict: 'subject' },
-  { key: 'term', label: '学期', options: ['上学期', '下学期'] },
   { key: 'examType', label: '考试类型', dict: 'examType' },
+  { key: 'competition', label: '杯赛', dict: 'competition' },
 ]
+
+/** 次要条件：收在「更多查询」里，选中后靠折叠开关上的角标露出 */
+const MORE_ROWS: BankFilterRow[] = [
+  { key: 'status', label: '状态', options: Object.values(STATUS_LABEL) },
+  { key: 'useCount', label: '使用次数', options: USE_COUNT_BUCKETS.map((row) => row.label) },
+  { key: 'region', label: '地区', dict: 'region' },
+  { key: 'source', label: '来源', options: QUESTION_SOURCE_OPTIONS },
+  { key: 'term', label: '学期', options: ['上学期', '下学期'] },
+]
+
+/** 主条件 + 更多查询 = 参与过滤的全部行（回写、清空、取值映射都按这份走） */
+const ALL_ROWS = [...FILTER_ROWS, ...MORE_ROWS]
 
 const filterSel = reactive<Record<BankFilterRow['key'], string[]>>({
   type: [],
   difficulty: [],
-  grade: [],
-  subject: [],
-  term: [],
   examType: [],
+  competition: [],
+  status: [],
+  useCount: [],
+  region: [],
+  source: [],
+  term: [],
 })
 const filterOptions = reactive<Record<string, string[]>>({})
+/** 题型字典原始项（含适用学科），候选项按当前学科实时收窄 */
+const typeItems = ref<TenantDictItem[]>([])
 
 /** 展开给共享 AppFilterPanel 的行定义（选项为空的字典行由组件显示「暂无可选项」） */
-const filterRows = computed<FilterRowDef[]>(() =>
-  FILTER_ROWS.map((row) => ({ key: row.key, label: row.label, options: rowOptions(row) })),
-)
+function toRowDefs(rows: BankFilterRow[]): FilterRowDef[] {
+  return rows.map((row) => ({ key: row.key, label: row.label, options: rowOptions(row) }))
+}
+const filterRows = computed<FilterRowDef[]>(() => toRowDefs(FILTER_ROWS))
+const moreFilterRows = computed<FilterRowDef[]>(() => toRowDefs(MORE_ROWS))
 
 /** AppFilterPanel 回传的是整份筛选值（覆盖式回写，不做级联） */
 function onFiltersChange(next: Record<string, string[]>) {
-  FILTER_ROWS.forEach((row) => {
+  ALL_ROWS.forEach((row) => {
     filterSel[row.key] = next[row.key] ?? []
   })
 }
 
 function rowOptions(row: BankFilterRow): string[] {
   if (row.options) return row.options
+  /* 题型是唯一按学科收窄的字典：通用题型 + 当前学科的专属题型（英语的完形填空 / 七选五 / 短文改错） */
+  if (row.dict === 'questionType') return scopedQuestionTypes(typeItems.value, scope.value.subject)
   return filterOptions[row.dict ?? ''] ?? []
 }
 
-/* ================= 顶部栏全局年级 / 学科 → 筛选默认值 ================= */
-/** 题库默认只看当前作用域（年级 + 学科）；顶部栏切换后立刻跟随，避免两个入口各说各话 */
-function applyScope() {
-  if (scopeGrade.value) filterSel.grade = [scopeGrade.value]
-  if (scopeSubject.value) filterSel.subject = [scopeSubject.value]
-}
-
-watch([scopeGrade, scopeSubject], () => applyScope())
-
 async function loadDicts() {
-  const dictTypes = [...new Set(FILTER_ROWS.map((row) => row.dict).filter((d): d is string => !!d))]
+  const dictTypes = [...new Set(ALL_ROWS.map((row) => row.dict).filter((d): d is string => !!d))]
   await Promise.all(
     dictTypes.map(async (type) => {
-      filterOptions[type] = (await fetchTenantDict(type)).map((item) => item.name)
+      const items = await fetchTenantDict(type)
+      /* 题型的候选项要随学科重算，留下原始字典项；其余字典只用到名字 */
+      if (type === 'questionType') typeItems.value = items
+      else filterOptions[type] = items.map((item) => item.name)
     }),
   )
 }
@@ -153,20 +201,35 @@ function setViewMode(value: string) {
 
 const page = ref(1)
 
+/**
+ * 每个筛选 key 从题目上取哪个值。
+ * 杯赛 / 地区是可选字段，缺省给空串 —— 空串永远不落在任何候选项里，等价于「这题没有这个属性」。
+ * 状态用中文标签（面板里显示的也是标签），使用次数用桶名（精确值做不了筛选项）。
+ */
 const FIELD_OF: Record<BankFilterRow['key'], (row: OrgQuestion) => string> = {
   type: (row) => row.type,
   difficulty: (row) => row.difficulty,
-  grade: (row) => row.grade,
-  subject: (row) => row.subject,
-  term: (row) => row.term ?? '',
   examType: (row) => row.examType ?? '',
+  competition: (row) => row.competition ?? '',
+  status: (row) => STATUS_LABEL[row.status] ?? '',
+  useCount: (row) => USE_COUNT_BUCKETS.find((bucket) => bucket.match(row.useCount))?.label ?? '',
+  region: (row) => row.region ?? '',
+  source: (row) => row.source,
+  term: (row) => row.term ?? '',
 }
 
 const filtered = computed(() => {
   const kw = keyword.value.trim()
+  /* 状态不选时 = 只看已入库；选「已下架」才把下架题翻出来重新上架。
+     硬性可见性（VISIBLE_STATUS）在下面第一道卡住草稿 / 校验中 / 待终审 / 已驳回。 */
+  const statusSel = filterSel.status.length ? filterSel.status : [STATUS_LABEL.approved]
   return list.value.filter((row) => {
+    if (!VISIBLE_STATUS.includes(row.status)) return false
+    if (scope.value.grade && row.grade !== scope.value.grade) return false
+    if (scope.value.subject && row.subject !== scope.value.subject) return false
     if (activeTags.value && !row.knowledge.some((tag) => activeTags.value!.includes(tag))) return false
-    for (const def of FILTER_ROWS) {
+    if (!statusSel.includes(FIELD_OF.status(row))) return false
+    for (const def of ALL_ROWS) {
       const selected = filterSel[def.key]
       if (selected.length > 0 && !selected.includes(FIELD_OF[def.key](row))) return false
     }
@@ -179,12 +242,12 @@ const filtered = computed(() => {
 const pageSize = 10
 const paged = computed(() => filtered.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 
-watch([activeTags, () => JSON.stringify(filterSel), keyword, viewMode], () => {
+watch([activeTags, scope, () => JSON.stringify(filterSel), keyword, viewMode], () => {
   page.value = 1
 })
 
-/* needsFigure / answerLetters / difficultyClass 与 AI 生成结果列表同源，
-   已收敛到 @/utils/question-card，避免两处各改一份 */
+/* needsFigure / difficultyClass 与 AI 生成结果列表同源，已收敛到 @/utils/question-card，
+   避免两处各改一份；「选项字母 + 正确项高亮」则由 QuestionOptions 组件统一渲染 */
 
 /* ===== 详细列表：解析展开 ===== */
 const analysisOpen = ref<number[]>([])
@@ -195,74 +258,27 @@ function toggleAnalysis(id: number) {
   else analysisOpen.value.push(id)
 }
 
-/* ================= 组卷篮（加入组卷库） ================= */
-/* 组卷工作台的组卷车（localStorage）：跨标签页交接的落点，见 pourIntoCompose */
-const composeBasket = useComposeBasket()
-const BASKET_KEY = 'aiteach.paper-basket'
-const basket = ref<number[]>([])
-
-function restoreBasket() {
-  try {
-    const raw = sessionStorage.getItem(BASKET_KEY)
-    if (raw) basket.value = JSON.parse(raw) as number[]
-  } catch {
-    basket.value = []
-  }
-}
-
-watch(
-  basket,
-  (ids) => {
-    if (ids.length) sessionStorage.setItem(BASKET_KEY, JSON.stringify(ids))
-    else sessionStorage.removeItem(BASKET_KEY)
-  },
-  { deep: true },
-)
-
-function addToBasket(row: OrgQuestion) {
-  if (basket.value.includes(row.id)) return
-  basket.value.push(row.id)
-  showToast(`题目 #${row.id} 已加入组卷库`, 'success')
-}
-
-function clearBasket() {
-  basket.value = []
-  showToast('已清空组卷库', 'info')
-}
-
-function goCollab() {
-  router.push({ path: '/paper/collab', query: { basket: '1' } })
-}
-
-/**
- * 带着本页组卷篮去「题库组卷」工作台。
- *
- * 为什么需要这道桥：本页的篮子是 `sessionStorage`（按标签页隔离），而工作台开在**另一个
- * 标签页**里，读不到它。所以交接必须在点击的当下、在本页把题灌进工作台的 localStorage 组卷车。
- *
- * 用 `<a target="_blank">` 而不是 `window.open`：新标签页由浏览器自己打开，永远不会被
- * 弹窗拦截器拦下（本函数虽然是同步的，但把「开标签页」交给浏览器更稳）。
- */
-function pourIntoCompose() {
-  const rows = basket.value
-    .map((id) => list.value.find((row) => row.id === id))
-    .filter((row): row is OrgQuestion => Boolean(row))
-  const added = composeBasket.addMany(rows, 'pool')
-  const skipped = rows.length - added
-  if (added === 0) {
-    showToast(rows.length === 0 ? '组卷篮中的题目已不在题库中' : `这 ${rows.length} 道题都已在组卷车中`)
-    return
-  }
-  showToast(skipped > 0 ? `已带入 ${added} 题，另有 ${skipped} 题已在组卷车中` : `已带入 ${added} 题到组卷工作台`)
-}
-
-/* ===== 操作：预览 / 编辑 / 变式 / 删除 ===== */
+/* ===== 操作：预览 / 纠错 / 变式 / 上下架 / 删除 ===== */
 const preview = ref<OrgQuestion | null>(null)
 const variantOpen = ref<OrgQuestion | null>(null)
 
-/** 带题目 id 进录题中心（落手动态；新建入口在侧边菜单，列表里只做编辑） */
+/** 带题目 id 进录题中心（落手动态；新建入口在侧边菜单，列表里只做纠错改题） */
 function goEdit(id: number) {
   router.push({ path: '/question/create', query: { id: String(id) } })
+}
+
+/**
+ * 上架 / 下架。后端只在 `已入库 ⇄ 已下架` 之间切换，其余状态会报错（那种题本来也不在本列表里）。
+ * toast 按**返回值**说，不按点击前的状态取反 —— 列表点完就重载，说错了用户也看不出是哪里不对。
+ */
+async function onToggleOffline(row: OrgQuestion) {
+  try {
+    const next = await toggleQuestionOffline(row.id)
+    showToast(next.status === 'offline' ? `题目 #${row.id} 已下架` : `题目 #${row.id} 已重新上架`, 'success')
+    void load()
+  } catch (error) {
+    showToast(error instanceof ApiError ? error.message : '操作失败', 'error')
+  }
 }
 
 async function onManualVariant() {
@@ -293,7 +309,6 @@ async function onDelete(row: OrgQuestion) {
 
 /* ===== 挂载 ===== */
 onMounted(() => {
-  restoreBasket()
   void load()
   void loadDicts()
 })
@@ -301,13 +316,16 @@ onMounted(() => {
 
 <template>
   <div class="bank-layout">
-    <KnowledgeFilter :rows="list" @change="onKnowledgeChange" />
+    <!-- 年级 / 学科由左侧教材级联驱动（scopeChange），右上不再重复出这两行 -->
+    <KnowledgeFilter :rows="list" @change="onKnowledgeChange" @scope-change="onScopeChange" />
 
     <!-- 右侧 -->
     <div class="right-col">
-      <!-- 搜索条件（可折叠；行渲染 / 折叠汇总 / 清空由共享组件 AppFilterPanel 负责） -->
+      <!-- 搜索条件（可折叠；行渲染 / 折叠汇总 / 清空由共享组件 AppFilterPanel 负责，
+           「更多查询」里收着使用次数 / 地区 / 来源 / 学期等次要条件） -->
       <AppFilterPanel
         :rows="filterRows"
+        :more-rows="moreFilterRows"
         :model-value="filterSel"
         @update:model-value="onFiltersChange"
       />
@@ -322,18 +340,20 @@ onMounted(() => {
 
         <!-- 表格显示 -->
         <div v-if="viewMode === 'table'" class="data-table-wrap">
-          <table class="data-table">
+          <table class="data-table bank-table">
             <thead>
               <tr>
                 <th style="width: 46px">序号</th>
                 <th style="width: 84px">题目编号</th>
-                <th class="th-stem">题干</th>
+                <!-- 题干列是唯一的「不定宽」列：table-layout: fixed 下它吃掉剩余空间，
+                     于是窗口越宽题干越舒展、窄了就换行（见 .bank-table 的说明） -->
+                <th>题干</th>
                 <th style="width: 76px">题型</th>
                 <th style="width: 66px">难度</th>
                 <th style="width: 150px">知识点</th>
-                <th style="width: 76px">考试次数</th>
+                <th style="width: 76px">使用次数</th>
                 <th style="width: 96px">更新时间</th>
-                <th style="width: 250px">操作</th>
+                <th style="width: 264px">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -356,15 +376,10 @@ onMounted(() => {
                   <td>
                     <div class="op-group">
                       <button class="mini-btn" type="button" @click="preview = row">预览</button>
-                      <button class="mini-btn" type="button" @click="goEdit(row.id)">编辑</button>
+                      <button class="mini-btn" type="button" @click="goEdit(row.id)">纠错</button>
                       <button class="mini-btn" type="button" @click="variantOpen = row">变式</button>
-                      <button
-                        class="mini-btn success"
-                        :disabled="basket.includes(row.id)"
-                        type="button"
-                        @click="addToBasket(row)"
-                      >
-                        {{ basket.includes(row.id) ? '已在组卷库' : '加入组卷库' }}
+                      <button class="mini-btn" type="button" @click="onToggleOffline(row)">
+                        {{ row.status === 'offline' ? '上架' : '下架' }}
                       </button>
                     </div>
                   </td>
@@ -382,9 +397,8 @@ onMounted(() => {
               <span class="qc-id">#{{ row.id }}</span>
               <span class="tag tag-blue">{{ row.type }}</span>
               <span class="tag" :class="difficultyClass(row.difficulty)">{{ row.difficulty }}</span>
-              <span class="tag" :class="STATUS_CLASS[row.status]">{{ QUESTION_STATUS_TEXT[row.status] }}</span>
               <span class="qc-kp">{{ row.knowledge.join('、') }}</span>
-              <span class="qc-right">考试 {{ row.useCount }} 次 · {{ row.updatedAt.slice(5, 16) }}</span>
+              <span class="qc-right">使用 {{ row.useCount }} 次 · {{ row.updatedAt.slice(5, 16) }}</span>
             </div>
             <RichTextViewer class="qc-stem" :content="row.stem" @click="preview = row" />
             <!-- 配图（含图形描述的题展示图位；题内已嵌图的不再占位） -->
@@ -392,28 +406,23 @@ onMounted(() => {
               <AppIcon name="image" :size="26" />
               <span>题目配图（演示占位）</span>
             </div>
-            <ul v-if="row.options.length > 0" class="qc-options">
-              <li
-                v-for="(opt, i) in row.options"
-                :key="i"
-                :class="{ right: answerLetters(row).includes('ABCDEF'[i]) }"
-              >
-                <span class="opt-letter">{{ 'ABCDEF'[i] }}</span>
-                <RichTextViewer :content="opt" tag="span" />
-              </li>
-            </ul>
+            <QuestionOptions
+              class="qc-options"
+              :options="row.options"
+              :answer="row.answer"
+              :columns="optionColumnsOf(row)"
+            />
             <div v-if="analysisOpen.includes(row.id)" class="qc-answer">
               <p>
                 <b>答案：</b>
-                <!-- 客观题答案是字母用强调色纯文本；问答题答案是富文本（公式/插图） -->
-                <span v-if="row.options.length" class="qc-answer-text">{{ row.answer || '—' }}</span>
+                <!-- 客观题答案是字母用强调色纯文本；无选项判断题的对/错同理；
+                     问答题答案是富文本（公式/插图） -->
+                <span v-if="row.options.length || isJudgeNoOptions(row)" class="qc-answer-text">
+                  {{ isJudgeNoOptions(row) ? judgeAnswerText(row.answer) : row.answer || '—' }}
+                </span>
                 <RichTextViewer v-else :content="row.answer" tag="span" empty="—" />
               </p>
               <p><b>解析：</b><RichTextViewer :content="row.analysis" tag="span" empty="—" /></p>
-            </div>
-            <div v-if="basket.includes(row.id) || row.status === 'rejected'" class="qc-flags">
-              <span v-if="basket.includes(row.id)" class="tag tag-green">已加入组卷库</span>
-              <span v-if="row.status === 'rejected'" class="qc-reject">驳回意见：{{ row.reviewOpinion }}</span>
             </div>
             <div class="qc-ops">
               <button class="btn btn-ghost btn-sm" type="button" @click="onDelete(row)">删除</button>
@@ -421,15 +430,10 @@ onMounted(() => {
               <button class="mini-btn" type="button" @click="toggleAnalysis(row.id)">
                 {{ analysisOpen.includes(row.id) ? '收起解析' : '解析' }}
               </button>
-              <button class="mini-btn" type="button" @click="goEdit(row.id)">编辑</button>
+              <button class="mini-btn" type="button" @click="goEdit(row.id)">纠错</button>
               <button class="mini-btn" type="button" @click="variantOpen = row">变式</button>
-              <button
-                class="mini-btn success"
-                :disabled="basket.includes(row.id)"
-                type="button"
-                @click="addToBasket(row)"
-              >
-                {{ basket.includes(row.id) ? '已在组卷库' : '加入组卷库' }}
+              <button class="mini-btn" type="button" @click="onToggleOffline(row)">
+                {{ row.status === 'offline' ? '上架' : '下架' }}
               </button>
             </div>
           </article>
@@ -439,40 +443,8 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- 题目预览 -->
-    <AppDrawer v-if="preview" :title="`题目 #${preview.id}`" subtitle="学生视角预览" @close="preview = null">
-      <div class="detail-grid">
-        <div class="detail-item"><div class="d-label">学科 / 年级</div><div class="d-value">{{ preview.subject }} · {{ preview.grade }}</div></div>
-        <div class="detail-item"><div class="d-label">题型 / 难度</div><div class="d-value">{{ preview.type }} · {{ preview.difficulty }}</div></div>
-        <div class="detail-item"><div class="d-label">知识点</div><div class="d-value">{{ preview.knowledge.join('、') }}</div></div>
-        <div class="detail-item"><div class="d-label">来源 / 库</div><div class="d-value">{{ preview.source }} · {{ LIBRARY_TEXT[preview.library] }}</div></div>
-        <div class="detail-item"><div class="d-label">学期 / 考试类型</div><div class="d-value">{{ preview.term ?? '—' }} · {{ preview.examType ?? '—' }}</div></div>
-        <div class="detail-item"><div class="d-label">考试次数</div><div class="d-value">{{ preview.useCount }} 次</div></div>
-      </div>
-      <h4 class="section-title">题干</h4>
-      <RichTextViewer class="q-text" :content="preview.stem" empty="—" />
-      <template v-if="preview.options.length > 0">
-        <h4 class="section-title">选项</h4>
-        <ul class="option-list">
-          <li v-for="(opt, i) in preview.options" :key="i" :class="{ right: answerLetters(preview).includes('ABCDEF'[i]) }">
-            {{ 'ABCDEF'[i] }}. <RichTextViewer :content="opt" tag="span" />
-          </li>
-        </ul>
-      </template>
-      <h4 class="section-title">答案</h4>
-      <RichTextViewer v-if="!preview.options.length" class="q-text" :content="preview.answer" empty="—" />
-      <p v-else class="q-text answer">{{ preview.answer || '—' }}</p>
-      <h4 class="section-title">解析</h4>
-      <RichTextViewer class="q-text" :content="preview.analysis" empty="—" />
-      <template v-if="preview.variantOf != null">
-        <h4 class="section-title">变式关联</h4>
-        <p class="q-text">本题为题目 #{{ preview.variantOf }} 的变式，原题-变式关联永久存档，可互跳。</p>
-      </template>
-      <template v-if="preview.reviewOpinion">
-        <h4 class="section-title">审核意见</h4>
-        <p class="q-text reject">{{ preview.reviewOpinion }}</p>
-      </template>
-    </AppDrawer>
+    <!-- 题目预览（与录题中心共用同一个抽屉组件，两页不再各写一份） -->
+    <QuestionPreviewDrawer v-if="preview" :question="preview" @close="preview = null" />
 
     <!-- 变式入口 -->
     <AppModal v-if="variantOpen" :title="`变式 · 题目 #${variantOpen.id}`" @close="variantOpen = null">
@@ -486,17 +458,6 @@ onMounted(() => {
         <span class="ve-desc">选择变式策略批量生成（消耗 AI 额度），结果卡片可逐题采纳 / 丢弃</span>
       </button>
     </AppModal>
-
-    <!-- 组卷篮浮动条 -->
-    <div v-if="basket.length" class="basket-bar">
-      <AppIcon name="file" :size="16" />
-      <span>已选 <b>{{ basket.length }}</b> 题</span>
-      <button class="btn btn-primary btn-sm" @click="goCollab">去组卷</button>
-      <a class="btn btn-ghost btn-sm" href="/paper/compose" target="_blank" rel="noopener" @click="pourIntoCompose">
-        在新标签页组卷
-      </a>
-      <button class="btn btn-ghost btn-sm" @click="clearBasket">清空</button>
-    </div>
   </div>
 </template>
 
@@ -534,14 +495,11 @@ onMounted(() => {
 .data-table-wrap { flex: 1; min-height: 0; overflow: auto; }
 .table-panel .pagination { flex-shrink: 0; }
 
-.th-stem { min-width: 220px; }
+/* 列宽：题干列不给宽度，在 table-layout: fixed 下自动吃掉剩余空间 —— 于是题干是「按列宽
+   换行」而不是被截断（换行本身由 RichTextViewer 的 word-break 负责）。
+   固定列合计 858px（见各 <th> 的内联宽度），min-width 让窗口再窄就横向滚动，题干列始终有地儿放字 */
+.bank-table { table-layout: fixed; min-width: 1080px; }
 .stem-cell {
-  max-width: 320px;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
-  overflow: hidden;
   line-height: 1.6;
   font-size: 13px;
   color: var(--ink-2);
@@ -582,20 +540,8 @@ onMounted(() => {
   color: var(--sub);
   font-size: 12.5px;
 }
-.qc-options { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
-.qc-options li {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  padding: 8px 12px;
-  font-size: 13px;
-  color: var(--ink-2);
-}
-.qc-options li.right { border-color: var(--success); background: var(--success-soft, #ecfaf4); }
-.opt-letter { font-weight: 700; color: var(--sub); }
-.qc-options li.right .opt-letter { color: var(--success); }
+/* 选项的外观（描边块 / 正确项高亮 / 一行 N 个）都在 QuestionOptions 里，这里只负责与上方题干的距离 */
+.qc-options { margin-top: 10px; }
 .qc-answer {
   margin-top: 10px;
   border-left: 3px solid var(--brand);
@@ -611,43 +557,10 @@ onMounted(() => {
 }
 .qc-answer b { color: var(--ink); }
 .qc-answer-text { color: var(--success); font-weight: 600; }
-.qc-flags { margin-top: 8px; display: flex; align-items: center; gap: 10px; }
-.qc-reject { font-size: 12.5px; color: var(--danger); }
 .qc-ops { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 10px; }
 
-/* ===== 组卷篮浮动条 ===== */
-.basket-bar {
-  position: fixed;
-  right: 28px;
-  bottom: 28px;
-  z-index: 40;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  box-shadow: 0 10px 30px rgba(15, 60, 55, 0.16);
-  padding: 9px 12px 9px 18px;
-  font-size: 13px;
-  color: var(--ink-2);
-}
-.basket-bar b { color: var(--brand-deep); }
-
-/* ===== 预览抽屉 ===== */
-.q-text {
-  font-size: 13.5px;
-  color: var(--ink-2);
-  line-height: 1.8;
-  background: #f7fafa;
-  border-radius: 10px;
-  padding: 12px 14px;
-}
-.q-text.answer { color: var(--success); font-weight: 600; }
-.q-text.reject { color: var(--danger); }
-.option-list { display: flex; flex-direction: column; gap: 8px; }
-.option-list li { background: #f7fafa; border-radius: 8px; padding: 9px 12px; font-size: 13.5px; color: var(--ink-2); }
-.option-list li.right { background: var(--success-soft, #ecfaf4); color: var(--success); font-weight: 600; }
+/* ===== 预览抽屉 =====
+   样式与结构都在共享组件 QuestionPreviewDrawer 里（录题中心同一份），本页不再持有。 */
 
 /* ===== 变式入口 ===== */
 .variant-entry {

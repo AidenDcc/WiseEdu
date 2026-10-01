@@ -22,8 +22,11 @@ import { interpretComposeSearch as mockInterpret } from './org'
 
 export type ComposeSearchEngine = 'deepseek' | 'mock'
 
-/** 题型白名单（与字典 questionType 的取值一致） */
-export const COMPOSE_TYPE_OPTIONS = ['单选题', '多选题', '判断题', '填空题', '解答题']
+/** 题型白名单（与字典 questionType 的取值一致；末尾三个是英语专属题型） */
+export const COMPOSE_TYPE_OPTIONS = [
+  '单选', '多选', '判断', '填空', '解答', '计算', '证明', '连线', '作文',
+  '完形填空', '七选五', '短文改错',
+]
 /** 难度白名单（与字典 difficulty 的取值一致） */
 export const COMPOSE_DIFFICULTY_OPTIONS = ['容易', '较易', '中等', '较难', '困难']
 

@@ -38,11 +38,34 @@ export const DICT_TYPES: Array<{ key: DictTypeKey; title: string; hint: string }
   { key: 'subject', title: '学科', hint: '编码唯一，创建后不可修改' },
   { key: 'grade', title: '年级 / 学段', hint: '年级挂靠学段' },
   { key: 'term', title: '学期', hint: '起止日期不可交叉重叠' },
-  { key: 'questionType', title: '题型', hint: '已被题目使用的题型不可修改作答类型' },
+  { key: 'questionType', title: '题型', hint: '已被题目使用的题型不可修改作答类型；可限定适用学科' },
   { key: 'difficulty', title: '难度等级', hint: '系数 0.1-1.0，保留 1 位小数且不可重复' },
   { key: 'examType', title: '考试类型', hint: '题目筛选与组卷场景使用的考试类型' },
+  { key: 'competition', title: '杯赛', hint: '题目筛选维度，非杯赛题留空' },
+  { key: 'region', title: '地区', hint: '题目来源地区，用于筛名校真题' },
   { key: 'copyright', title: '版权信息', hint: '机构端首页页脚文案，一行一条，按排序展示' },
 ]
+
+/**
+ * 杯赛 / 地区的取值。字典项与题目种子共用这一份 —— 题目侧按题号轮转取值（见
+ * seedQuestionMeta），若两处各写一份字符串，必然出现「筛选项在、却没题命中」。
+ */
+export const COMPETITIONS = ['华罗庚金杯', '希望杯', '全国高中数学联赛', '全国初中数学联赛', '全国中学生英语能力竞赛']
+export const REGIONS = ['全国', '北京', '上海', '江苏', '浙江', '广东', '山东', '湖北', '四川']
+
+/** 杯赛只挂理科题：文科题挂着「华罗庚金杯」在演示里一眼假 */
+const COMPETITION_SUBJECTS = new Set(['数学', '物理', '化学'])
+
+/**
+ * 题目种子的地区 / 杯赛默认值，按题号轮转。演示数据必须保证每个字典取值都有样本，
+ * 否则新加的筛选项点哪个都是空列表。
+ */
+export function seedQuestionMeta(id: number, subject: string): { region: string; competition?: string } {
+  return {
+    region: REGIONS[id % REGIONS.length],
+    competition: id % 3 === 0 && COMPETITION_SUBJECTS.has(subject) ? COMPETITIONS[id % COMPETITIONS.length] : undefined,
+  }
+}
 
 export const dictStore: Record<DictTypeKey, DictItem[]> = {
   subject: [
@@ -80,12 +103,20 @@ export const dictStore: Record<DictTypeKey, DictItem[]> = {
     { id: 26, name: '2026-2027 下学期', year: '2026-2027', termHalf: '下学期', dateFrom: '2027-02-22', dateTo: '2027-07-09', sort: 6, enabled: true, refCount: 0 },
   ],
   questionType: [
-    { id: 31, name: '单选题', answerType: '选择', sort: 1, enabled: true, refCount: 9 },
-    { id: 32, name: '多选题', answerType: '选择', sort: 2, enabled: true, refCount: 7 },
-    { id: 36, name: '判断题', answerType: '选择', sort: 3, enabled: true, refCount: 3 },
-    { id: 33, name: '填空题', answerType: '填空', sort: 4, enabled: true, refCount: 8 },
-    { id: 34, name: '解答题', answerType: '解答', sort: 5, enabled: true, refCount: 9 },
-    { id: 35, name: '作图题', answerType: '解答', sort: 6, enabled: false, refCount: 1 },
+    { id: 31, name: '单选', answerType: '选择', sort: 1, enabled: true, refCount: 9 },
+    { id: 32, name: '多选', answerType: '选择', sort: 2, enabled: true, refCount: 7 },
+    { id: 36, name: '判断', answerType: '选择', sort: 3, enabled: true, refCount: 3 },
+    { id: 33, name: '填空', answerType: '填空', sort: 4, enabled: true, refCount: 8 },
+    { id: 34, name: '解答', answerType: '解答', sort: 5, enabled: true, refCount: 9 },
+    { id: 37, name: '计算', answerType: '解答', sort: 6, enabled: true, refCount: 1 },
+    { id: 38, name: '证明', answerType: '解答', sort: 7, enabled: true, refCount: 1 },
+    { id: 39, name: '连线', answerType: '连线', sort: 8, enabled: true, refCount: 1 },
+    { id: 40, name: '作文', answerType: '解答', sort: 9, enabled: true, refCount: 1 },
+    /* 英语专属题型（subjects 限定）：录题 / 筛选题型时先选学科，选到英语才多出这三项 */
+    { id: 42, name: '完形填空', answerType: '填空', sort: 10, enabled: true, refCount: 1, subjects: ['英语'] },
+    { id: 43, name: '七选五', answerType: '填空', sort: 11, enabled: true, refCount: 1, subjects: ['英语'] },
+    { id: 44, name: '短文改错', answerType: '解答', sort: 12, enabled: true, refCount: 1, subjects: ['英语'] },
+    { id: 35, name: '作图', answerType: '解答', sort: 13, enabled: false, refCount: 1 },
   ],
   difficulty: [
     { id: 41, name: '容易', coefficient: 0.3, sort: 1, enabled: true, refCount: 9 },
@@ -106,6 +137,10 @@ export const dictStore: Record<DictTypeKey, DictItem[]> = {
     { id: 59, name: '高考真题', sort: 9, enabled: true, refCount: 4 },
     { id: 60, name: '专题训练', sort: 10, enabled: true, refCount: 3 },
   ],
+  /* 题库筛选维度。refCount 沿用本文件其余字典的「静态演示值」口径（>0 时仅可停用、不可删除），
+     故用递减值填出「每一项都被题引用过」的样子 */
+  competition: COMPETITIONS.map((name, i) => ({ id: 81 + i, name, sort: i + 1, enabled: true, refCount: 6 - i })),
+  region: REGIONS.map((name, i) => ({ id: 91 + i, name, sort: i + 1, enabled: true, refCount: 12 - i })),
   /* 页脚文案：refCount 为该文案覆盖的机构数（平台统一展示，停用后机构端页脚不再出现该条） */
   copyright: [
     { id: 71, name: '© 2024-2026 星辰教育科技（杭州）有限公司 版权所有', sort: 1, enabled: true, refCount: 12 },
@@ -193,6 +228,7 @@ export function saveDictItem(type: DictTypeKey, input: Partial<DictItem>): DictI
     dateTo: input.dateTo,
     answerType: input.answerType,
     coefficient: input.coefficient,
+    subjects: input.subjects?.length ? [...input.subjects] : undefined,
   }
   items.push(item)
   return item
@@ -809,7 +845,7 @@ export function listAiLogs(query: {
 export const publicQuestions: PublicQuestion[] = [
   {
     id: 1, stem: '已知二次函数 f(x) = x² - 2x - 3，求其图像与 x 轴的交点坐标…', subject: '数学',
-    knowledge: '二次函数图像与性质', type: '解答题', difficulty: '中等', orgMasked: '机构 A',
+    knowledge: '二次函数图像与性质', type: '解答', difficulty: '中等', orgMasked: '机构 A',
     variantCount: 3, aiStatus: '全部通过', createdAt: dateAfter(-9),
     options: [], answer: '(-1, 0) 与 (3, 0)', analysis: '令 f(x)=0 即 x²-2x-3=0，解得 x₁=-1，x₂=3。',
     report: '语义完整性✓ 计算验算✓ LaTeX✓ 知识点匹配✓ 难度匹配✓ 查重(8%)✓',
@@ -817,7 +853,7 @@ export const publicQuestions: PublicQuestion[] = [
   },
   {
     id: 2, stem: '下列关于牛顿第三定律的说法正确的是（ ）…', subject: '物理',
-    knowledge: '牛顿运动定律', type: '单选题', difficulty: '较易', orgMasked: '机构 C',
+    knowledge: '牛顿运动定律', type: '单选', difficulty: '较易', orgMasked: '机构 C',
     variantCount: 1, aiStatus: '人工终审通过', createdAt: dateAfter(-6),
     options: ['A. 作用力与反作用力作用在同一物体上', 'B. 作用力与反作用力大小相等、方向相反', 'C. 先有作用力后有反作用力', 'D. 作用力与反作用力性质可以不同'],
     answer: 'B', analysis: '作用力与反作用力等大反向、作用在两个物体上、同时产生同时消失、性质相同。',
@@ -826,7 +862,7 @@ export const publicQuestions: PublicQuestion[] = [
   },
   {
     id: 3, stem: '阅读下面的文言文，完成后面题目：邹忌修八尺有余……', subject: '语文',
-    knowledge: '文言文阅读', type: '解答题', difficulty: '较难', orgMasked: '机构 A',
+    knowledge: '文言文阅读', type: '解答', difficulty: '较难', orgMasked: '机构 A',
     variantCount: 0, aiStatus: '全部通过', createdAt: dateAfter(-4),
     options: [], answer: '（示例）纳谏、自知之明', analysis: '考查对文意的理解概括与实词推断。',
     report: '语义完整性✓ 知识点匹配✓ 难度匹配✓ 查重(5%)✓',
@@ -834,7 +870,7 @@ export const publicQuestions: PublicQuestion[] = [
   },
   {
     id: 4, stem: '设集合 A = {x | x² - 3x + 2 = 0}，B = {x | 0 < x < 3}，则 A ∩ B = …', subject: '数学',
-    knowledge: '集合运算', type: '填空题', difficulty: '容易', orgMasked: '机构 D',
+    knowledge: '集合运算', type: '填空', difficulty: '容易', orgMasked: '机构 D',
     variantCount: 2, aiStatus: '自动修复 2 处后通过', createdAt: dateAfter(-2),
     options: [], answer: '{1, 2}', analysis: 'A = {1,2}，B 为开区间，交集为 {1,2}。',
     report: '数值笔误×2 → 自动修复（置信度 96%/93%）其余项通过',
@@ -842,7 +878,7 @@ export const publicQuestions: PublicQuestion[] = [
   },
   {
     id: 5, stem: 'As is known to all, the Great Wall ___ (stretch) across northern China…', subject: '英语',
-    knowledge: '时态语态', type: '填空题', difficulty: '中等', orgMasked: '机构 B',
+    knowledge: '时态语态', type: '填空', difficulty: '中等', orgMasked: '机构 B',
     variantCount: 1, aiStatus: '全部通过', createdAt: dateAfter(-1),
     options: [], answer: 'stretches', analysis: '一般现在时，主语单数。',
     report: '语义完整性✓ 语法✓ 知识点匹配✓ 查重(11%)✓',
@@ -859,7 +895,7 @@ export const publicPapers: PublicPaper[] = [
 
 export const auditRecords: AuditRecord[] = [
   {
-    id: 1, objectType: '题目', objectName: '二次函数与 x 轴交点（解答题）', agentPassed: 7, agentTotal: 8,
+    id: 1, objectType: '题目', objectName: '二次函数与 x 轴交点（解答）', agentPassed: 7, agentTotal: 8,
     autoFixed: 1, reviewer: '王老师（机构 A）', conclusion: '人工终审通过', reviewedAt: dateAfter(-2),
     timeline: [
       { time: dateAfter(-2.1), step: 'AI 出题', detail: 'GPT-4o 生成题目初稿（耗时 2.3s，1,842 tokens）' },
@@ -871,7 +907,7 @@ export const auditRecords: AuditRecord[] = [
     ],
   },
   {
-    id: 2, objectType: '题目', objectName: '牛顿第三定律（单选题）', agentPassed: 7, agentTotal: 8,
+    id: 2, objectType: '题目', objectName: '牛顿第三定律（单选）', agentPassed: 7, agentTotal: 8,
     autoFixed: 0, reviewer: '李老师（机构 C）', conclusion: '人工终审通过', reviewedAt: dateAfter(-4),
     timeline: [
       { time: dateAfter(-4.1), step: 'AI 出题', detail: 'Claude Sonnet 生成题目初稿' },
@@ -890,7 +926,7 @@ export const auditRecords: AuditRecord[] = [
     ],
   },
   {
-    id: 4, objectType: '题目', objectName: '集合交集（填空题）', agentPassed: 6, agentTotal: 8,
+    id: 4, objectType: '题目', objectName: '集合交集（填空）', agentPassed: 6, agentTotal: 8,
     autoFixed: 2, reviewer: '赵老师（机构 D）', conclusion: '人工终审驳回', reviewedAt: dateAfter(-1),
     timeline: [
       { time: dateAfter(-1.2), step: '拍照识题入库', detail: 'MathOCR-Pro 识别（1,024 tokens）' },
@@ -922,7 +958,7 @@ export const operationLogs: OperationLog[] = [
   { id: 6, account: 'admin', module: '系统管理', action: '重置管理员密码', target: 'ops_wang', ok: true, time: nowStr(-30) },
   { id: 7, account: 'orgadmin_a', module: '试卷管理', action: '发布试卷', target: '期中模拟卷（一）', ok: false, time: nowStr(-46) },
   { id: 8, account: 'admin', module: '租户管理', action: '续费机构', target: '广州明师教育', ok: true, time: nowStr(-52) },
-  { id: 9, account: 'ops_wang', module: '全局字典', action: '删除字典项', target: '题型-判断题', ok: false, time: nowStr(-80) },
+  { id: 9, account: 'ops_wang', module: '全局字典', action: '删除字典项', target: '题型-判断', ok: false, time: nowStr(-80) },
   { id: 10, account: 'admin', module: '套餐管理', action: '新增套餐', target: '轻量版', ok: true, time: nowStr(-96) },
 ]
 

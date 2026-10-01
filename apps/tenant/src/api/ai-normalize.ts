@@ -253,6 +253,6 @@ export function parseQuestionResponse(content: string, params: UserPromptParams)
     maxCount: params.count,
     allowedKnowledge: params.knowledge,
     /* 只有解答题用富文本编辑器承载答案；填空题答案走纯文本空值回填 */
-    richAnswer: params.type === '解答题',
+    richAnswer: params.type === '解答',
   })
 }

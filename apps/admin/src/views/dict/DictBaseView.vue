@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { AppIcon, AppListToolbar, showToast, ApiError, DICT_TYPES } from '@aiteach/shared'
 import type { DictItem, DictTypeKey } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
@@ -66,7 +66,7 @@ function onImport() {
 
 /* ===== 新增 / 编辑弹窗（编码编辑时置灰） ===== */
 const STAGES = ['小学', '初中', '高中']
-const ANSWER_TYPES = ['选择', '填空', '解答']
+const ANSWER_TYPES = ['选择', '填空', '连线', '解答']
 
 const editing = ref<DictItem | 'new' | null>(null)
 const form = reactive({
@@ -78,10 +78,28 @@ const form = reactive({
   dateFrom: '',
   dateTo: '',
   answerType: '选择',
+  /* 适用学科（仅题型用）：空 = 全学科通用 */
+  subjects: [] as string[],
   coefficient: 0.5,
 })
 const formError = ref('')
 const saving = ref(false)
+
+/** 适用学科候选项取自学科字典，与机构端下拉同一份口径 */
+const subjectOptions = ref<string[]>([])
+
+async function loadSubjectOptions() {
+  subjectOptions.value = (await fetchDict('subject')).map((item) => item.name)
+}
+
+/* 学科名只在「题型」弹窗里用到，进入该字典类型时按需加载一次，不为其他类型多打一个请求 */
+watch(
+  activeType,
+  (type) => {
+    if (type === 'questionType' && !subjectOptions.value.length) void loadSubjectOptions()
+  },
+  { immediate: true },
+)
 
 function openCreate() {
   editing.value = 'new'
@@ -93,6 +111,7 @@ function openCreate() {
   form.dateFrom = ''
   form.dateTo = ''
   form.answerType = '选择'
+  form.subjects = []
   form.coefficient = 0.5
   formError.value = ''
 }
@@ -107,6 +126,7 @@ function openEdit(item: DictItem) {
   form.dateFrom = item.dateFrom ?? ''
   form.dateTo = item.dateTo ?? ''
   form.answerType = item.answerType ?? '选择'
+  form.subjects = [...(item.subjects ?? [])]
   form.coefficient = item.coefficient ?? 0.5
   formError.value = ''
 }
@@ -128,6 +148,9 @@ async function save() {
       dateFrom: activeType.value === 'term' ? form.dateFrom : undefined,
       dateTo: activeType.value === 'term' ? form.dateTo : undefined,
       answerType: activeType.value === 'questionType' ? form.answerType : undefined,
+      /* 不勾任何学科即全学科通用：传 undefined 而不是空数组，两种写法在字典里都表示「不限定」 */
+      subjects:
+        activeType.value === 'questionType' && form.subjects.length ? [...form.subjects] : undefined,
       coefficient: activeType.value === 'difficulty' ? form.coefficient : undefined,
     })
     showToast('已保存', 'success')
@@ -192,6 +215,7 @@ onMounted(load)
               <th v-if="activeType === 'subject'">编码</th>
               <th v-if="activeType === 'term'">起止日期</th>
               <th v-if="activeType === 'questionType'">作答类型</th>
+              <th v-if="activeType === 'questionType'">适用学科</th>
               <th v-if="activeType === 'difficulty'">系数</th>
               <th>排序</th>
               <th>机构引用</th>
@@ -214,6 +238,10 @@ onMounted(load)
                 <td v-if="activeType === 'subject'"><code class="code-chip">{{ item.code }}</code></td>
                 <td v-if="activeType === 'term'">{{ item.dateFrom }} ~ {{ item.dateTo }}</td>
                 <td v-if="activeType === 'questionType'">{{ item.answerType }}</td>
+                <td v-if="activeType === 'questionType'">
+                  <span v-if="item.subjects?.length">{{ item.subjects.join('、') }}</span>
+                  <span v-else class="ref-zero">全学科</span>
+                </td>
                 <td v-if="activeType === 'difficulty'">{{ item.coefficient?.toFixed(1) }}</td>
                 <td>
                   <div class="op-group">
@@ -300,6 +328,16 @@ onMounted(load)
           该题型已被题目使用，保存后作答类型不建议修改。
         </p>
       </div>
+      <div v-if="activeType === 'questionType'" class="f-field">
+        <label class="f-label">适用学科（不勾选 = 全学科通用）</label>
+        <div class="subject-checks">
+          <label v-for="subject in subjectOptions" :key="subject" class="check-item">
+            <input v-model="form.subjects" type="checkbox" :value="subject" />
+            {{ subject }}
+          </label>
+        </div>
+        <p class="f-hint">勾选后该题型只在机构端选到这些学科时出现，如「完形填空 / 七选五 / 短文改错」只勾英语。</p>
+      </div>
       <div v-if="activeType === 'difficulty'" class="f-field">
         <label class="f-label">难度系数（0.1 - 1.0）<span class="req">*</span></label>
         <input v-model.number="form.coefficient" class="f-input" type="number" min="0.1" max="1" step="0.1" />
@@ -353,5 +391,7 @@ onMounted(load)
 .date-row .f-input { flex: 1; }
 .range-sep { font-size: 12.5px; color: var(--sub); }
 .warn-hint { color: var(--warn); }
+.subject-checks { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.check-item { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
 .form-err { font-size: 12px; color: var(--danger); margin: 4px 0; }
 </style>

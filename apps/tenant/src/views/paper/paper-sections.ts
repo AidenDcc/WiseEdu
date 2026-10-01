@@ -23,22 +23,42 @@ export interface SectionSeed {
   sectionTitle?: string
 }
 
-/** 题型 → 大题标准名（新建大题时用它命名） */
+/** 题型 → 大题标准名（新建大题时用它命名；卷面大题名保留「题」字，是试卷惯例） */
 export const SECTION_LABEL: Record<string, string> = {
-  单选题: '单项选择题',
-  多选题: '多项选择题',
-  判断题: '判断题',
-  填空题: '填空题',
-  解答题: '解答题',
+  单选: '单项选择题',
+  多选: '多项选择题',
+  判断: '判断题',
+  填空: '填空题',
+  解答: '解答题',
+  计算: '计算题',
+  证明: '证明题',
+  连线: '连线题',
+  作文: '作文题',
+  作图: '作图题',
+  /* 英语专属题型；「七选五」「短文改错」在卷面上本就不带「题」字，不硬凑 */
+  完形填空: '完形填空题',
+  七选五: '七选五',
+  短文改错: '短文改错题',
 }
+
+/** 题型名全集：用于从大题标题反查题型，避免各处再维护一份题型清单 */
+export const SECTION_TYPES = Object.keys(SECTION_LABEL)
 
 /** 题型 → 大题标题匹配关键词（兼容「选择题」「一、单选题」等用户自定义标题） */
 export const SECTION_KEYWORDS: Record<string, string[]> = {
-  单选题: ['单选', '选择'],
-  多选题: ['多选'],
-  判断题: ['判断'],
-  填空题: ['填空'],
-  解答题: ['解答', '问答'],
+  单选: ['单选', '选择'],
+  多选: ['多选'],
+  判断: ['判断'],
+  填空: ['填空'],
+  解答: ['解答', '问答'],
+  计算: ['计算'],
+  证明: ['证明'],
+  连线: ['连线'],
+  作文: ['作文'],
+  作图: ['作图'],
+  完形填空: ['完形填空'],
+  七选五: ['七选五'],
+  短文改错: ['短文改错', '改错'],
 }
 
 export const SECTION_NUMBERS = '一二三四五六七八'
@@ -61,9 +81,26 @@ export function sectionKeywordsOf(type: string): string[] {
   return SECTION_KEYWORDS[type] ?? [type.replace(/题$/, '')]
 }
 
-/** 题型默认分值（解答题 12 分，其余 5 分） */
+/**
+ * 大题标题 → 题型名（认不出返回空串）。
+ *
+ * 命中最长者胜，而不是先到先得：「完形填空题」同时含「完形填空」与「填空」，
+ * 若按短名先匹配，同一个大题会既算完形填空又算填空 —— 分工标签会挂出两个负责人，
+ * 组卷时也会被塞错大题。长度比较不依赖清单顺序，新增题型不必考虑排序。
+ */
+export function typeOfSectionTitle(title: string): string {
+  const matched = SECTION_TYPES.filter((type) => title.includes(type))
+  return matched.reduce((longest, type) => (type.length > longest.length ? type : longest), '')
+}
+
+/**
+ * 题型默认分值：演算型主观大题（解答 / 计算 / 证明）12 分，其余 5 分。
+ * 只作「组卷车条目没带分值」时的兜底，实际分值以条目为准。
+ */
+const LARGE_SCORE_TYPES = new Set(['解答', '计算', '证明'])
+
 export function defaultScore(type: string): number {
-  return type === '解答题' ? 12 : 5
+  return LARGE_SCORE_TYPES.has(type) ? 12 : 5
 }
 
 /** 大题标题：`${序号}、${大题名}` */
@@ -83,6 +120,10 @@ export function findSectionIndex(sections: PaperSection[], key: string, keywords
   if (exact >= 0) return exact
   return sections.findIndex((row) => {
     const title = sectionTypeKey(row.title)
+    /* 大题已归到别的题型时不再用关键词接（「完形填空题」含「填空」）：
+       否则完形填空题会把普通填空题一并吞下，或反过来把完形填空塞进填空大题 */
+    const owner = typeOfSectionTitle(title)
+    if (owner && !needle.includes(owner)) return false
     return keywords.some((kw) => title.includes(kw))
   })
 }
@@ -148,7 +189,7 @@ export function scoreOfSections(sections: PaperSection[]): number {
 
 /** 客观题（单选/多选/判断）分值合计 */
 export function objectiveScoreOfSections(sections: PaperSection[], questions: OrgQuestion[]): number {
-  const OBJECTIVE = new Set(['单选题', '多选题', '判断题'])
+  const OBJECTIVE = new Set(['单选', '多选', '判断'])
   const byId = new Map(questions.map((row) => [row.id, row]))
   return sections.reduce(
     (total, section) =>

@@ -65,7 +65,7 @@ const routes: RouteRecordRaw[] = [
         path: 'question/photo',
         name: 'question-photo',
         component: () => import('@/views/question/PhotoView.vue'),
-        meta: { title: 'AI 拍照识题' },
+        meta: { title: 'AI 识题' },
       },
       {
         path: 'question/review',

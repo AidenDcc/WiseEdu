@@ -39,7 +39,7 @@ import type { ComposeFilter } from '../types'
 const props = defineProps<{ filter: ComposeFilter }>()
 
 const { questions, questionOf, ensure } = useComposeData()
-const { questionTypes, difficulties } = useBaseData()
+const { questionTypesFor, difficulties } = useBaseData()
 const basket = useComposeBasket()
 
 void ensure()
@@ -90,7 +90,10 @@ const pool = computed(() =>
 const knowledgeOptions = computed(() =>
   availableKnowledges(pool.value).filter((row) => !bp.value.knowledges.includes(row.name)),
 )
-const typeOptions = computed(() => questionTypes.value.filter((type) => !bp.value.types.includes(type)))
+/** 可加入的题型：随筛选学科收窄（英语的完形填空 / 七选五 / 短文改错），已加入的列不再出现 */
+const typeOptions = computed(() =>
+  questionTypesFor(props.filter.subject).filter((type) => !bp.value.types.includes(type)),
+)
 
 const stats = computed(() => blueprintStats(bp.value))
 const used = computed(() => usedIds(bp.value))
@@ -140,7 +143,7 @@ function onAddType(event: Event) {
 /** 一键铺开：把当前筛选里的知识点与全部题型建成行列，省得一个个点 */
 function seedFromFilter() {
   if (props.filter.knowledge.length) props.filter.knowledge.forEach((tag) => addKnowledge(tag))
-  questionTypes.value.slice(0, 5).forEach((type) => addType(type))
+  questionTypesFor(props.filter.subject).slice(0, 5).forEach((type) => addType(type))
   if (!bp.value.knowledges.length) showToast('先在左侧知识点树或筛选里选择知识点', 'error')
 }
 

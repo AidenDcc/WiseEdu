@@ -23,7 +23,7 @@ import {
   toPlainText,
   truncateRich,
 } from '@aiteach/shared'
-import type { CollabMember, OrgCollabTask, OrgPaper, OrgQuestion } from '@aiteach/shared'
+import type { CollabMember, OrgCollabTask, OrgPaper, OrgQuestion, PaperSection } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
 import PaperPreviewModal from '@/components/paper/PaperPreviewModal.vue'
 import {
@@ -38,6 +38,7 @@ import {
   restorePaperVersion,
 } from '@/api/org'
 import { useBaseData } from '@/composables/useBaseData'
+import { typeOfSectionTitle } from './paper-sections'
 
 const route = useRoute()
 const router = useRouter()
@@ -69,6 +70,12 @@ const totalScore = computed(() =>
 const reqKnowledge = computed(() => task.value?.requirement.knowledge ?? [])
 
 const itemOf = (id: number) => questions.value.find((row) => row.id === id)
+
+/** 大题标题 → 题型标签（至多一个）。看不出题型的自定义标题不挂标签，空大题也能标出归属 */
+function sectionTypeTags(section: PaperSection): string[] {
+  const type = typeOfSectionTitle(section.title)
+  return type ? [type] : []
+}
 
 /** 题型的负责人（卷面上每一道题都要标出来，否则看不出「这道题是谁的」） */
 function ownerOfType(type: string): string {
@@ -494,9 +501,7 @@ onMounted(async () => {
                 {{ section.questions.reduce((s, q) => s + (Number(q.score) || 0), 0) }} 分
               </span>
               <span
-                v-for="type in ['单选题', '多选题', '判断题', '填空题', '解答题'].filter((t) =>
-                  section.title.includes(t.replace('题', '')),
-                )"
+                v-for="type in sectionTypeTags(section)"
                 :key="type"
                 class="tag"
                 :class="isMineType(type) ? 'tag-blue' : 'tag-gray'"

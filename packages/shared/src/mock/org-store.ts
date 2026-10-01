@@ -19,6 +19,7 @@ import type {
   ExamSession,
   FileFolder,
   GeneratedQuestion,
+  FillBlankAnswer,
   GradingDuty,
   Homework,
   HomeworkSubmission,
@@ -37,6 +38,8 @@ import type {
   OrgMaterial,
   OrgMedia,
   OrgMessage,
+  OptionColumns,
+  PhotoResultEdit,
   OrgOperationLog,
   OrgPaper,
   OrgPrompt,
@@ -76,6 +79,8 @@ import {
 import { registerMediaSrc, unregisterMediaSrc } from '../utils/media-ref'
 /* 相对导入而非 '@aiteach/shared'：从 shared 内部引自己的桶文件会形成循环依赖 */
 import { hasImage, sanitizeRichHtml, toPlainText, truncateRich } from '../utils/richtext'
+/* 杯赛 / 地区的取值与题目种子共用同一份（见 admin-store 的 seedQuestionMeta） */
+import { seedQuestionMeta } from './admin-store'
 /* 高考模拟卷（语文 / 数学 / 英语各一套，含阅读材料）单独成文件，避免本文件过长 */
 import { EXAM_PAPERS, EXAM_QUESTIONS } from './exam-seeds'
 
@@ -187,7 +192,7 @@ function seedQuestion(input: Partial<OrgQuestion> & { stem: string; id: number }
   return {
     subject: '数学',
     grade: '高一',
-    type: '单选题',
+    type: '单选',
     difficulty: '中等',
     knowledge: ['函数与导数'],
     source: '手动录入',
@@ -197,12 +202,16 @@ function seedQuestion(input: Partial<OrgQuestion> & { stem: string; id: number }
     ownerId: 103,
     owner: '李文博',
     options: [],
+    /* 选项单列是历史口径：不在下面的入库映射里显式覆盖时，存量题与种子题都保持单列 */
+    optionColumns: 1,
     answer: '',
     analysis: '',
     term: '上学期',
     examType: '期中考试',
     useCount: Math.floor(Math.random() * 40),
     updatedAt: nowStr(-Math.floor(Math.random() * 400)),
+    /* 杯赛 / 地区：按题号轮转，保证筛选面板里每个字典取值都有样本（演示数据） */
+    ...seedQuestionMeta(input.id, input.subject ?? '数学'),
     ...input,
   } as OrgQuestion
 }
@@ -211,7 +220,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9001,
     stem: '已知二次函数 f(x)=x²-2x-3，则其图像与 x 轴交点个数为（ ）',
-    type: '单选题',
+    type: '单选',
     options: ['0 个', '1 个', '2 个', '3 个'],
     answer: 'C',
     analysis: '令 f(x)=0，Δ=(-2)²+12=16>0，故有两个交点。',
@@ -223,7 +232,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9002,
     stem: '求 ∁ᵤB（补集）：设全集 U={1,2,3,4,5}，B={2,4}，则 ∁ᵤB = ______',
-    type: '填空题',
+    type: '填空',
     answer: '{1,3,5}',
     analysis: '补集即全集中去掉 B 的元素。',
     knowledge: ['集合'],
@@ -240,7 +249,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9003,
     stem: '如图，正方体 ABCD-A₁B₁C₁D₁ 棱长为 2，求异面直线 AC 与 BD₁ 所成角的余弦值。',
-    type: '解答题',
+    type: '解答',
     answer: 'cosθ=√6/3',
     analysis: '建立空间直角坐标系，A(0,0,0)、C(2,2,0)、B(2,0,0)、D₁(0,2,2)，由向量法可得。',
     knowledge: ['立体几何', '空间向量'],
@@ -256,7 +265,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9004,
     stem: '下列函数中，在 (0,+∞) 上单调递增的是（ ）',
-    type: '多选题',
+    type: '多选',
     options: ['y=x³', 'y=1/x', 'y=√x', 'y=-x²+4x'],
     answer: 'AC',
     analysis: 'y=1/x 在 (0,+∞) 单调递减；y=-x²+4x 在 (2,+∞) 递减。',
@@ -274,7 +283,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9005,
     stem: '已知等差数列 {aₙ} 中 a₁=2，公差 d=3，求 a₁₀。',
-    type: '填空题',
+    type: '填空',
     answer: '29',
     analysis: 'a₁₀=a₁+9d=2+27=29。',
     knowledge: ['数列'],
@@ -290,7 +299,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9006,
     stem: '判断：函数 y=|x| 在 x=0 处可导。',
-    type: '判断题',
+    type: '判断',
     options: ['正确', '错误'],
     answer: 'B',
     analysis: '左右导数分别为 -1 与 1，不相等，故不可导。',
@@ -303,7 +312,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9007,
     stem: '已知抛物线 y²=4x 的焦点为 F，过 F 的直线交抛物线于 A、B 两点，|AB|=8，求直线斜率。',
-    type: '解答题',
+    type: '解答',
     answer: 'k=±1',
     analysis: '设直线 y=k(x-1)，联立抛物线方程，由焦点弦长公式 |AB|=4/k²·(1+k²) 得 k²=1。',
     knowledge: ['抛物线', '圆锥曲线'],
@@ -319,7 +328,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9008,
     stem: '化简：sin(α+β)cosβ - cos(α+β)sinβ = ______',
-    type: '填空题',
+    type: '填空',
     answer: 'sinα',
     analysis: '逆用两角差的正弦公式。',
     knowledge: ['三角恒等变换'],
@@ -338,7 +347,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9009,
     stem: '已知集合 A={1,2,3}，B={2,3,4}，则 A∩B=（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '容易',
     options: ['{1,2}', '{2,3}', '{3,4}', '{1,4}'],
     answer: 'B',
@@ -354,7 +363,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9010,
     stem: '函数 f(x)=x²-4x+3 的单调递减区间是（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '中等',
     options: ['(-∞,2)', '(2,+∞)', '(-∞,-2)', '(-2,+∞)'],
     answer: 'A',
@@ -369,7 +378,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9011,
     stem: '设函数 f(x)=x³-3x，则下列结论正确的是（ ）',
-    type: '多选题',
+    type: '多选',
     difficulty: '较难',
     options: [
       'f(x) 在 x=-1 处取得极大值',
@@ -392,7 +401,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9012,
     stem: '计算：log₂8 + lg100 = ______',
-    type: '填空题',
+    type: '填空',
     difficulty: '容易',
     answer: '5',
     analysis: 'log₂8=3，lg100=2，两者之和为 5。',
@@ -407,7 +416,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9013,
     stem: '已知 sinα=3/5，且 α∈(π/2,π)，则 cosα = ______',
-    type: '填空题',
+    type: '填空',
     difficulty: '中等',
     answer: '-4/5',
     analysis: '由 sin²α+cos²α=1 得 |cosα|=4/5；α 在第二象限，余弦值为负，故 cosα=-4/5。',
@@ -423,7 +432,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9014,
     stem: '已知等比数列 {aₙ} 中 a₁=2，a₃=8，且公比 q>0，求该数列的通项公式 aₙ 及前 n 项和 Sₙ。',
-    type: '解答题',
+    type: '解答',
     difficulty: '较难',
     answer: 'aₙ=2ⁿ，Sₙ=2ⁿ⁺¹-2',
     analysis: '由 a₃=a₁q² 得 q²=4，又 q>0，故 q=2，aₙ=2·2ⁿ⁻¹=2ⁿ；Sₙ=a₁(1-qⁿ)/(1-q)=2(2ⁿ-1)=2ⁿ⁺¹-2。',
@@ -439,7 +448,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9015,
     stem: '已知椭圆 x²/4+y²=1 的左、右焦点分别为 F₁、F₂，过 F₂ 的直线交椭圆于 A、B 两点，求 △F₁AB 的周长。',
-    type: '解答题',
+    type: '解答',
     difficulty: '困难',
     answer: '8',
     analysis: '由椭圆定义 |AF₁|+|AF₂|=2a=4，|BF₁|+|BF₂|=4，且 |AB|=|AF₂|+|BF₂|，故 △F₁AB 的周长 = |AF₁|+|BF₁|+|AB| = 4a = 8，与直线位置无关。',
@@ -457,7 +466,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9016,
     stem: '二次函数 y=x²+2x-3 的图像与 y 轴的交点坐标是（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '较易',
     options: ['(0,-3)', '(-3,0)', '(0,3)', '(1,0)'],
     answer: 'A',
@@ -474,7 +483,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9017,
     stem: '判断：函数 f(x)=|x-1| 在 x=1 处连续且可导。',
-    type: '判断题',
+    type: '判断',
     difficulty: '容易',
     options: ['正确', '错误'],
     answer: 'B',
@@ -491,7 +500,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9018,
     stem: '已知正方体 ABCD-A₁B₁C₁D₁ 的棱长为 a，则该正方体外接球的表面积为（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '中等',
     options: ['3πa²', '2πa²', 'πa²', '4πa²'],
     answer: 'A',
@@ -507,7 +516,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9019,
     stem: '在空间直角坐标系中，已知向量 a=(1,0,-1)，b=(0,1,1)，则下列结论正确的是（ ）',
-    type: '多选题',
+    type: '多选',
     difficulty: '困难',
     options: ['a·b=1', '|a|=|b|', 'a 与 b 垂直', 'a+b=(1,1,0)'],
     answer: 'BD',
@@ -525,7 +534,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9020,
     stem: '计算：(1/2)⁻² + 8^(1/3) = ______',
-    type: '填空题',
+    type: '填空',
     difficulty: '较易',
     answer: '6',
     analysis: '(1/2)⁻²=2²=4，8^(1/3)=2，两者之和为 6。',
@@ -540,7 +549,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9021,
     stem: '已知直线 l 过点 P(1,2)，且与直线 2x-y+1=0 平行，求直线 l 的方程。',
-    type: '解答题',
+    type: '解答',
     difficulty: '中等',
     answer: '2x-y=0',
     analysis: '两直线平行则斜率相等，由 2x-y+1=0 得 k=2；由点斜式 y-2=2(x-1)，整理得 2x-y=0。',
@@ -556,7 +565,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9022,
     stem: '已知命题 p：对任意 x∈R，x²+ax+1>0 恒成立，则实数 a 的取值范围是 ______',
-    type: '填空题',
+    type: '填空',
     difficulty: '中等',
     answer: '-2<a<2',
     analysis: '二次项系数 1>0，恒成立只需判别式 Δ=a²-4<0，解得 -2<a<2。',
@@ -576,7 +585,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9023,
     stem: '「春天来了，小草从地里钻出来。」句中「钻」字的正确读音是（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '容易',
     subject: '语文',
     grade: '一年级',
@@ -594,7 +603,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9024,
     stem: '补写诗句：欲穷千里目，______。',
-    type: '填空题',
+    type: '填空',
     difficulty: '较易',
     subject: '语文',
     grade: '二年级',
@@ -612,7 +621,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9025,
     stem: '下列句中「之」字的用法与其他三项不同的一项是（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '中等',
     subject: '语文',
     grade: '七年级',
@@ -630,7 +639,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9026,
     stem: '阅读《秋天的怀念》选段，结合全文，说说作者为什么反复写「看花」这一细节，并分析其在文中的作用。',
-    type: '解答题',
+    type: '解答',
     difficulty: '较难',
     subject: '语文',
     grade: '七年级',
@@ -650,7 +659,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9027,
     stem: '关于议论文常用的论证方法，下列说法正确的有（ ）',
-    type: '多选题',
+    type: '多选',
     difficulty: '中等',
     subject: '语文',
     grade: '八年级',
@@ -673,7 +682,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9028,
     stem: '判断：「令尊」「令堂」是对对方父母的尊称，「家父」「家母」是对自己父母的谦称。',
-    type: '判断题',
+    type: '判断',
     difficulty: '较易',
     subject: '语文',
     grade: '八年级',
@@ -692,7 +701,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9029,
     stem: '翻译句子：所以遣将守关者，备他盗之出入与非常也。',
-    type: '解答题',
+    type: '解答',
     difficulty: '困难',
     subject: '语文',
     grade: '高一',
@@ -710,7 +719,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9030,
     stem: '杜甫《登高》中「______，不尽长江滚滚来」一句，写出了秋景的苍凉与时光的流逝。',
-    type: '填空题',
+    type: '填空',
     difficulty: '中等',
     subject: '语文',
     grade: '高一',
@@ -727,7 +736,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9031,
     stem: '下列词语中，表示颜色的有（ ）',
-    type: '多选题',
+    type: '多选',
     difficulty: '容易',
     subject: '语文',
     grade: '一年级',
@@ -746,7 +755,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9032,
     stem: '「弯弯的月亮像一只小船。」这句话使用的修辞手法是（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '较易',
     subject: '语文',
     grade: '二年级',
@@ -766,7 +775,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9033,
     stem: '— How old are you?  — ______',
-    type: '单选题',
+    type: '单选',
     difficulty: '容易',
     subject: '英语',
     grade: '一年级',
@@ -784,7 +793,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9034,
     stem: 'My mother ______ breakfast for us every morning.',
-    type: '单选题',
+    type: '单选',
     difficulty: '较易',
     subject: '英语',
     grade: '二年级',
@@ -805,7 +814,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9035,
     stem: 'Look! The children ______ football on the playground.',
-    type: '单选题',
+    type: '单选',
     difficulty: '中等',
     subject: '英语',
     grade: '七年级',
@@ -823,7 +832,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9036,
     stem: '用所给动词的适当形式填空：He ______ (visit) his grandparents last weekend.',
-    type: '填空题',
+    type: '填空',
     difficulty: '中等',
     subject: '英语',
     grade: '七年级',
@@ -841,7 +850,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9037,
     stem: '下列句子中，含有宾语从句的有（ ）',
-    type: '多选题',
+    type: '多选',
     difficulty: '较难',
     subject: '英语',
     grade: '八年级',
@@ -866,7 +875,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9038,
     stem: '以 My Weekend 为题，写一篇不少于 60 词的短文，介绍你上个周末的活动安排，要求至少使用三种不同的时态。',
-    type: '解答题',
+    type: '解答',
     difficulty: '较难',
     subject: '英语',
     grade: '八年级',
@@ -884,7 +893,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9039,
     stem: '______ from the top of the hill, the city looks beautiful.',
-    type: '单选题',
+    type: '单选',
     difficulty: '中等',
     subject: '英语',
     grade: '高一',
@@ -902,7 +911,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9040,
     stem: '假设你是李华，你的英国朋友 Peter 对中国的传统节日很感兴趣，请给他写一封 80 词左右的邮件，介绍春节的主要习俗并邀请他来中国体验。',
-    type: '解答题',
+    type: '解答',
     difficulty: '困难',
     subject: '英语',
     grade: '高一',
@@ -921,7 +930,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9041,
     stem: '阅读短文，选择最佳答案：Tom is a student. He gets up at six every day. He goes to school at seven. — What time does Tom get up?',
-    type: '单选题',
+    type: '单选',
     difficulty: '容易',
     subject: '英语',
     grade: '高一',
@@ -941,7 +950,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9042,
     stem: '一辆汽车以 20 m/s 的速度在平直公路上匀速行驶，10 s 内通过的路程是（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '容易',
     subject: '物理',
     grade: '八年级',
@@ -959,7 +968,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9043,
     stem: '两个力的大小分别为 3 N 和 4 N，方向互相垂直，则它们的合力大小为 ______ N。',
-    type: '填空题',
+    type: '填空',
     difficulty: '中等',
     subject: '物理',
     grade: '八年级',
@@ -977,7 +986,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9044,
     stem: '质量为 2 kg 的物体放在水平地面上，受到 10 N 的水平拉力，物体与地面间的滑动摩擦力为 4 N，求物体运动的加速度大小。',
-    type: '解答题',
+    type: '解答',
     difficulty: '较难',
     subject: '物理',
     grade: '八年级',
@@ -995,7 +1004,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9045,
     stem: '判断：物体所受合外力为零时，一定处于静止状态。',
-    type: '判断题',
+    type: '判断',
     difficulty: '较易',
     subject: '物理',
     grade: '八年级',
@@ -1014,7 +1023,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9046,
     stem: '真空中两个点电荷之间的静电力大小，与它们之间距离的关系是（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '中等',
     subject: '物理',
     grade: '高一',
@@ -1032,7 +1041,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9047,
     stem: '关于闭合电路，下列说法正确的有（ ）',
-    type: '多选题',
+    type: '多选',
     difficulty: '较难',
     subject: '物理',
     grade: '高一',
@@ -1057,7 +1066,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9048,
     stem: '长为 L 的导体棒在磁感应强度为 B 的匀强磁场中，以速度 v 沿垂直于磁场的方向做切割磁感线运动，求导体棒两端产生的感应电动势大小，并说明判断感应电流方向的方法。',
-    type: '解答题',
+    type: '解答',
     difficulty: '困难',
     subject: '物理',
     grade: '高一',
@@ -1078,7 +1087,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9049,
     stem: '物体做自由落体运动（g 取 10 m/s²），下落 2 s 时的速度大小为（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '较易',
     subject: '物理',
     grade: '高一',
@@ -1096,7 +1105,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9050,
     stem: '穿过某线圈的磁通量在 0.2 s 内由 0.1 Wb 均匀增加到 0.5 Wb，则线圈中产生的感应电动势大小为 ______ V。',
-    type: '填空题',
+    type: '填空',
     difficulty: '中等',
     subject: '物理',
     grade: '高一',
@@ -1117,7 +1126,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9051,
     stem: '1 mol 任何物质中都含有的粒子数约为（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '容易',
     subject: '化学',
     grade: '高一',
@@ -1135,7 +1144,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9052,
     stem: '下列离子方程式书写正确的是（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '中等',
     subject: '化学',
     grade: '高一',
@@ -1158,7 +1167,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9053,
     stem: '关于氧化还原反应，下列说法正确的有（ ）',
-    type: '多选题',
+    type: '多选',
     difficulty: '较难',
     subject: '化学',
     grade: '高一',
@@ -1182,7 +1191,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9054,
     stem: '元素周期表中，同周期元素从左到右，原子半径逐渐 ______（填「增大」或「减小」）。',
-    type: '填空题',
+    type: '填空',
     difficulty: '中等',
     subject: '化学',
     grade: '高一',
@@ -1200,7 +1209,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9055,
     stem: '判断：所有的酸碱中和反应都属于离子反应。',
-    type: '判断题',
+    type: '判断',
     difficulty: '较易',
     subject: '化学',
     grade: '高一',
@@ -1219,7 +1228,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9056,
     stem: '已知短周期元素 X 原子的最外层电子数是其电子层数的 2 倍，且 X 的最高价氧化物对应的水化物为强酸。推断 X 是哪种元素，并写出推断过程。',
-    type: '解答题',
+    type: '解答',
     difficulty: '困难',
     subject: '化学',
     grade: '高一',
@@ -1239,7 +1248,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9057,
     stem: '标准状况下，11.2 L 由 CO 和 CO₂ 组成的混合气体，所含氧原子的物质的量不可能是（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '较难',
     subject: '化学',
     grade: '高一',
@@ -1258,7 +1267,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9058,
     stem: '在反应 Fe + CuSO₄ = FeSO₄ + Cu 中，还原剂是 ______。',
-    type: '填空题',
+    type: '填空',
     difficulty: '容易',
     subject: '化学',
     grade: '高一',
@@ -1278,7 +1287,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9059,
     stem: '细胞中控制物质进出、具有选择透过性的结构是（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '容易',
     subject: '生物',
     grade: '九年级',
@@ -1297,7 +1306,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9060,
     stem: '一个完整的生态系统由 ______ 和 ______ 两部分组成。',
-    type: '填空题',
+    type: '填空',
     difficulty: '中等',
     subject: '生物',
     grade: '九年级',
@@ -1315,7 +1324,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9061,
     stem: '简述食物中的淀粉在人体内被消化和吸收的主要过程。',
-    type: '解答题',
+    type: '解答',
     difficulty: '中等',
     subject: '生物',
     grade: '九年级',
@@ -1334,7 +1343,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9062,
     stem: '孟德尔一对相对性状的杂交实验中，F₁ 自交所得 F₂ 的性状分离比是（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '中等',
     subject: '生物',
     grade: '高二',
@@ -1353,7 +1362,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9063,
     stem: '细胞膜的基本支架是 ______，组成它的元素除 C、H、O 外还含有 ______。',
-    type: '填空题',
+    type: '填空',
     difficulty: '中等',
     subject: '生物',
     grade: '高二',
@@ -1371,7 +1380,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9064,
     stem: '简述基因表达的过程，并说明转录和翻译在细胞中的发生场所。',
-    type: '解答题',
+    type: '解答',
     difficulty: '困难',
     subject: '生物',
     grade: '高二',
@@ -1390,7 +1399,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9065,
     stem: '判断：兴奋在离体神经纤维上可以双向传导，但在突触处只能由突触前膜向突触后膜单向传递。',
-    type: '判断题',
+    type: '判断',
     difficulty: '容易',
     subject: '生物',
     grade: '高二',
@@ -1411,7 +1420,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9066,
     stem: '进入青春期后，下列对待自身身体变化的做法恰当的是（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '容易',
     subject: '政治',
     grade: '九年级',
@@ -1430,7 +1439,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9067,
     stem: '结合所学知识，说明法律在保护未成年人健康成长中的主要作用。',
-    type: '解答题',
+    type: '解答',
     difficulty: '中等',
     subject: '政治',
     grade: '九年级',
@@ -1449,7 +1458,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9068,
     stem: '判断：积极参与社会公益活动、主动承担力所能及的社会责任，是公民意识的重要体现。',
-    type: '判断题',
+    type: '判断',
     difficulty: '容易',
     subject: '政治',
     grade: '九年级',
@@ -1468,7 +1477,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9069,
     stem: '在其他条件不变的情况下，某商品价格下降，通常会导致（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '中等',
     subject: '政治',
     grade: '高二',
@@ -1487,7 +1496,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9070,
     stem: '我国政府的基本职能包括（ ）',
-    type: '多选题',
+    type: '多选',
     difficulty: '中等',
     subject: '政治',
     grade: '高二',
@@ -1511,7 +1520,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9071,
     stem: '运用唯物辩证法矛盾观的相关知识，分析说明为什么要在发展中既要抓住重点又要统筹兼顾。',
-    type: '解答题',
+    type: '解答',
     difficulty: '困难',
     subject: '政治',
     grade: '高二',
@@ -1530,7 +1539,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9072,
     stem: '文化的传承与发展，既要 ______ 优秀传统文化，又要面向世界、博采众长，不断 ______ 。',
-    type: '填空题',
+    type: '填空',
     difficulty: '较易',
     subject: '政治',
     grade: '高二',
@@ -1550,7 +1559,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9073,
     stem: '秦朝为加强对地方的控制，在全国范围内推行的制度是（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '容易',
     subject: '历史',
     grade: '九年级',
@@ -1569,7 +1578,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9074,
     stem: '洋务运动前期以“______”为口号，后期以“______”为口号。',
-    type: '填空题',
+    type: '填空',
     difficulty: '中等',
     subject: '历史',
     grade: '九年级',
@@ -1587,7 +1596,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9075,
     stem: '简述第一次工业革命的主要成果，并说明它对社会生产组织方式产生的影响。',
-    type: '解答题',
+    type: '解答',
     difficulty: '中等',
     subject: '历史',
     grade: '九年级',
@@ -1606,7 +1615,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9076,
     stem: '标志着中国新民主主义革命开端的历史事件是（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '中等',
     subject: '历史',
     grade: '高二',
@@ -1625,7 +1634,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9077,
     stem: '明清时期加强君主专制的措施有（ ）',
-    type: '多选题',
+    type: '多选',
     difficulty: '中等',
     subject: '历史',
     grade: '高二',
@@ -1644,7 +1653,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9078,
     stem: '分析两次世界大战爆发的共同原因，并说明第二次世界大战后国际格局的变化。',
-    type: '解答题',
+    type: '解答',
     difficulty: '困难',
     subject: '历史',
     grade: '高二',
@@ -1663,7 +1672,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9079,
     stem: '英国于 1689 年颁布《______》，以法律形式确立了君主立宪制；美国于 1787 年制定宪法，确立了 ______ 制。',
-    type: '填空题',
+    type: '填空',
     difficulty: '较易',
     subject: '历史',
     grade: '高二',
@@ -1683,7 +1692,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9080,
     stem: '关于经纬网的说法，正确的是（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '容易',
     subject: '地理',
     grade: '九年级',
@@ -1702,7 +1711,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9081,
     stem: '地中海气候的主要特征是：夏季 ______ ，冬季 ______ 。',
-    type: '填空题',
+    type: '填空',
     difficulty: '中等',
     subject: '地理',
     grade: '九年级',
@@ -1720,7 +1729,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9082,
     stem: '简述我国地势西高东低、呈阶梯状分布的特点对气候和河流的影响。',
-    type: '解答题',
+    type: '解答',
     difficulty: '中等',
     subject: '地理',
     grade: '九年级',
@@ -1739,7 +1748,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9083,
     stem: '形成季风环流的主要原因是（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '中等',
     subject: '地理',
     grade: '高二',
@@ -1758,7 +1767,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9084,
     stem: '下列环节属于海陆间水循环的有（ ）',
-    type: '多选题',
+    type: '多选',
     difficulty: '较难',
     subject: '地理',
     grade: '高二',
@@ -1777,7 +1786,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9085,
     stem: '分析影响农业区位选择的主要因素，并结合实例说明其影响。',
-    type: '解答题',
+    type: '解答',
     difficulty: '困难',
     subject: '地理',
     grade: '高二',
@@ -1796,7 +1805,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9086,
     stem: '衡量一个国家或地区城市化水平的主要标志是 ______ 占总人口的比重。',
-    type: '填空题',
+    type: '填空',
     difficulty: '容易',
     subject: '地理',
     grade: '高二',
@@ -1816,7 +1825,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9087,
     stem: '下列词语中书写完全正确的一项是（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '容易',
     subject: '语文',
     grade: '三年级',
@@ -1835,7 +1844,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9088,
     stem: '计算：25 × 4 + 36 ÷ 6 = ______ 。',
-    type: '填空题',
+    type: '填空',
     difficulty: '中等',
     subject: '数学',
     grade: '三年级',
@@ -1853,7 +1862,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9089,
     stem: '由 3 个万、5 个千和 7 个一组成的数是（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '容易',
     subject: '数学',
     grade: '四年级',
@@ -1872,7 +1881,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9090,
     stem: '选出与 book 属于同一类的一项（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '中等',
     subject: '英语',
     grade: '四年级',
@@ -1891,7 +1900,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9091,
     stem: '一辆汽车 3 小时行驶 180 千米。照这样的速度，行驶 300 千米需要多少小时？',
-    type: '解答题',
+    type: '解答',
     difficulty: '中等',
     subject: '数学',
     grade: '五年级',
@@ -1909,7 +1918,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9092,
     stem: '《题西林壁》中“不识庐山真面目”的下一句是“______”。',
-    type: '填空题',
+    type: '填空',
     difficulty: '容易',
     subject: '语文',
     grade: '五年级',
@@ -1927,7 +1936,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9093,
     stem: '一个圆的半径是 3 厘米，它的周长是（ ）厘米。',
-    type: '单选题',
+    type: '单选',
     difficulty: '中等',
     subject: '数学',
     grade: '六年级',
@@ -1946,7 +1955,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9094,
     stem: '— How ______ you? — I\'m fine, thank you.',
-    type: '填空题',
+    type: '填空',
     difficulty: '较易',
     subject: '英语',
     grade: '六年级',
@@ -1966,7 +1975,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9095,
     stem: '下列化学方程式书写完全正确的是（ ）',
-    type: '单选题',
+    type: '单选',
     difficulty: '中等',
     subject: '化学',
     grade: '九年级',
@@ -1985,7 +1994,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9096,
     stem: '已知二次函数 y = x² - 4x + 3。(1) 求其图像的顶点坐标；(2) 求图像与 x 轴交点的坐标。',
-    type: '解答题',
+    type: '解答',
     difficulty: '困难',
     subject: '数学',
     grade: '九年级',
@@ -2003,7 +2012,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9097,
     stem: '已知椭圆 C: x²/4 + y²/3 = 1 的左、右焦点分别为 F₁、F₂，P 为椭圆上一点且 ∠F₁PF₂ = 90°，求 △F₁PF₂ 的面积。',
-    type: '解答题',
+    type: '解答',
     difficulty: '困难',
     subject: '数学',
     grade: '高三',
@@ -2021,7 +2030,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9098,
     stem: '关于电磁感应现象，下列说法正确的有（ ）',
-    type: '多选题',
+    type: '多选',
     difficulty: '较难',
     subject: '物理',
     grade: '高三',
@@ -2045,7 +2054,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9099,
     stem: '古人所称“而立之年”指的是 ______ 岁，“不惑之年”指的是 ______ 岁。',
-    type: '填空题',
+    type: '填空',
     difficulty: '中等',
     subject: '语文',
     grade: '高三',
@@ -2063,7 +2072,7 @@ export const questions: OrgQuestion[] = [
   seedQuestion({
     id: 9100,
     stem: '写出实验室用二氧化锰与浓盐酸制取氯气的化学方程式，并标出电子转移的方向和数目。',
-    type: '解答题',
+    type: '解答',
     difficulty: '困难',
     subject: '化学',
     grade: '高三',
@@ -2074,6 +2083,134 @@ export const questions: OrgQuestion[] = [
     categoryId: 16,
     term: '下学期',
     examType: '高考真题',
+    source: '手动录入',
+    owner: '李文博',
+    ownerId: 103,
+  }),
+  /*
+   * 扩充题库：计算 / 证明 / 连线 / 作文（FR-TM-002 新增题型）。
+   * 每种题型都要有样本 —— 否则题库管理的题型筛选项点下去是空列表（与杯赛 / 地区同一口径）。
+   * id 取 9326（高考模拟卷最大题号）与 9400（运行期自增起点）之间的空档，避免撞号。
+   */
+  seedQuestion({
+    id: 9330,
+    stem: '计算：等差数列 {aₙ} 中 a₁=3，公差 d=2，求前 10 项和 S₁₀。',
+    type: '计算',
+    difficulty: '容易',
+    subject: '数学',
+    grade: '高一',
+    answer: 'S₁₀ = 120',
+    analysis: '由等差数列前 n 项和公式 S₁₀ = 10a₁ + (10×9÷2)d = 30 + 90 = 120。',
+    knowledge: ['数列'],
+    library: 'org',
+    categoryId: 11,
+    examType: '随堂练习',
+    source: '手动录入',
+    owner: '陈明远',
+    ownerId: 101,
+  }),
+  seedQuestion({
+    id: 9331,
+    stem: '证明：对任意角 α，恒有 sin²α + cos²α = 1。',
+    type: '证明',
+    difficulty: '中等',
+    subject: '数学',
+    grade: '高一',
+    answer: '证明见解析（由单位圆定义 x²+y²=1 直接代入得证）。',
+    analysis: '设角 α 的终边与单位圆交于点 P(x, y)，由三角函数定义得 x=cosα、y=sinα；点 P 在单位圆上，故 x²+y²=1，代入即得 sin²α+cos²α=1。',
+    knowledge: ['三角函数'],
+    library: 'org',
+    categoryId: 11,
+    examType: '单元测试',
+    source: '手动录入',
+    owner: '沈丽华',
+    ownerId: 102,
+  }),
+  seedQuestion({
+    id: 9332,
+    stem: '将下列英文单词与其对应的中文释义连线：① increase　② protect　③ afford　④ reduce\nA. 减少　B. 增加　C. 保护　D. 负担得起',
+    type: '连线',
+    difficulty: '较易',
+    subject: '英语',
+    grade: '高一',
+    answer: '①—B；②—C；③—D；④—A',
+    analysis: 'increase 增加；protect 保护；afford 负担得起（多与 can / cannot 连用）；reduce 减少。',
+    knowledge: ['词汇'],
+    library: 'org',
+    categoryId: 14,
+    examType: '随堂练习',
+    source: '手动录入',
+    owner: '李文博',
+    ownerId: 103,
+  }),
+  seedQuestion({
+    id: 9333,
+    stem: '阅读下面的材料，根据要求写作。\n有人说，成长是一次次告别；也有人说，成长是一次次相遇。这引发了你怎样的联想与思考？请结合自身经历与体验，自拟标题，写一篇不少于 800 字的议论文或记叙文（诗歌除外）。',
+    type: '作文',
+    difficulty: '中等',
+    subject: '语文',
+    grade: '高二',
+    answer: '（评分参考）立意须落在「成长」与「告别、相遇」的关系上：可写告别中获得的独立，可写相遇中得到的滋养，也可辩证论述二者共同构成成长。一等卷（54 分以上）：立意深刻、材料鲜活、语言有表现力；二等卷：立意明确、结构完整、语言通顺；三类卷：泛泛而谈「成长」，未扣住材料。',
+    analysis: '材料给的是对「成长」的两种互补理解，写成非此即彼的对立会失之片面；高分作文多由一件具体的事切入，再拓到对成长的体认，避免堆砌名人素材而无一己之经验。',
+    knowledge: ['议论文写作'],
+    library: 'org',
+    categoryId: 13,
+    examType: '期中考试',
+    source: '手动录入',
+    owner: '李文博',
+    ownerId: 103,
+  }),
+  /*
+   * 英语专属题型（字典里 subjects 限定「英语」）：完形填空 / 七选五 / 短文改错。
+   * 同样每种都要有样本 —— 选中英语后题型选项多出这三项，点下去不能是空列表。
+   */
+  seedQuestion({
+    id: 9334,
+    stem: '阅读下面短文，从括号内所给的两个词中选出可以填入空白处的最佳选项。\nLast summer I volunteered at a community library. At first I felt (1)____ (excited / lost) among so many books I had never read. A librarian noticed my (2)____ (hesitation / anger) and handed me a list of easy stories. Little by little I found myself (3)____ (spending / to spend) every afternoon there, and by August I had finished twelve books.',
+    type: '完形填空',
+    difficulty: '较易',
+    subject: '英语',
+    grade: '高一',
+    answer: '1. lost　2. hesitation　3. spending',
+    analysis: '1. 空处与 among so many books I had never read 呼应，说的是面对陌生书架的不知所措，故填 lost。2. 上句写「我」的局促，图书管理员注意到的正是这份迟疑，hesitation 合语境。3. find oneself doing sth. 是固定搭配，表示「不知不觉做起某事」，故填 spending。',
+    knowledge: ['完形填空'],
+    library: 'org',
+    categoryId: 14,
+    examType: '随堂练习',
+    source: '手动录入',
+    owner: '李文博',
+    ownerId: 103,
+  }),
+  seedQuestion({
+    id: 9335,
+    stem: '根据短文内容，从短文后的选项中选出能填入空白处的最佳选项。选项中有两项为多余选项。\nHow to Build a Reading Habit\nReading regularly is easier when the habit starts small. (36)____ Start with ten minutes a day, and let the book live where you can see it. (37)____ If a book does not hold you after thirty pages, put it down and pick another. (38)____ Reading is not a test; it is a conversation you can leave whenever you like. (39)____ Keep a short list of what you finish, because seeing your own progress is the strongest motivation. (40)____\nA. Do not force yourself to finish every book.\nB. The point is to make the first step as small as possible.\nC. Give it a month and the habit will begin to carry you.\nD. Place it on the table you use most.\nE. Libraries are quiet places to study.\nF. Novels are usually longer than poems.\nG. Write down one sentence that stayed with you.',
+    type: '七选五',
+    difficulty: '中等',
+    subject: '英语',
+    grade: '高一',
+    answer: '36. B　37. D　38. A　39. G　40. C',
+    analysis: '36. 后句 Start with ten minutes a day 是「把第一步做小」的具体做法，B 的 the first step as small as possible 与之衔接。37. 前句 let the book live where you can see it 要求把书放到看得见的地方，D 的 Place it on the table you use most 是同一建议的落地。38. 后句说书读不下去就换一本，A「不要强迫自己读完每一本」正是其概括。39. 后句 Keep a short list of what you finish 对应 G 的 Write down one sentence。40. 全文收尾、指向习惯养成，C 的 Give it a month 与前文 ten minutes a day 的时间线呼应。E（图书馆）、F（小说与诗歌）与本文建立阅读习惯的话题无关，为多余项。',
+    knowledge: ['阅读理解'],
+    library: 'org',
+    categoryId: 14,
+    examType: '随堂练习',
+    source: '手动录入',
+    owner: '李文博',
+    ownerId: 103,
+  }),
+  seedQuestion({
+    id: 9336,
+    stem: '假定英语课上老师要求同桌之间交换修改作文，请你修改你同桌写的以下作文。文中共有 4 处语言错误，每句中最多有两处。\nLast week our class holds a discussion about reading. Many students said they had little time to read, but some of them spent two hours on their phones every day. I think we should to set a fixed reading time. Beside, sharing what we read with friends make the books more interesting.',
+    type: '短文改错',
+    difficulty: '中等',
+    subject: '英语',
+    grade: '高二',
+    answer: '1. holds → held　2. 删去 should 后的 to　3. Beside → Besides　4. make → makes',
+    analysis: '1. 时间状语 Last week 表明动作发生在过去，谓语须用一般过去时 held。2. should 是情态动词，后面接动词原形，故删去 to。3. Beside 意为「在……旁边」，此处表示「此外」，应用 Besides。4. 动名词短语 sharing what we read with friends 作主语视为单数，谓语用 makes。',
+    knowledge: ['时态语态'],
+    library: 'org',
+    categoryId: 14,
+    examType: '单元测试',
     source: '手动录入',
     owner: '李文博',
     ownerId: 103,
@@ -2611,6 +2748,7 @@ const TREE_SPECS: Record<string, TreeSpec[]> = {
         { name: '从句', tag: '从句' },
       ],
     },
+    { name: '词汇', tag: '词汇' },
     { name: '阅读理解', tag: '阅读理解' },
     { name: '完形填空', tag: '完形填空' },
     { name: '书面表达', tag: '书面表达' },
@@ -2773,6 +2911,7 @@ export const QUESTION_STATUS_TEXT: Record<QuestionStatus, string> = {
   pending: '待终审',
   approved: '已入库',
   rejected: '已驳回',
+  offline: '已下架',
 }
 
 export function saveQuestion(input: Partial<OrgQuestion> & { stem: string; submit: boolean }): OrgQuestion {
@@ -2781,10 +2920,15 @@ export function saveQuestion(input: Partial<OrgQuestion> & { stem: string; submi
   const stem = sanitizeRichHtml(input.stem)
   const analysis = input.analysis ? sanitizeRichHtml(input.analysis) : input.analysis
   const options = (input.options ?? []).map((opt) => sanitizeRichHtml(opt))
+  /* 填空题每空的答案与等价答案都是富文本，与题干走同一套净化 */
+  const fillAnswers: FillBlankAnswer[] = (input.fillAnswers ?? []).map((row) => ({
+    value: sanitizeRichHtml(row.value),
+    equivalents: row.equivalents ? sanitizeRichHtml(row.equivalents) : '',
+  }))
 
   /* 富文本下 `<p></p>` 的 trim() 非空，故按纯文本判空；仅含图片的题干也算有内容 */
   if (!toPlainText(stem).trim() && !hasImage(stem)) throw new Error('题干不能为空')
-  if ((input.type === '单选题' || input.type === '多选题' || input.type === '判断题') && !input.answer) {
+  if ((input.type === '单选' || input.type === '多选' || input.type === '判断') && !input.answer) {
     throw new Error('请设置正确答案')
   }
   const isEdit = input.id != null
@@ -2796,11 +2940,12 @@ export function saveQuestion(input: Partial<OrgQuestion> & { stem: string; submi
   const target = item as OrgQuestion
   /* seedQuestion 是纯工厂，不会入池；新建题目须显式入池，否则保存后被静默丢弃 */
   if (!isEdit) questions.unshift(target)
+  const type = input.type ?? target.type
   Object.assign(target, {
     stem,
     subject: input.subject ?? target.subject,
     grade: input.grade ?? target.grade,
-    type: input.type ?? target.type,
+    type,
     difficulty: input.difficulty ?? target.difficulty,
     knowledge: input.knowledge ?? target.knowledge,
     textbook: input.textbook,
@@ -2808,13 +2953,18 @@ export function saveQuestion(input: Partial<OrgQuestion> & { stem: string; submi
     examType: input.examType ?? target.examType,
     sourceRemark: input.sourceRemark,
     options,
+    /* 非选择题的排布配置无意义，一律归一为单列，避免换题型后残留旧列数 */
+    optionColumns: options.length ? (input.optionColumns ?? target.optionColumns) : 1,
     answer: input.answer ?? '',
     analysis: analysis ?? '',
+    /* 非填空题不留上一位编辑的填写结构（换题型后残留会让「重新打开」看到旧空答案） */
+    fillAnswers: type === '填空' ? fillAnswers : [],
     library: input.library ?? target.library,
     categoryId: input.categoryId ?? target.categoryId,
     owner: isEdit ? target.owner : CURRENT.name,
     ownerId: isEdit ? target.ownerId : CURRENT.id,
-    source: isEdit ? target.source : '手动录入',
+    /* 来源由录题页选定；缺省时新建题记为手动录入、编辑时保留原值（不因改错把来源也抹掉） */
+    source: input.source ?? (isEdit ? target.source : '手动录入'),
     updatedAt: nowStr(),
   })
   if (input.submit) {
@@ -2875,6 +3025,22 @@ export function moveQuestions(ids: number[], categoryId: number): number {
     }
   })
   return count
+}
+
+/**
+ * 上架 / 下架：只在 `approved ⇄ offline` 之间切换。
+ *
+ * 其余状态一律不动 —— 草稿、校验中、待终审、已驳回的题本就不在可组卷池里，
+ * 允许从这些状态直接下架只会把审核流绕过去（下架后再上架就变成已入库了）。
+ */
+export function toggleQuestionOffline(id: number): OrgQuestion {
+  const item = questions.find((row) => row.id === id)
+  if (!item) throw new Error('题目不存在')
+  if (item.status === 'approved') item.status = 'offline'
+  else if (item.status === 'offline') item.status = 'approved'
+  else throw new Error(`「${QUESTION_STATUS_TEXT[item.status]}」状态的题目不能上下架`)
+  item.updatedAt = nowStr()
+  return item
 }
 
 export function reviewQuestion(id: number, pass: boolean, opinion: string): OrgQuestion {
@@ -2990,6 +3156,12 @@ export interface PhotoTask {
     /** 真实 AI 识别时模型判定的学科 / 年级（mock 识别不填，入库走默认） */
     subject?: string
     grade?: string
+    /** 题型：识别结果本身不带，校对区改过才会有 —— 入库时优先用它，缺省按选项结构推导 */
+    type?: string
+    /** 选项排布，随题保存（校对区可改） */
+    optionColumns?: OptionColumns
+    /** 填空题各空的富文本答案，与 `answer` 的「｜」连接串并行存在（同 OrgQuestion 的口径） */
+    fillAnswers?: FillBlankAnswer[]
     decided: null | 'import' | 'draft' | 'drop'
   }>
 }
@@ -3049,7 +3221,7 @@ export function decidePhotoResult(
   resultId: string,
   decision: 'import' | 'draft' | 'drop',
   /** 教师在校对区改过的内容；此前前端根本没有回传，改动被静默丢弃 */
-  edit?: { stem?: string; options?: string[]; answer?: string; analysis?: string; subject?: string; grade?: string },
+  edit?: PhotoResultEdit,
 ): PhotoTask {
   const task = photoTasks.find((row) => row.id === taskId)
   if (!task) throw new Error('任务不存在')
@@ -3068,20 +3240,30 @@ export function decidePhotoResult(
     }
     if (edit.subject !== undefined) result.subject = edit.subject
     if (edit.grade !== undefined) result.grade = edit.grade
+    /* 题型 / 难度 / 知识点 / 选项排布：校对区改得到，此前却从没落过 —— 改完存了跟没改一样 */
+    if (edit.type !== undefined) result.type = edit.type
+    if (edit.difficulty !== undefined) result.difficulty = edit.difficulty
+    if (edit.knowledge !== undefined) result.knowledge = [...edit.knowledge]
+    if (edit.optionColumns !== undefined) result.optionColumns = edit.optionColumns
+    if (edit.fillAnswers !== undefined) result.fillAnswers = edit.fillAnswers.map((row) => ({ ...row }))
   }
 
   if (decision === 'import') {
-    /* 题型按选项结构推导：无选项 → 解答题（问答题），有选项 → 单选/多选按答案字母数 */
+    /* 题型优先用教师改过的（校对区可以把它从单选改成填空）；没改过就按选项结构推导：
+       无选项 → 解答题（问答题），有选项 → 单选/多选按答案字母数 */
     const letters = result.answer.toUpperCase().replace(/[^A-F]/g, '')
     const q = seedQuestion({
       id: ++questionSeq,
-      type: result.options.length ? (letters.length > 1 ? '多选题' : '单选题') : '解答题',
+      type: result.type ?? (result.options.length ? (letters.length > 1 ? '多选' : '单选') : '解答'),
       stem: result.stem,
       options: result.options.map((opt) => sanitizeRichHtml(opt)),
       answer: result.answer,
       analysis: result.analysis,
       knowledge: result.knowledge,
       difficulty: result.difficulty,
+      optionColumns: result.optionColumns,
+      /* 填空题各空的富文本答案随题落库（answer 仍是各空纯文本的「｜」连接串） */
+      fillAnswers: result.type === '填空' ? result.fillAnswers : undefined,
       subject: result.subject ?? '数学',
       grade: result.grade ?? '高一',
       source: '拍照识别',
@@ -3154,12 +3336,12 @@ function defaultSections(): PaperSection[] {
     },
     {
       id: ++sectionSeq,
-      title: '二、填空题',
+      title: '二、填空',
       questions: [{ questionId: 9008, score: 5 }],
     },
     {
       id: ++sectionSeq,
-      title: '三、解答题',
+      title: '三、解答',
       questions: [{ questionId: 9003, score: 12 }],
     },
   ]
@@ -3449,7 +3631,7 @@ export const COLLAB_MEMBER_STATUS_TEXT = COLLAB_MEMBER_TEXT
 
 /** 题型默认分值（与前端 paper-sections.ts 同一口径，避免两边算出不同总分） */
 function collabDefaultScore(type: string): number {
-  return type === '解答题' ? 12 : 5
+  return type === '解答' ? 12 : 5
 }
 
 function collabRequirementOf(input: Partial<CollabRequirement>): CollabRequirement {
@@ -3458,9 +3640,9 @@ function collabRequirementOf(input: Partial<CollabRequirement>): CollabRequireme
     grade: input.grade ?? '高一',
     duration: input.duration ?? 120,
     structure: input.structure ?? [
-      { type: '单选题', count: 8, score: 5 },
-      { type: '填空题', count: 4, score: 5 },
-      { type: '解答题', count: 3, score: 12 },
+      { type: '单选', count: 8, score: 5 },
+      { type: '填空', count: 4, score: 5 },
+      { type: '解答', count: 3, score: 12 },
     ],
     difficulty: input.difficulty ?? [
       { level: '容易', ratio: 30 },
@@ -3541,12 +3723,12 @@ export const collabTasks: OrgCollabTask[] = [
       grade: '高一',
       duration: 120,
       structure: [
-        { type: '单选题', count: 8, score: 5 },
-        { type: '填空题', count: 4, score: 5 },
-        { type: '解答题', count: 3, score: 12 },
+        { type: '单选', count: 8, score: 5 },
+        { type: '填空', count: 4, score: 5 },
+        { type: '解答', count: 3, score: 12 },
       ],
       knowledge: ['函数与导数', '二次函数', '集合'],
-      remark: '命题范围：必修一第一至三章。难度按易 3 : 中 5 : 难 2 配比，解答题须给出完整解析与评分点。',
+      remark: '命题范围：必修一第一至三章。难度按易 3 : 中 5 : 难 2 配比，解答须给出完整解析与评分点。',
     })
     const paper = seedPaper({
       id: 320,
@@ -3555,8 +3737,8 @@ export const collabTasks: OrgCollabTask[] = [
       owner: '陈明远',
       sections: [
         { id: ++sectionSeq, title: '一、单项选择题', questions: [{ questionId: 9001, score: 5 }, { questionId: 9004, score: 5 }] },
-        { id: ++sectionSeq, title: '二、填空题', questions: [{ questionId: 9002, score: 5 }] },
-        { id: ++sectionSeq, title: '三、解答题', questions: [] },
+        { id: ++sectionSeq, title: '二、填空', questions: [{ questionId: 9002, score: 5 }] },
+        { id: ++sectionSeq, title: '三、解答', questions: [] },
       ],
     })
     papers.unshift(paper)
@@ -3566,10 +3748,10 @@ export const collabTasks: OrgCollabTask[] = [
       name: paper.name,
       requirement,
       members: [
-        collabMemberOf({ name: '陈明远', questionTypes: ['单选题'], perms: ['选题', '改分值', '编辑卷头'], status: 'working', online: true }, requirement),
-        collabMemberOf({ name: '李文博', questionTypes: ['填空题'], perms: ['选题', '改分值'], status: 'working', online: true }, requirement),
-        collabMemberOf({ name: '沈丽华', questionTypes: ['解答题'], perms: ['选题'], status: 'submitted', lastActiveAt: nowStr(-20) }, requirement),
-        collabMemberOf({ name: '王静', questionTypes: ['多选题'], perms: ['选题'], status: 'invited', lastActiveAt: nowStr(-40) }, requirement),
+        collabMemberOf({ name: '陈明远', questionTypes: ['单选'], perms: ['选题', '改分值', '编辑卷头'], status: 'working', online: true }, requirement),
+        collabMemberOf({ name: '李文博', questionTypes: ['填空'], perms: ['选题', '改分值'], status: 'working', online: true }, requirement),
+        collabMemberOf({ name: '沈丽华', questionTypes: ['解答'], perms: ['选题'], status: 'submitted', lastActiveAt: nowStr(-20) }, requirement),
+        collabMemberOf({ name: '王静', questionTypes: ['多选'], perms: ['选题'], status: 'invited', lastActiveAt: nowStr(-40) }, requirement),
       ],
       versions: [],
       status: 'collecting',
@@ -3602,7 +3784,7 @@ export const collabTasks: OrgCollabTask[] = [
         no: 3,
         time: nowStr(-20),
         actor: '沈丽华',
-        summary: '提交 1 道解答题并调整模块分值',
+        summary: '提交 1 道解答并调整模块分值',
         questionCount: paperQuestionCount(paper),
         totalScore: paperTotalScore(paper),
         sections: JSON.parse(JSON.stringify(paper.sections)) as PaperSection[],
@@ -3616,8 +3798,8 @@ export const collabTasks: OrgCollabTask[] = [
       grade: '高一',
       duration: 150,
       structure: [
-        { type: '单选题', count: 6, score: 3 },
-        { type: '解答题', count: 4, score: 8 },
+        { type: '单选', count: 6, score: 3 },
+        { type: '解答', count: 4, score: 8 },
       ],
       knowledge: ['现代文阅读', '古诗文默写'],
       remark: '现代文阅读请选用 2025 年后发表的文章；文言文选自《史记》。',
@@ -3637,8 +3819,8 @@ export const collabTasks: OrgCollabTask[] = [
       name: paper.name,
       requirement,
       members: [
-        collabMemberOf({ name: '沈丽华', questionTypes: ['单选题'], perms: ['选题', '改分值', '编辑卷头'], status: 'working', online: true }, requirement),
-        collabMemberOf({ name: '孙悦', questionTypes: ['解答题'], perms: ['选题', '改分值'], status: 'working' }, requirement),
+        collabMemberOf({ name: '沈丽华', questionTypes: ['单选'], perms: ['选题', '改分值', '编辑卷头'], status: 'working', online: true }, requirement),
+        collabMemberOf({ name: '孙悦', questionTypes: ['解答'], perms: ['选题', '改分值'], status: 'working' }, requirement),
       ],
       versions: [],
       status: 'collecting',
@@ -3651,7 +3833,7 @@ export const collabTasks: OrgCollabTask[] = [
         no: 1,
         time: nowStr(-8),
         actor: '沈丽华',
-        summary: '创建协同组卷任务，邀请孙悦负责解答题',
+        summary: '创建协同组卷任务，邀请孙悦负责解答',
         questionCount: 0,
         totalScore: 0,
         sections: JSON.parse(JSON.stringify(paper.sections)) as PaperSection[],
@@ -3781,11 +3963,11 @@ export function deleteCollabTask(id: number): void {
 /** 题型 → 大题标准名（与前端同一口径） */
 function sectionLabelOfType(type: string): string {
   const map: Record<string, string> = {
-    单选题: '单项选择题',
-    多选题: '多项选择题',
-    判断题: '判断题',
-    填空题: '填空题',
-    解答题: '解答题',
+    单选: '单项选择题',
+    多选: '多项选择题',
+    判断: '判断',
+    填空: '填空',
+    解答: '解答',
   }
   return map[type] ?? `${type}大题`
 }
@@ -4582,7 +4764,7 @@ export function decideExample(materialId: number, exampleId: number, decision: '
   const q = seedQuestion({
     id: ++questionSeq,
     stem: target.stem,
-    type: '解答题',
+    type: '解答',
     answer: target.answer,
     analysis: target.analysis,
     source: '教辅导入',
@@ -5237,7 +5419,7 @@ export function recognizeFile(id: number): { file: OrgFile; questionCount: numbe
     const q = seedQuestion({
       id: ++questionSeq,
       stem: `${item.name.replace(/\.\w+$/, '')} · 第 ${i + 1} 题：${AI_STEMS[i % AI_STEMS.length]}`,
-      type: i === 2 ? '解答题' : '填空题',
+      type: i === 2 ? '解答' : '填空',
       answer: '见解析',
       analysis: '文档识别结果，公式已转 LaTeX。',
       source: '文档导入',
@@ -5285,13 +5467,13 @@ export interface RecognizedImportQuestion {
 
 /** 题型 → 试卷大题标题（组卷自动归类与协同组卷页保持同一套命名） */
 const IMPORT_SECTION_TITLE: Record<string, string> = {
-  单选题: '单项选择题',
-  多选题: '多项选择题',
-  判断题: '判断题',
-  填空题: '填空题',
-  解答题: '解答题',
+  单选: '单项选择题',
+  多选: '多项选择题',
+  判断: '判断',
+  填空: '填空',
+  解答: '解答',
 }
-const SECTION_TYPE_ORDER = ['单选题', '多选题', '判断题', '填空题', '解答题']
+const SECTION_TYPE_ORDER = ['单选', '多选', '判断', '填空', '解答']
 
 /**
  * 文档识别确认入库：勾选题目入题库（待终审），makePaper 时按题型自动归组
@@ -5601,7 +5783,7 @@ export function setDefaultOrgPrompt(id: number): OrgPrompt {
 export function testOrgPrompt(): { output: string; costMs: number; tokens: number } {
   consumeQuota(1)
   return {
-    output: '【示例输出】已按机构模板风格生成：一、单选题（每题 5 分）\n1. 某商场促销，商品原价 200 元…（情境化题干，贴近生活）',
+    output: '【示例输出】已按机构模板风格生成：一、单选（每题 5 分）\n1. 某商场促销，商品原价 200 元…（情境化题干，贴近生活）',
     costMs: 980 + Math.floor(Math.random() * 1800),
     tokens: 520 + Math.floor(Math.random() * 700),
   }
@@ -5878,7 +6060,7 @@ export const orgMenuTree: OrgMenuNode[] = [
     children: [
       { key: 'question/bank', title: '题库管理', enabled: true },
       { key: 'question/create', title: '录题中心', enabled: true },
-      { key: 'question/photo', title: 'AI 拍照识题', enabled: true },
+      { key: 'question/photo', title: 'AI 识题', enabled: true },
       { key: 'question/review', title: '题目审核中心', enabled: true },
     ],
   },
@@ -6014,11 +6196,21 @@ export function recognizeSearchImage(name: string): { keyword: string } {
 
 /** 题型 / 难度 / 短称都是封闭集合，写死比从语料里推更稳（语料里不一定每种都出现） */
 const COMPOSE_TYPES: Array<{ name: string; aliases: string[] }> = [
-  { name: '单选题', aliases: ['单选题', '单选', '选择题', '单项选择'] },
-  { name: '多选题', aliases: ['多选题', '多选', '多项选择'] },
-  { name: '判断题', aliases: ['判断题', '判断', '对错题'] },
-  { name: '填空题', aliases: ['填空题', '填空'] },
-  { name: '解答题', aliases: ['解答题', '解答', '问答', '大题', '计算题'] },
+  { name: '单选', aliases: ['单选', '单选题', '选择题', '单项选择'] },
+  { name: '多选', aliases: ['多选', '多选题', '多项选择'] },
+  { name: '判断', aliases: ['判断', '判断题', '对错题'] },
+  { name: '填空', aliases: ['填空', '填空题'] },
+  /* 「计算题」曾是解答题的别名，现在自己就是一个题型，别再挂在解答下 */
+  { name: '解答', aliases: ['解答', '解答题', '问答', '大题'] },
+  { name: '计算', aliases: ['计算', '计算题'] },
+  { name: '证明', aliases: ['证明', '证明题'] },
+  { name: '连线', aliases: ['连线', '连线题', '配对题', '匹配题'] },
+  { name: '作文', aliases: ['作文', '作文题', '写作题'] },
+  /* 英语专属题型（字典里 subjects 限定「英语」）。「完形填空」含「填空」，命中后由下方
+     的包含关系剔除通用的「填空」，否则一句「英语完形填空题」会同时解析出两个题型。 */
+  { name: '完形填空', aliases: ['完形填空', '完型填空', '完形'] },
+  { name: '七选五', aliases: ['七选五', '七选5'] },
+  { name: '短文改错', aliases: ['短文改错', '改错题'] },
 ]
 
 const COMPOSE_DIFFICULTIES = ['容易', '较易', '中等', '较难', '困难']
@@ -6109,7 +6301,11 @@ function interpretComposeText(seeded: string): ComposeSearchIntent {
 
   const subject = vocabOf((row) => [row.subject]).find((value) => contains(value)) ?? ''
   const grade = vocabOf((row) => [row.grade]).find((value) => contains(value)) ?? ''
-  const questionTypes = COMPOSE_TYPES.filter((entry) => entry.aliases.some(contains)).map((entry) => entry.name)
+  const matchedTypes = COMPOSE_TYPES.filter((entry) => entry.aliases.some(contains))
+  /* 「完形填空」命中时丢掉「填空」：长名已把短名整个覆盖，两个都留下等于凭空多出一个题型 */
+  const questionTypes = matchedTypes
+    .filter((entry) => !matchedTypes.some((other) => other !== entry && other.name.includes(entry.name)))
+    .map((entry) => entry.name)
   const difficulty = COMPOSE_DIFFICULTIES.find(contains) ?? ''
 
   /* 关键词优先用命中的知识点（检索区分度最高），其次退回学科/年级这类较泛的词 */
@@ -6168,7 +6364,7 @@ function seeded(seed: number): () => number {
 const round1 = (n: number) => Math.round(n * 10) / 10
 
 /** 客观题：机器阅卷直接判对错；主观题：按步给分，错也有部分分 */
-const OBJECTIVE_TYPES = ['单选题', '多选题', '判断题']
+const OBJECTIVE_TYPES = ['单选', '多选', '判断']
 
 /**
  * 按试卷生成答卷（模拟答题卡扫描 + 客观题机阅）。
@@ -6195,7 +6391,7 @@ function buildAnswers(session: ExamSession, paper: OrgPaper): ExamAnswer[] {
           questionId: row.questionId,
           qIndex: i + 1,
           sectionTitle: row.sectionTitle,
-          type: q?.type ?? '解答题',
+          type: q?.type ?? '解答',
           knowledge: q?.knowledge ?? [],
           full: row.score,
           score,

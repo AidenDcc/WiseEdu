@@ -3,7 +3,8 @@
  * 教材知识点过滤面板（题库 BankView 与标准公式库 StandardView 共用）。
  *
  * 左侧：教材级联（年级 → 学科 → 版本）+ 知识点搜索 + 知识点树；
- * 选中节点时 emit 该子树的全部叶子 tag（null = 全部知识点），由父组件自行过滤列表。
+ * 选中节点时 emit 该子树的全部叶子 tag（null = 全部知识点），由父组件自行过滤列表；
+ * 已应用的年级 / 学科随 `scopeChange` 一并抛出，供父组件替代单独的年级 / 学科筛选行。
  * 节点计数通过 `rows`（含 knowledge 标签的列表数据）计算。
  *
  * 年级 / 学科单向跟随顶部栏全局作用域（useScope）：顶部栏变了面板跟着变，
@@ -17,7 +18,12 @@ import { fetchKnowledgeTree, fetchTextbookMatrix } from '@/api/org'
 import { useScope } from '@/composables/useScope'
 
 const props = defineProps<{ rows: Array<{ knowledge: string[] }> }>()
-const emit = defineEmits<{ change: [tags: string[] | null] }>()
+const emit = defineEmits<{
+  /** 选中节点的子树叶子 tag（null = 全部知识点） */
+  change: [tags: string[] | null]
+  /** 已应用的年级 / 学科。题库管理用它替代「年级 / 学科」两个筛选行 —— 教材级联就是这两个维度 */
+  scopeChange: [scope: { grade: string; subject: string }]
+}>()
 
 const rootEl = ref<HTMLElement | null>(null)
 
@@ -218,6 +224,13 @@ function selectNode(node: OrgKnowledgeNode) {
 
 /* 选中节点变化 → 通知父组件 */
 watch(activeTags, (tags) => emit('change', tags))
+
+/* 已应用的年级 / 学科变化 → 通知父组件。
+   不用 immediate：onMounted 里的 locateByScope() 会写 sel，那一次同样会触发，
+   提前 emit 只会抛出一对空字符串。 */
+watch([() => sel.grade, () => sel.subject], () => {
+  emit('scopeChange', { grade: sel.grade, subject: sel.subject })
+})
 
 /* ===== 顶部栏作用域 → 教材级联 ===== */
 /** 在教材矩阵里定位一组「年级 / 学科」，教材版本沿用现值，失效则回退人教A版 / 首项 */

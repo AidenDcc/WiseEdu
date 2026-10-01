@@ -78,6 +78,16 @@ export function hasImage(content: string): boolean {
   return /<img\b[^>]*>/i.test(content)
 }
 
+/**
+ * 录题时最常用的两个符号：填空下横线、作答括号。
+ *
+ * 放共享层是为了**只有一个口径**：编辑器的工具栏按钮插入它们，录题页判断「题干是否已以作答括号开头」
+ * 也读它 —— 两处各写一份字面量时，改了其中一处，另一处就会把已有括号的题干再加一次。
+ * 取值与种子数据一致（填空 6 个 ASCII 下划线，括号为全角、中间两个全角空格）。
+ */
+export const FILL_BLANK = '______'
+export const ANSWER_PAREN = '（　　）'
+
 /** 富文本 → 纯文本：公式取 LaTeX 源码，块级元素补换行，最后压缩空白 */
 export function toPlainText(content: string): string {
   if (!content) return ''

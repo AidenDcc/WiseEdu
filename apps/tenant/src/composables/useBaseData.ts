@@ -31,9 +31,26 @@ const namesOf = (key: BaseDictKey) => dict.value[key].map((item) => item.name)
 
 const subjects = computed(() => namesOf('subject'))
 const grades = computed(() => namesOf('grade'))
-const questionTypes = computed(() => namesOf('questionType'))
 const difficulties = computed(() => namesOf('difficulty'))
 const examTypes = computed(() => namesOf('examType'))
+
+/**
+ * 题型按学科收窄：通用题型（未限定适用学科）+ 该学科专属题型。
+ *
+ * `subject` 为空表示「不指定学科」，此时给全部题型 —— 若只给通用项，英语专属题目
+ * 在题库里存在、却没有任何筛选项能选中它们。
+ *
+ * 纯函数，单例内的 `questionTypesFor` 与自行查字典的题库筛选共用这一份规则。
+ */
+export function scopedQuestionTypes(items: TenantDictItem[], subject: string): string[] {
+  return items
+    .filter((item) => !subject || !item.subjects?.length || item.subjects.includes(subject))
+    .map((item) => item.name)
+}
+
+function questionTypesFor(subject: string): string[] {
+  return scopedQuestionTypes(dict.value.questionType, subject)
+}
 
 /** 教材级联（学科随年级动态、版本随学科动态），唯一权威来源是机构端教材矩阵 */
 function subjectsForGrade(grade: string): string[] {
@@ -106,7 +123,7 @@ export function useBaseData() {
     ensure,
     subjects,
     grades,
-    questionTypes,
+    questionTypesFor,
     difficulties,
     examTypes,
     subjectsForGrade,

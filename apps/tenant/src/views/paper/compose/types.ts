@@ -4,7 +4,15 @@
  * 8 个页签共用**同一份** `ComposeFilter`：一次搜索（文本 / 图片 / AI）写进它，切页签时条件保持，
  * 这样「搜到的东西换个页签还在」是默认行为，而不是要用户在每个页签里重搜一遍。
  */
-import { toPlainText, type MediaKind, type OrgMaterial, type OrgMedia, type OrgPaper, type OrgQuestion } from '@aiteach/shared'
+import {
+  QUESTION_SOURCE_OPTIONS,
+  toPlainText,
+  type MediaKind,
+  type OrgMaterial,
+  type OrgMedia,
+  type OrgPaper,
+  type OrgQuestion,
+} from '@aiteach/shared'
 
 export interface ComposeFilter {
   /** 关键词：文本搜索输入、图片搜索识别结果、AI 解读的关键词都会落在这里 */
@@ -26,15 +34,11 @@ export interface ComposeFilter {
   excludePicked: boolean
 }
 
-/** 题目来源候选，与 `QuestionSource` 同值域（此处不引类型，避免筛选模型绑死后端枚举） */
-export const QUESTION_SOURCES = [
-  '手动录入',
-  'AI 出题',
-  'AI 变式',
-  '拍照识别',
-  '文档导入',
-  '教辅导入',
-] as const
+/**
+ * 题目来源候选。改为引用共享层那份（`QUESTION_SOURCE_OPTIONS`，与 `QuestionSource` 同值域）——
+ * 原先这里手抄了一份，题库那边新增「名校考试」时本页必然漏掉，下拉里就少一个取值。
+ */
+export const QUESTION_SOURCES = QUESTION_SOURCE_OPTIONS
 
 export type TabKey =
   | 'questions'

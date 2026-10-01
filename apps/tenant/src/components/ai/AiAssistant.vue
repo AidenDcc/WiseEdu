@@ -178,7 +178,7 @@ function onFabClick(): void {
         :style="style"
         type="button"
         aria-label="AI 问答"
-        title="AI 问答（可拖动调整位置）"
+        title="AI 问答（可拖动，松手自动吸附到左右两侧）"
         @pointerdown="onPointerDown"
         @pointermove="onPointerMove"
         @pointerup="onPointerUp"
@@ -226,7 +226,8 @@ function onFabClick(): void {
   touch-action: none;
   user-select: none;
   cursor: grab;
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  /* left/top 给吸附归位用（松手后滑到边上）；拖动中由 .dragging 关掉过渡以跟手 */
+  transition: transform 0.18s ease, box-shadow 0.18s ease, left 0.26s ease-out, top 0.26s ease-out;
 }
 .ai-fab:hover {
   transform: scale(1.06);

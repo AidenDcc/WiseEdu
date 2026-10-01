@@ -156,7 +156,7 @@ function applyBatchScore() {
 /* ===== 自动排序 ===== */
 
 type SortMode = 'added' | 'type' | 'difficulty' | 'score'
-const OBJECTIVE = new Set(['单选题', '多选题', '判断题'])
+const OBJECTIVE = new Set(['单选', '多选', '判断'])
 
 /** 组卷车条目 + 反查到的题目；题目已缺失的条目不参与排序（它们本来就进不了卷） */
 interface BasketRow {

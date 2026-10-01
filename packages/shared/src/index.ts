@@ -86,6 +86,8 @@ export {
   renderMathIn,
   normalizeRichHtml,
   hasImage,
+  FILL_BLANK,
+  ANSWER_PAREN,
 } from './utils/richtext'
 export { registerMediaSrc, resolveMediaIn, resolveMediaSrc, unregisterMediaSrc } from './utils/media-ref'
 /* 统一 KaTeX 入口：已注册 mhchem（\ce{} 化学式），各渲染点一律从这里取 katex */
@@ -107,6 +109,9 @@ export type {
   QuestionLibrary,
   AiCheckResult,
   OrgQuestion,
+  FillBlankAnswer,
+  OptionColumns,
+  PhotoResultEdit,
   OrgCategory,
   OrgKnowledgeNode,
   TextbookOption,
@@ -212,6 +217,7 @@ export {
 } from './mock/org-store'
 /* 这几个字典定义在 models 里（与类型同源），值需单独导出给前端 */
 export {
+  QUESTION_SOURCE_OPTIONS,
   COLLAB_STATUS_TEXT,
   COLLAB_MEMBER_TEXT,
   TEACH_KIND_TEXT,

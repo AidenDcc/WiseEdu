@@ -136,7 +136,7 @@ function mockReport(input: CheckQuestionInput): AiCheckReport {
     options: [...input.options],
     answer:
       input.answer ||
-      (input.options.length ? 'A' : input.type === '填空题' ? '答案要点' : '由题意直接推导可得结论（演示答案，请替换）'),
+      (input.options.length ? 'A' : input.type === '填空' ? '答案要点' : '由题意直接推导可得结论（演示答案，请替换）'),
     analysis:
       input.analysis || '<p>（AI 补）演示解析：依据题干条件逐步推导即可得出结论，请替换为真实解析。</p>',
     knowledge: input.knowledge.slice(0, 3),

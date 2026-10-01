@@ -65,7 +65,7 @@ import { downloadFile, formatFileSize } from '@/utils/file'
 const route = useRoute()
 const router = useRouter()
 
-const { subjects, grades, questionTypes, difficulties, ensure, optionLabel } = useBaseData()
+const { subjects, grades, questionTypesFor, difficulties, ensure, optionLabel, withCurrent } = useBaseData()
 
 const ROOT_ID = 0
 const folders = ref<FileFolder[]>([])
@@ -825,7 +825,7 @@ async function submitUpload() {
 
 /* ===== AI 识别入库（FR-FL-004/005 扩展：先确认、可修改，再入库） ===== */
 
-const CHOICE_TYPES = ['单选题', '多选题', '判断题']
+const CHOICE_TYPES = ['单选', '多选', '判断']
 function isChoiceType(type: string): boolean {
   return CHOICE_TYPES.includes(type)
 }
@@ -879,7 +879,7 @@ function closeRecognize() {
 /** 修改题型时同步选项结构：客观题保底 4 个空选项，主观题清空选项 */
 function onRecogTypeChange(q: RecognizedQuestion) {
   if (isChoiceType(q.type)) {
-    if (!q.options.length) q.options = q.type === '判断题' ? ['正确', '错误'] : ['', '', '', '']
+    if (!q.options.length) q.options = q.type === '判断' ? ['正确', '错误'] : ['', '', '', '']
     q.score = 5
   } else {
     q.options = []
@@ -987,9 +987,6 @@ onBeforeUnmount(() => {
           </div>
         </template>
       </AppDropdownMenu>
-      <button class="btn btn-ghost btn-sm" type="button" @click="router.push('/recycle')">
-        <AppIcon name="trash" :size="15" /> 回收站
-      </button>
       <span class="fm-divider" />
       <button class="btn btn-ghost btn-sm" type="button" :disabled="!pickedCount" @click="openMoveSelected">
         <AppIcon name="move" :size="15" /> 移动
@@ -1352,7 +1349,8 @@ onBeforeUnmount(() => {
                 <b>第 {{ qi + 1 }} 题</b>
               </label>
               <select v-model="q.type" class="f-select rq-type" @change="onRecogTypeChange(q)">
-                <option v-for="t in questionTypes" :key="t" :value="t">{{ t }}</option>
+                <!-- 题型随本题学科收窄（英语才有完形填空 / 七选五 / 短文改错）；已选值并入，改学科不会渲染成空白 -->
+                <option v-for="t in withCurrent(questionTypesFor(q.subject), q.type)" :key="t" :value="t">{{ t }}</option>
               </select>
               <select v-model="q.subject" class="f-select rq-meta">
                 <option v-for="s in subjects" :key="s" :value="s">{{ optionLabel(subjects, s) }}</option>
@@ -1373,9 +1371,9 @@ onBeforeUnmount(() => {
               <div v-for="(opt, oi) in q.options" :key="oi" class="rq-opt">
                 <span class="rq-letter">{{ 'ABCDEF'[oi] }}</span>
                 <RichTextEditor v-model="q.options[oi]" class="rq-opt-editor" compact :subject="q.subject" :min-height="36" :placeholder="`选项 ${'ABCDEF'[oi]}`" />
-                <button v-if="q.options.length > 2 && q.type !== '判断题'" class="mini-btn danger" type="button" @click="q.options.splice(oi, 1)">删</button>
+                <button v-if="q.options.length > 2 && q.type !== '判断'" class="mini-btn danger" type="button" @click="q.options.splice(oi, 1)">删</button>
               </div>
-              <button v-if="q.type !== '判断题' && q.options.length < 6" class="btn btn-ghost btn-sm" type="button" @click="q.options.push('')">
+              <button v-if="q.type !== '判断' && q.options.length < 6" class="btn btn-ghost btn-sm" type="button" @click="q.options.push('')">
                 <AppIcon name="plus" :size="13" /> 添加选项
               </button>
               <label class="f-label" style="margin-top: 8px">答案（选项字母，多选连写如 AC）</label>

@@ -6,7 +6,7 @@
  * 为什么复用题库那套卡片外观、而不是抽成一个公共组件：题库卡片里的编号、状态标签、组卷篮、
  * 解析折叠都依赖 OrgQuestion（status / useCount / updatedAt / variantOf），而生成结果只有
  * GeneratedQuestion（stem / options / answer / analysis / knowledge / difficulty），
- * 另外还多了质检结论与「已转入手动编辑」这类对方没有的状态 —— 抽成公共组件要挂一堆可选字段与插槽，
+ * 另外还多了质检结论与「已保存到题库」这类对方没有的状态 —— 抽成公共组件要挂一堆可选字段与插槽，
  * 两边都更难读。所以**共用的是逻辑与样式规则，不是组件**：
  * - 判定逻辑（answerLetters / difficultyClass / needsFigure）收敛在 `@/utils/question-card`，
  *   与 BankView 同一份实现，改一处两边都生效；
@@ -20,20 +20,28 @@
  * - 不搬题库的 `.detail-list`（flex:1 + overflow-y:auto，那是给固定高度的 .table-panel 用的）：
  *   这里是页面流式布局，滚动交给 AppLayout 的 .content。
  *
- * 采纳态 / 转入手动态 / 质检结论一律按**题目 id** 索引，不用下标 —— 丢弃中间一题时下标会整体错位，
+ * 采纳态 / 已入库态 / 质检结论一律按**题目 id** 索引，不用下标 —— 丢弃中间一题时下标会整体错位，
  * 采纳标记与质检标签就会挂到别的题上。
  */
 import { AppIcon, RichTextViewer } from '@aiteach/shared'
-import type { GeneratedQuestion } from '@aiteach/shared'
+import type { GeneratedQuestion, OrgQuestion } from '@aiteach/shared'
 import type { VerifyIssue } from '@/api/ai-verify'
-import { answerLetters, difficultyClass, needsFigure } from '@/utils/question-card'
+import QuestionOptions from '@/components/question/QuestionOptions.vue'
+import { difficultyClass, needsFigure } from '@/utils/question-card'
 
 const props = defineProps<{
   list: GeneratedQuestion[]
   /** 已采纳进题库的题目 id */
   adopted: Set<string>
-  /** 已「编辑后采纳」填进手动录入表单的题目 id（不能再直接采纳，否则题库会出现重复题） */
-  handedOff: Set<string>
+  /** 已「编辑入库」保存进题库的题目 id（不能再直接采纳，否则题库会出现重复题） */
+  saved: Set<string>
+  /**
+   * 已入库的题，按**生成结果 id** 索引。
+   * 有值时卡片正文改用它渲染 —— 编辑过再存，卡片上还挂着旧题干会让人以为没存上。
+   * 生成结果与入库题在卡片用到的字段上同形（stem / options / answer / analysis / knowledge /
+   * difficulty），故这里按「带这几项」的最小结构取用。
+   */
+  savedById?: Record<string, Pick<OrgQuestion, 'stem' | 'options' | 'answer' | 'analysis' | 'knowledge' | 'difficulty'>>
   /** 最后一轮的质检结论，按题目 id 索引 */
   issues: Record<string, VerifyIssue>
   /** 实际执行的质检轮数（0 = 未开启检查，此时不打质检标） */
@@ -44,10 +52,17 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   adopt: [item: GeneratedQuestion]
-  /** 编辑后采纳：填进手动录入表单并切到手动标签（由父组件完成） */
+  /** 编辑入库：开「题目编辑」弹窗，确认后由父组件存进题库 */
   edit: [item: GeneratedQuestion]
   discard: [id: string]
 }>()
+
+/** 卡片正文的取值来源：已入库的看入库版，其余看生成结果 */
+type CardBody = Pick<OrgQuestion, 'stem' | 'options' | 'answer' | 'analysis' | 'knowledge' | 'difficulty'>
+
+function bodyOf(item: GeneratedQuestion): CardBody {
+  return props.savedById?.[item.id] ?? item
+}
 
 /* answerLetters / difficultyClass / needsFigure 见 @/utils/question-card
    （与题库管理 BankView 共用同一份实现） */
@@ -63,13 +78,13 @@ function issueOf(id: string): VerifyIssue | null {
       v-for="(item, index) in list"
       :key="item.id"
       class="q-card"
-      :class="{ adopted: adopted.has(item.id) }"
+      :class="{ adopted: adopted.has(item.id) || saved.has(item.id) }"
     >
       <div class="qc-meta">
         <span class="qc-id">第 {{ index + 1 }} 题</span>
-        <span class="tag tag-blue">{{ item.options.length > 0 ? '客观题' : requestedType }}</span>
-        <span class="tag" :class="difficultyClass(item.difficulty)">{{ item.difficulty }}</span>
-        <span class="qc-kp">{{ item.knowledge.join('、') }}</span>
+        <span class="tag tag-blue">{{ bodyOf(item).options.length > 0 ? '客观题' : requestedType }}</span>
+        <span class="tag" :class="difficultyClass(bodyOf(item).difficulty)">{{ bodyOf(item).difficulty }}</span>
+        <span class="qc-kp">{{ bodyOf(item).knowledge.join('、') }}</span>
         <!-- 质检结论打标：error 红（需人工），warn 橙，通过绿 -->
         <span v-if="issueOf(item.id)?.level === 'error'" class="tag tag-red" :title="issueOf(item.id)?.message">
           质检异常 · {{ issueOf(item.id)?.aspect }}
@@ -79,49 +94,39 @@ function issueOf(id: string): VerifyIssue | null {
         </span>
         <span v-else-if="verifyRounds" class="tag tag-green">质检通过</span>
         <span v-if="adopted.has(item.id)" class="tag tag-green">已采纳</span>
-        <span v-else-if="handedOff.has(item.id)" class="tag tag-orange">已转入手动编辑</span>
+        <span v-else-if="saved.has(item.id)" class="tag tag-green">已保存到题库</span>
       </div>
 
-      <RichTextViewer class="qc-stem" :content="item.stem" />
+      <RichTextViewer class="qc-stem" :content="bodyOf(item).stem" />
       <!-- 配图（含图形描述的题展示图位；题内已嵌图的不再占位） -->
-      <div v-if="needsFigure(item)" class="qc-figure">
+      <div v-if="needsFigure(bodyOf(item))" class="qc-figure">
         <AppIcon name="image" :size="26" />
         <span>题目配图（演示占位）</span>
       </div>
 
-      <ul v-if="item.options.length > 0" class="qc-options">
-        <li
-          v-for="(opt, i) in item.options"
-          :key="i"
-          :class="{ right: answerLetters(item).includes('ABCDEF'[i]) }"
-        >
-          <span class="opt-letter">{{ 'ABCDEF'[i] }}</span>
-          <RichTextViewer :content="opt" tag="span" />
-        </li>
-      </ul>
+      <QuestionOptions class="qc-options" :options="bodyOf(item).options" :answer="bodyOf(item).answer" />
 
       <div class="qc-answer">
         <p>
           <b>答案：</b>
           <!-- 客观题答案是字母用强调色纯文本；问答题答案是富文本（公式/插图） -->
-          <span v-if="item.options.length" class="qc-answer-text">{{ item.answer || '—' }}</span>
-          <RichTextViewer v-else :content="item.answer" tag="span" empty="—" />
+          <span v-if="bodyOf(item).options.length" class="qc-answer-text">{{ bodyOf(item).answer || '—' }}</span>
+          <RichTextViewer v-else :content="bodyOf(item).answer" tag="span" empty="—" />
         </p>
-        <p><b>解析：</b><RichTextViewer :content="item.analysis" tag="span" empty="—" /></p>
+        <p><b>解析：</b><RichTextViewer :content="bodyOf(item).analysis" tag="span" empty="—" /></p>
       </div>
 
       <div class="qc-ops">
         <template v-if="adopted.has(item.id)">
           <span class="f-hint">已进入题库待终审</span>
         </template>
-        <template v-else-if="handedOff.has(item.id)">
-          <span class="f-hint">已填入手动录入表单，保存后入库</span>
-          <button class="mini-btn" type="button" @click="emit('edit', item)">回到编辑</button>
-          <button class="mini-btn danger" type="button" @click="emit('discard', item.id)">丢弃</button>
+        <template v-else-if="saved.has(item.id)">
+          <span class="f-hint">已保存到题库，可在「题库管理」查看</span>
+          <button class="mini-btn" type="button" @click="emit('edit', item)">重新编辑</button>
         </template>
         <template v-else>
           <button class="mini-btn success" type="button" @click="emit('adopt', item)">采纳</button>
-          <button class="mini-btn" type="button" @click="emit('edit', item)">编辑后采纳</button>
+          <button class="mini-btn" type="button" @click="emit('edit', item)">编辑入库</button>
           <button class="mini-btn danger" type="button" @click="emit('discard', item.id)">丢弃</button>
         </template>
       </div>
@@ -132,7 +137,7 @@ function issueOf(id: string): VerifyIssue | null {
 <style scoped>
 /* 一排一题：生成结果的主任务是「逐题读 → 决定采纳」，一屏并排两题会把题干、选项、解析都挤成
    窄行（富文本里的公式与配图尤其经不起窄列），且视线要左右来回跳。单列后每题占满整行宽度，
-   与下面「编辑后采纳」进去的手动录入表单也是同一种自上而下的读法。 */
+   与「编辑入库」进去的编辑弹窗也是同一种自上而下的读法。 */
 .result-list {
   display: flex;
   flex-direction: column;
@@ -158,20 +163,8 @@ function issueOf(id: string): VerifyIssue | null {
   color: var(--sub);
   font-size: 12.5px;
 }
-.qc-options { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
-.qc-options li {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  padding: 8px 12px;
-  font-size: 13px;
-  color: var(--ink-2);
-}
-.qc-options li.right { border-color: var(--success); background: var(--success-soft, #ecfaf4); }
-.opt-letter { font-weight: 700; color: var(--sub); }
-.qc-options li.right .opt-letter { color: var(--success); }
+/* 选项外观（描边块 / 正确项高亮）由 QuestionOptions 负责，这里只管与题干的间距 */
+.qc-options { margin-top: 10px; }
 .qc-answer {
   margin-top: 10px;
   border-left: 3px solid var(--brand);

@@ -67,7 +67,7 @@ function onPending(name: string) {
         <h1>机构端</h1>
         <p class="slogan">SaaS 多租户 · 机构专属教学资源业务闭环</p>
         <ul class="features">
-          <li><AppIcon name="edit" :size="16" /> 手动录题 · AI 出题 · 拍照识题 · 题目变式</li>
+          <li><AppIcon name="edit" :size="16" /> 手动录题 · AI 出题 · AI 识题 · 题目变式</li>
           <li><AppIcon name="file" :size="16" /> 手动 / AI / 双向细目表组卷与平行卷</li>
           <li><AppIcon name="cpu" :size="16" /> 多 AI 智能体并行检测 → 自动纠错 → 人工终审</li>
           <li><AppIcon name="star" :size="16" /> 教辅管理 · 公式中心 · 知识广场协同共享</li>

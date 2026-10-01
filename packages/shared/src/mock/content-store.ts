@@ -50,17 +50,17 @@ const PLATFORM_QUESTION_SEEDS: Array<{
   source: string
   refs: number
 }> = [
-  { stem: '已知集合 A={x|x²-3x+2=0}，B={x|1<x<3}，则 A∩B=', type: '单选题', subject: '数学', grade: '高一', difficulty: '容易', knowledge: ['集合与逻辑'], status: 'published', quality: 'A', source: '2025 某省期中真题', refs: 128 },
-  { stem: '函数 f(x)=ln x + 2x - 6 的零点所在区间是', type: '单选题', subject: '数学', grade: '高一', difficulty: '中等', knowledge: ['函数概念与性质'], status: 'published', quality: 'A', source: '教辅《同步精练》', refs: 96 },
-  { stem: '化简：sin(α+β)cosβ - cos(α+β)sinβ =', type: '填空题', subject: '数学', grade: '高一', difficulty: '较易', knowledge: ['三角函数'], status: 'published', quality: 'A', source: '教研自研', refs: 73 },
+  { stem: '已知集合 A={x|x²-3x+2=0}，B={x|1<x<3}，则 A∩B=', type: '单选', subject: '数学', grade: '高一', difficulty: '容易', knowledge: ['集合与逻辑'], status: 'published', quality: 'A', source: '2025 某省期中真题', refs: 128 },
+  { stem: '函数 f(x)=ln x + 2x - 6 的零点所在区间是', type: '单选', subject: '数学', grade: '高一', difficulty: '中等', knowledge: ['函数概念与性质'], status: 'published', quality: 'A', source: '教辅《同步精练》', refs: 96 },
+  { stem: '化简：sin(α+β)cosβ - cos(α+β)sinβ =', type: '填空', subject: '数学', grade: '高一', difficulty: '较易', knowledge: ['三角函数'], status: 'published', quality: 'A', source: '教研自研', refs: 73 },
   { stem: '阅读下面的文言文，完成后面题目：《劝学》节选……下列加点词解释不正确的一项是', type: '阅读理解', subject: '语文', grade: '高一', difficulty: '中等', knowledge: ['文言文阅读'], status: 'published', quality: 'B', source: '2025 某市月考真题', refs: 64 },
-  { stem: '下列各句中，没有语病的一句是', type: '单选题', subject: '语文', grade: '高二', difficulty: '中等', knowledge: ['语言文字运用'], status: 'pending', quality: 'B', source: '教师投稿', refs: 12 },
+  { stem: '下列各句中，没有语病的一句是', type: '单选', subject: '语文', grade: '高二', difficulty: '中等', knowledge: ['语言文字运用'], status: 'pending', quality: 'B', source: '教师投稿', refs: 12 },
   { stem: 'Which of the following best states the main idea of the passage?', type: '阅读理解', subject: '英语', grade: '高一', difficulty: '中等', knowledge: ['阅读理解'], status: 'published', quality: 'A', source: '2025 某省期中真题', refs: 152 },
   { stem: '完形填空：From that day on, Mark made up his mind to ___ his old habits…', type: '完形填空', subject: '英语', grade: '高二', difficulty: '较难', knowledge: ['完形填空'], status: 'pending', quality: 'B', source: '教辅《完形专练》', refs: 8 },
-  { stem: '一物体沿直线运动，其 v-t 图像为过原点的倾斜直线，则该物体做', type: '单选题', subject: '物理', grade: '高一', difficulty: '容易', knowledge: ['运动学'], status: 'published', quality: 'A', source: '教研自研', refs: 88 },
-  { stem: '质量为 m 的物体静止在倾角为 θ 的斜面上，求斜面对物体的支持力与摩擦力。', type: '解答题', subject: '物理', grade: '高一', difficulty: '中等', knowledge: ['相互作用'], status: 'published', quality: 'A', source: '教研自研', refs: 57 },
-  { stem: '已知等差数列 {aₙ} 满足 a₃=5，a₇=13，求其通项公式与前 20 项和。', type: '解答题', subject: '数学', grade: '高一', difficulty: '中等', knowledge: ['数列'], status: 'pending', quality: 'C', source: '教师投稿', refs: 3 },
-  { stem: '古诗词鉴赏：阅读《登高》，请分析颔联「无边落木萧萧下，不尽长江滚滚来」的意境与手法。', type: '解答题', subject: '语文', grade: '高二', difficulty: '较难', knowledge: ['古诗词鉴赏'], status: 'published', quality: 'A', source: '2025 某省高考真题', refs: 201 },
+  { stem: '一物体沿直线运动，其 v-t 图像为过原点的倾斜直线，则该物体做', type: '单选', subject: '物理', grade: '高一', difficulty: '容易', knowledge: ['运动学'], status: 'published', quality: 'A', source: '教研自研', refs: 88 },
+  { stem: '质量为 m 的物体静止在倾角为 θ 的斜面上，求斜面对物体的支持力与摩擦力。', type: '解答', subject: '物理', grade: '高一', difficulty: '中等', knowledge: ['相互作用'], status: 'published', quality: 'A', source: '教研自研', refs: 57 },
+  { stem: '已知等差数列 {aₙ} 满足 a₃=5，a₇=13，求其通项公式与前 20 项和。', type: '解答', subject: '数学', grade: '高一', difficulty: '中等', knowledge: ['数列'], status: 'pending', quality: 'C', source: '教师投稿', refs: 3 },
+  { stem: '古诗词鉴赏：阅读《登高》，请分析颔联「无边落木萧萧下，不尽长江滚滚来」的意境与手法。', type: '解答', subject: '语文', grade: '高二', difficulty: '较难', knowledge: ['古诗词鉴赏'], status: 'published', quality: 'A', source: '2025 某省高考真题', refs: 201 },
   { stem: '语法填空：The new bridge ___ (complete) by the end of last month…', type: '语法填空', subject: '英语', grade: '高一', difficulty: '较易', knowledge: ['语法填空'], status: 'offline', quality: 'B', source: '教辅《同步精练》', refs: 41 },
 ]
 
@@ -219,7 +219,7 @@ export const spotChecks: ComplianceSpotCheck[] = [
     samples: [
       { contentName: '英语完形填空（编号 10067）', reason: '原文疑似超出高一词汇大纲', level: 'mid' },
       { contentName: '语文语言运用（编号 10094）', reason: '题干含敏感表述，建议下架复核', level: 'high' },
-      { contentName: '数学解答题（编号 10102）', reason: '解析步骤缺失中间结论', level: 'low' },
+      { contentName: '数学解答（编号 10102）', reason: '解析步骤缺失中间结论', level: 'low' },
     ],
   },
   {
@@ -399,7 +399,7 @@ export const traceRecords: AiTraceRecord[] = [
   { id: ++traceSeq, traceId: 'trace-20260926-0142', scene: 'AI 出题', model: 'deepseek-chat', tenantName: '星辰教育', artifactKind: '题目 ×10', artifactTitle: '「三角函数」专项出题', inputDigest: '学科=数学；知识点=三角函数；难度=中等；数量=10', safety: 'pass', createdAt: '2026-09-26 10:24:00' },
   { id: ++traceSeq, traceId: 'trace-20260926-0141', scene: 'AI 组卷', model: 'deepseek-chat', tenantName: '星辰教育', artifactKind: '试卷 ×1', artifactTitle: '高一数学期中卷（AI 生成）', inputDigest: '范围=函数+三角；时长=120 分钟；难度=中', safety: 'pass', createdAt: '2026-09-26 10:12:00' },
   { id: ++traceSeq, traceId: 'trace-20260926-0138', scene: '学生 AI 问答', model: 'deepseek-chat', tenantName: '启航培训', artifactKind: '问答 ×1', artifactTitle: '二次函数最值引导问答', inputDigest: '问题=二次函数最值怎么求（学生提问）', safety: 'masked', createdAt: '2026-09-26 09:47:00' },
-  { id: ++traceSeq, traceId: 'trace-20260925-0119', scene: 'AI 阅卷', model: 'deepseek-chat', tenantName: '星辰教育', artifactKind: '批改 ×45', artifactTitle: '期中考试解答题批改', inputDigest: '试卷=期中卷；题目=解答题 17-22；份数=45', safety: 'pass', createdAt: '2026-09-25 20:31:00' },
+  { id: ++traceSeq, traceId: 'trace-20260925-0119', scene: 'AI 阅卷', model: 'deepseek-chat', tenantName: '星辰教育', artifactKind: '批改 ×45', artifactTitle: '期中考试解答批改', inputDigest: '试卷=期中卷；题目=解答 17-22；份数=45', safety: 'pass', createdAt: '2026-09-25 20:31:00' },
   { id: ++traceSeq, traceId: 'trace-20260925-0102', scene: 'AI 课件', model: 'deepseek-chat', tenantName: '博学堂', artifactKind: '课件 ×1', artifactTitle: '《平面向量》课件生成', inputDigest: '课题=平面向量；课时=2', safety: 'blocked', createdAt: '2026-09-25 16:02:00' },
 ]
 

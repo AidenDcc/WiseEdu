@@ -36,6 +36,8 @@ import {
   saveMistake,
   setMistakeMastery,
 } from '@/api/org'
+import QuestionOptions from '@/components/question/QuestionOptions.vue'
+import { optionColumnsOf } from '@/utils/question-card'
 import { useBaseData } from '@/composables/useBaseData'
 
 const router = useRouter()
@@ -327,11 +329,13 @@ onMounted(async () => {
       <div v-if="questionMap[current.questionId]" class="mk-detail">
         <div class="section-title" style="margin-bottom: 8px">原题</div>
         <RichTextViewer :content="questionMap[current.questionId].stem" />
-        <ul v-if="questionMap[current.questionId].options.length" class="mk-opts">
-          <li v-for="(opt, oi) in questionMap[current.questionId].options" :key="oi">
-            <b>{{ 'ABCDEF'[oi] }}．</b><RichTextViewer :content="opt" tag="span" />
-          </li>
-        </ul>
+        <!-- 错题详情看的是原题，不标正确项（学生已经做错了，标出来反而像答案泄漏） -->
+        <QuestionOptions
+          class="mk-opts"
+          variant="doc"
+          :options="questionMap[current.questionId].options"
+          :columns="optionColumnsOf(questionMap[current.questionId])"
+        />
         <p class="mk-line"><b>参考答案：</b><RichTextViewer :content="questionMap[current.questionId].answer" tag="span" /></p>
         <p class="mk-line"><b>解析：</b><RichTextViewer :content="questionMap[current.questionId].analysis" tag="span" /></p>
 
@@ -388,7 +392,7 @@ onMounted(async () => {
         <template #left>
           <select v-model="bankFilter.type" class="f-select">
             <option value="">全部题型</option>
-            <option v-for="t in ['单选题', '多选题', '判断题', '填空题', '解答题']" :key="t" :value="t">{{ t }}</option>
+            <option v-for="t in ['单选', '多选', '判断', '填空', '解答']" :key="t" :value="t">{{ t }}</option>
           </select>
           <select v-model="bankFilter.difficulty" class="f-select">
             <option value="">全部难度</option>
@@ -444,8 +448,8 @@ onMounted(async () => {
 
 /* 详情 */
 .mk-detail { display: flex; flex-direction: column; }
-.mk-opts { list-style: none; display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
-.mk-opts li { font-size: 13px; color: var(--ink-2); line-height: 1.6; }
+/* 选项外观由 QuestionOptions 负责，这里只管外边距 */
+.mk-opts { margin: 8px 0; }
 .mk-line { font-size: 13px; color: var(--ink-2); line-height: 1.6; margin-top: 6px; }
 .mk-line :deep(.rt) { display: inline; }
 .mk-fault {

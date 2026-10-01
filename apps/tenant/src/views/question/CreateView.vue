@@ -3,18 +3,18 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   AppFilterChips,
-  AppFilterPanel,
   AppIcon,
   RichTextViewer,
   showToast,
   ApiError,
-  hasImage,
   toPlainText,
   truncateRich,
 } from '@aiteach/shared'
-import type { FilterRowDef, GeneratedQuestion, OrgCategory, OrgQuestion } from '@aiteach/shared'
+import type { GeneratedQuestion, OrgCategory, OrgQuestion } from '@aiteach/shared'
 import AppModal from '@/components/ui/AppModal.vue'
-import RichTextEditor from '@/components/ui/RichTextEditor.vue'
+import QuestionEditor from '@/components/question/QuestionEditor.vue'
+import QuestionEditorModal from '@/components/question/QuestionEditorModal.vue'
+import QuestionPreviewDrawer from '@/components/question/QuestionPreviewDrawer.vue'
 import QuestionResultList from '@/components/question/QuestionResultList.vue'
 import { adoptGenerated, fetchCategories, fetchQuestions, fetchQuota, saveQuestion, variantOf } from '@/api/org'
 import { checkQuestionByAi } from '@/api/ai-check'
@@ -25,19 +25,31 @@ import { getCheckRounds, setCheckRounds, verifyQuestionsByAi, type AiVerifyRepor
 import { useBaseData } from '@/composables/useBaseData'
 import { useKnowledgePool } from '@/composables/useKnowledgePool'
 import { useScope } from '@/composables/useScope'
+import {
+  answerTextOf,
+  draftFromGenerated,
+  draftFromQuestion,
+  emptyQuestionDraft,
+  hasContent,
+  isChoiceDraft,
+  questionPayloadOf,
+  setDraftGrade,
+} from '@/utils/question-draft'
+import type { QuestionDraft } from '@/utils/question-draft'
 
 const route = useRoute()
 const router = useRouter()
 
-const { subjects, grades, questionTypes, difficulties, examTypes, versionsFor, optionsForGrade, ensure, pick, withCurrent, optionLabel } = useBaseData()
+const { subjects, grades, questionTypesFor, difficulties, examTypes, optionsForGrade, ensure, pick } = useBaseData()
 /** 顶部栏的全局年级 / 学科：表单初值与出题参数的默认值 */
 const { grade: scopeGrade, subject: scopeSubject, ensureScope } = useScope()
 
-/** 学期保留短名，与题目 question.term 的存储形式一致（字典里的 term 是「2025-2026 上学期」全名） */
-const TERMS = ['上学期', '下学期']
+/** 有选项、答案存字母的题型。判定口径与编辑组件同源（`isChoiceDraft`），页面这边只用来收口
+    预览 / 检测 / 保存的 options —— 表单本身的选项区已搬进 QuestionEditor。 */
+const isChoice = computed(() => isChoiceDraft(form))
 
-/** 判断题固定两项 */
-const isChoice = computed(() => form.type === '单选题' || form.type === '多选题' || form.type === '判断题')
+/** 答案的三形态折叠成一条字符串（存库口径）—— 预览、AI 检测入参、修正比对都读它 */
+const answerText = computed(() => answerTextOf(form))
 
 /* ===== 录题方式：手动录入 / AI 出题 =====
    两种方式共用上面同一套「题目基本信息」，下面切标签换录入方式，故合在一页里。
@@ -69,31 +81,26 @@ function switchMode(next: 'manual' | 'ai'): void {
   void router.replace({ query })
 }
 
-/* ===== 表单（FR-TM-008 ~ 012） ===== */
-const form = reactive({
+/* ===== 表单（FR-TM-008 ~ 012） =====
+   字段集由 `QuestionDraft` 定义、界面由 QuestionEditor 渲染，页面这边只持有这一份草稿，
+   并读它做预览 / AI 检测 / 保存 —— 所以草稿必须「就地改」而不是换引用（见 QuestionEditor 的说明）。 */
+const form = reactive<QuestionDraft>({
+  ...emptyQuestionDraft(),
   subject: scopeSubject.value,
   grade: scopeGrade.value,
-  type: '单选题',
-  difficulty: '中等',
-  knowledge: [] as string[],
-  textbook: '',
-  term: '上学期',
-  examType: '',
-  sourceRemark: '',
-  stem: '',
-  options: ['', '', '', ''],
-  answers: [] as number[],
-  fillAnswers: [{ value: '', equivalents: '' }],
-  essayAnswer: '',
-  analysis: '',
-  /* 所属库 / 分类不再出现在表单里（录题时先想「放哪」是多余的一道题），新建一律落到个人题库的
-     默认分类；保存时由 save() 兜底补 categoryId。编辑存量题仍按原值回写，故字段保留。 */
-  library: 'personal' as 'personal' | 'org' | 'wrong',
-  categoryId: null as number | null,
 })
-const errors = reactive<Record<string, string>>({})
+
+/* 所属库 / 分类是「这题放哪」的归属信息，与编辑题目本身无关（录题时先想「放哪」是多余的一道题），
+   故不进 QuestionDraft，留在页面这一层：新建一律落到个人题库的默认分类，保存时由 save() 兜底补
+   categoryId；编辑存量题按原值回写。 */
+const library = ref<'personal' | 'org' | 'wrong'>('personal')
+const categoryId = ref<number | null>(null)
+
 const saving = ref(false)
 const dirty = ref(false)
+
+/** 手动标签页里那张编辑表单。校验、红字、面板展开都由它自理，页面只问一句「能不能存」 */
+const editorRef = ref<{ validate: (full: boolean) => boolean } | null>(null)
 
 const categories = ref<OrgCategory[]>([])
 
@@ -105,148 +112,15 @@ const { pool: knowledgePool } = useKnowledgePool(() => ({
   subject: form.subject,
   version: mode.value === 'ai' ? '' : form.textbook,
 }))
-/** 已选但不在当前池中的知识点（如切换学科前选的）保留可选，避免被静默清空 */
-const orphanKnowledge = computed(() => form.knowledge.filter((k) => !knowledgePool.value.includes(k)))
-const knowledgeOptions = computed(() => [...knowledgePool.value, ...orphanKnowledge.value])
-/** 教材版本随年级 + 学科联动；已绑定但不在新列表中的旧值仍保留 */
-const versionOptions = computed(() => withCurrent(versionsFor(form.grade, form.subject), form.textbook))
-
-/** 学科选项随年级收窄（多数年级开不齐全量学科），规则与顶部栏同一份：
-    教材矩阵缺该年级则退回全量学科；当前学科不在其中时仍并入，供存量题保留原值。 */
-const subjectOptions = computed(() => withCurrent(optionsForGrade(form.grade), form.subject))
-
-/** 选年级：学科随之收窄 —— 新年级没有当前学科时落到该年级首个学科，避免存出无效组合 */
-function pickGrade(value: string) {
-  if (value === form.grade) return
-  form.grade = value
-  const options = optionsForGrade(value)
-  if (options.length > 0 && !options.includes(form.subject)) form.subject = options[0] ?? form.subject
-}
-
-/* ===== 题目基本信息面板（共享 AppFilterPanel + AppFilterChips） =====
-   折叠头与 chip 行原先是手抄题库管理（BankView）的 `.prop-bar` / `.prop-head` / `.p-chip`，
-   现改用共享组件：两端（机构端 / 超管端）的折叠交互与 chip 造型从此只有一份实现。
-   面板的行定义与取值按需展开，表单本身仍是单值（string / string[]），两边在下面互相转换。 */
-
-/** 知识点上限（validate 里的提示文案与此保持一致） */
-const MAX_KNOWLEDGE = 5
-
-/** 面板行：候选项随字典 / 教材矩阵 / 录题方式变化，故为 computed */
-/**
- * 历史题目的取值可能已停用：`withCurrent` 会把它并进选项（否则会被静默改写），
- * 但文案得标出「（已停用）」，否则看着像还能选。
- * 值不变，只改显示 —— 见 `useBaseData` 的 `optionLabel`。
- */
-function retiredLabel(known: string[], value: string): Record<string, string> | undefined {
-  return value && !known.includes(value) ? { [value]: optionLabel(known, value) } : undefined
-}
-
-const metaRows = computed<FilterRowDef[]>(() => {
-  const rows: FilterRowDef[] = [
-    {
-      key: 'grade', label: '年级', multiple: false,
-      options: withCurrent(grades.value, form.grade),
-      optionLabels: retiredLabel(grades.value, form.grade),
-    },
-    {
-      key: 'subject', label: '学科', multiple: false,
-      options: subjectOptions.value,
-      optionLabels: retiredLabel(optionsForGrade(form.grade), form.subject),
-    },
-    {
-      key: 'type', label: '题型', multiple: false,
-      options: withCurrent(questionTypes.value, form.type),
-      optionLabels: retiredLabel(questionTypes.value, form.type),
-    },
-    {
-      key: 'difficulty', label: '难度', multiple: false,
-      options: withCurrent(difficulties.value, form.difficulty),
-      optionLabels: retiredLabel(difficulties.value, form.difficulty),
-    },
-  ]
-  /* 学期 / 考试类型 / 教材版本只有手动录入用得到（AI 出题不读它们，表单一并隐藏），
-     整行连同取值一起不给面板，折叠摘要才不会摘出用户看不见的条件 */
-  if (mode.value === 'manual') {
-    rows.push({ key: 'term', label: '学期', options: [...TERMS], multiple: false })
-    rows.push({ key: 'examType', label: '考试类型', options: examTypes.value, multiple: false })
-    rows.push({
-      key: 'textbook', label: '教材版本', multiple: false,
-      options: versionOptions.value,
-      optionLabels: retiredLabel(versionsFor(form.grade, form.subject), form.textbook),
-    })
-  }
-  rows.push({ key: 'knowledge', label: '知识点', options: knowledgeOptions.value })
-  return rows
-})
-
-/** 面板的当前取值：单值字段包成单元素数组（chip 组件以 string[] 表达选中） */
-const metaFilter = computed<Record<string, string[]>>(() => {
-  const value: Record<string, string[]> = {
-    grade: form.grade ? [form.grade] : [],
-    subject: form.subject ? [form.subject] : [],
-    type: form.type ? [form.type] : [],
-    difficulty: form.difficulty ? [form.difficulty] : [],
-  }
-  if (mode.value === 'manual') {
-    value.term = form.term ? [form.term] : []
-    value.examType = form.examType ? [form.examType] : []
-    value.textbook = form.textbook ? [form.textbook] : []
-  }
-  value.knowledge = [...form.knowledge]
-  return value
-})
-
-/**
- * 面板回传的是整份取值（覆盖式），这里逐行写回表单。
- * 必填项（年级 / 学科 / 题型 / 难度）取消选中时保持原值 —— 它们没有「全部」这一档，
- * 点一下已选项只是误触，不该把必填字段清空；单选的行「点已选项 = 取消」正好表示
- * 考试类型「不指定」/ 教材版本「不绑定」。年级变更仍走 pickGrade 以联动收窄学科。
- */
-function onMetaChange(next: Record<string, string[]>) {
-  const first = (key: string) => next[key]?.[0] ?? ''
-  const grade = first('grade')
-  if (grade && grade !== form.grade) pickGrade(grade)
-  const subject = first('subject')
-  if (subject) form.subject = subject
-  const type = first('type')
-  if (type && type !== form.type) pickType(type)
-  const difficulty = first('difficulty')
-  if (difficulty) form.difficulty = difficulty
-  /* 三个 AI 态不出现（因而不在 next 里）的字段：缺键即跳过，别把用户看不见的值清掉 */
-  if ('term' in next) form.term = first('term') || form.term
-  if ('examType' in next) form.examType = first('examType')
-  if ('textbook' in next) form.textbook = first('textbook')
-  if ('knowledge' in next) setKnowledge(next.knowledge ?? [])
-}
-
-/** 知识点最多 5 个：超出的不落地（沿用原 chip 的约束） */
-function setKnowledge(list: string[]) {
-  if (list.length > MAX_KNOWLEDGE) {
-    showToast(`知识点最多 ${MAX_KNOWLEDGE} 个`, 'error')
-    form.knowledge = list.slice(0, MAX_KNOWLEDGE)
-    return
-  }
-  form.knowledge = list
-}
-
-/** 面板的展开态由 AppFilterPanel 自持（组件没有 open 双向绑定）；
-    校验失败要强制展开时换 key 重挂载，否则用户只看到一句「请按红字提示修正」。 */
-const metaPanelKey = ref(0)
-
-/** 年级或学科变化后，原教材版本可能已不适用 —— 清空，避免存出无效组合。
-    AI 态跳过：教材版本那一行在 AI 态是隐藏的，清掉用户看不见，切回手动态才发现绑定没了。 */
-watch([() => form.grade, () => form.subject], () => {
-  if (mode.value === 'ai') return
-  if (form.textbook && !versionsFor(form.grade, form.subject).includes(form.textbook)) form.textbook = ''
-})
 
 /** 顶部栏切换年级 / 学科时同步表单：手动态仅限未动过的新建表单，AI 出题则总是跟随
     （出题参数就是取自这里，不跟随会用错学段）；变式模式以母题为准，不打扰。 */
 watch([scopeGrade, scopeSubject], () => {
   if (variantOfId.value) return
   if (mode.value === 'manual' && (editId.value || dirty.value)) return
-  form.grade = pick(grades.value, scopeGrade.value)
-  form.subject = pick(subjects.value, scopeSubject.value)
+  /* 走 setDraftGrade 而不是各写各的：学科必须按**归一后的年级**校验，此前直接 pick(全量 subjects)
+     会把「三年级 + 物理」这种该年级不开的组合写进表单。它与编辑器里的年级 chip 共用同一份规则 */
+  setDraftGrade(form, pick(grades.value, scopeGrade.value), pick(subjects.value, scopeSubject.value), optionsForGrade)
 })
 
 async function load() {
@@ -255,10 +129,10 @@ async function load() {
   ;[categories.value] = await Promise.all([fetchCategories()])
   const id = editId.value
   if (!id) {
-    /* 新建：默认取顶部栏的全局年级 / 学科，并归一为当前启用字典内的值 */
-    form.subject = pick(subjects.value, scopeSubject.value)
-    form.grade = pick(grades.value, scopeGrade.value)
-    form.type = pick(questionTypes.value, form.type)
+    /* 新建：默认取顶部栏的全局年级 / 学科，并归一为当前启用字典内的值。
+       走 setDraftGrade 让学科同样受年级收窄 —— 顶部栏那两个值是各自独立的，可能凑成无效组合。 */
+    setDraftGrade(form, pick(grades.value, scopeGrade.value), pick(subjects.value, scopeSubject.value), optionsForGrade)
+    form.type = pick(questionTypesFor(form.subject), form.type)
     form.difficulty = pick(difficulties.value, form.difficulty)
     form.examType = pick(examTypes.value, form.examType)
   }
@@ -267,10 +141,13 @@ async function load() {
     const all = await fetchQuestions()
     variantSource.value = all.find((row) => row.id === variantOfId.value) ?? null
     if (variantSource.value) {
+      /* 只借学段与知识点，题型要改写，故**不整体套 draftFromQuestion**；也**不走 setDraftGrade**
+         —— 这是「载入已存数据」而非「用户切年级」，按新规则校验会在打开变式的瞬间静默抹掉母题的
+         学科（存量题完全可能带已停用学科）。 */
       Object.assign(form, {
         subject: variantSource.value.subject,
         grade: variantSource.value.grade,
-        type: variantSource.value.type === '多选题' ? '单选题' : variantSource.value.type,
+        type: variantSource.value.type === '多选' ? '单选' : variantSource.value.type,
         knowledge: [...variantSource.value.knowledge],
       })
       ai.strategies = ['数值替换']
@@ -280,151 +157,35 @@ async function load() {
     const all = await fetchQuestions()
     const source = all.find((row) => row.id === id)
     if (source) {
-      Object.assign(form, {
-        subject: source.subject,
-        grade: source.grade,
-        type: source.type,
-        difficulty: source.difficulty,
-        knowledge: [...source.knowledge],
-        textbook: source.textbook ?? '',
-        term: source.term ?? '上学期',
-        examType: source.examType ?? '',
-        sourceRemark: source.sourceRemark ?? '',
-        stem: source.stem,
-        library: source.library,
-        categoryId: source.categoryId,
-        analysis: source.analysis,
-      })
-      lastType = source.type
-      if (source.options.length > 0) {
-        form.options = [...source.options]
-        form.answers = source.answer.split('').map((ch) => 'ABCDEF'.indexOf(ch)).filter((i) => i >= 0)
-      } else if (source.type === '填空题') {
-        form.fillAnswers = [{ value: source.answer, equivalents: '' }]
-      } else {
-        form.essayAnswer = source.answer
-      }
+      /* 存量题 → 草稿的映射统一走 draftFromQuestion（题型反推、答案按题型分派、每空答案的
+         「｜」回退都在那一份里，三个入口共用）。它同样有意**不走 setDraftGrade**：否则打开一道
+         学科已停用的存量题，学科会被静默清空，用户没动任何东西却存不回原值。 */
+      Object.assign(form, draftFromQuestion(source))
+      library.value = source.library
+      categoryId.value = source.categoryId
     }
   }
   quota.value = await fetchQuota()
 }
 
-/** 富文本下 `<p></p>` 的 trim() 非空，判空必须看纯文本；只含图片的内容也算有值 */
-function hasContent(value: string): boolean {
-  return Boolean(toPlainText(value).trim()) || hasImage(value)
-}
-
-let lastType = '单选题'
-function onTypeChange() {
-  if (hasContent(form.stem) || form.options.some((opt) => hasContent(opt))) {
-    if (!window.confirm('切换题型将清空选项结构，确认切换？')) {
-      form.type = lastType
-      return
-    }
-  }
-  lastType = form.type
-  form.answers = []
-  form.options = form.type === '判断题' ? ['正确', '错误'] : ['', '', '', '']
-  form.fillAnswers = [{ value: '', equivalents: '' }]
-}
-
-/** chip 版题型切换：先落值再走上面那套确认逻辑。
-    点当前已选中的题型直接返回 —— 下拉的 change 只在真的换值时触发，而 chip 的 click 每次都会触发。
-    **AI 态只改出题参数、不动选项结构**：手动态已填的题干/选项不该因为换个生成题型被清掉。 */
-function pickType(type: string) {
-  if (type === form.type) return
-  if (mode.value === 'ai') {
-    form.type = type
-    return
-  }
-  form.type = type
-  onTypeChange()
-}
-
-function addOption() {
-  if (form.options.length >= 6) {
-    showToast('选项最多 6 个', 'error')
-    return
-  }
-  form.options.push('')
-}
-
-function removeOption(index: number) {
-  if (form.options.length <= 2) {
-    showToast('选项至少 2 个', 'error')
-    return
-  }
-  form.options.splice(index, 1)
-  form.answers = form.answers.filter((i) => i !== index).map((i) => (i > index ? i - 1 : i))
-}
-
-function toggleAnswer(index: number) {
-  if (form.type === '单选题' || form.type === '判断题') {
-    form.answers = [index]
-  } else {
-    const pos = form.answers.indexOf(index)
-    if (pos >= 0) form.answers.splice(pos, 1)
-    else form.answers.push(index)
-  }
-}
-
-const answerText = computed(() => {
-  if (isChoice.value) {
-    if (form.answers.length === 0) return ''
-    return [...form.answers].sort().map((i) => 'ABCDEF'[i]).join('')
-  }
-  if (form.type === '填空题') return form.fillAnswers.map((row) => row.value).join('｜')
-  return form.essayAnswer
-})
-
-/** 校验：draft=true 仅校验必填属性；draft=false 全量校验（FR-TM-012） */
-function validate(full: boolean): boolean {
-  Object.keys(errors).forEach((key) => delete errors[key])
-  if (!form.knowledge.length) errors.knowledge = '请选择知识点（最多 5 个）'
-  if (full) {
-    if (!hasContent(form.stem)) errors.stem = '题干不能为空'
-    if (isChoice.value) {
-      if (form.options.some((opt) => !hasContent(opt))) errors.options = '每项选项必填'
-      if (form.answers.length === 0 || (form.type === '多选题' && form.answers.length < 2)) {
-        errors.options = errors.options || (form.type === '多选题' ? '多选题须标记 ≥2 个正确答案' : '请设置正确答案')
-      }
-    }
-    if (form.type === '填空题' && form.fillAnswers.some((row) => !row.value.trim())) errors.answer = '每空答案必填'
-    if (form.type === '解答题' && !hasContent(form.essayAnswer)) errors.answer = '解答题答案必填'
-    if (!hasContent(form.analysis) && !window.confirm('解析为空（选填），提交审核时建议补充解析，确认继续提交？')) return false
-  }
-  if (form.sourceRemark.length > 100) errors.sourceRemark = '来源备注 ≤100 字'
-  return Object.keys(errors).length === 0
-}
-
 async function save(submit: boolean) {
-  if (!validate(submit)) {
-    /* 基本信息的红字在收起态是看不见的，校验失败时展开，否则用户只看到一句「按红字提示修正」 */
-    if (errors.knowledge) metaPanelKey.value += 1
+  /* 校验口径与红字都在编辑组件里（含「解析为空」的那次确认）；失败时它已把基本信息面板展开，
+     这里只补一句提示。full 由 submit 决定：存草稿只看必填属性，提交审核全量校验（FR-TM-012） */
+  if (!editorRef.value?.validate(submit)) {
     showToast('请按红字提示修正后重试', 'error')
     return
   }
   saving.value = true
   try {
-    await saveQuestion({
-      id: editId.value || undefined,
-      stem: form.stem,
-      subject: form.subject,
-      grade: form.grade,
-      type: form.type,
-      difficulty: form.difficulty,
-      knowledge: form.knowledge,
-      textbook: form.textbook || undefined,
-      term: form.term,
-      examType: form.examType || undefined,
-      sourceRemark: form.sourceRemark || undefined,
-      options: isChoice.value ? form.options.filter((opt) => hasContent(opt)) : [],
-      answer: answerText.value,
-      analysis: form.analysis,
-      library: form.library,
-      categoryId: form.categoryId ?? categories.value.find((row) => row.parentId != null)?.id,
-      submit,
-    })
+    /* 入参拼装也统一走 questionPayloadOf：三个入口存进去的字段形状必须一模一样 */
+    await saveQuestion(
+      questionPayloadOf(form, {
+        id: editId.value || undefined,
+        library: library.value,
+        categoryId: categoryId.value ?? categories.value.find((row) => row.parentId != null)?.id,
+        submit,
+      }),
+    )
     showToast(
       submit ? '已提交：多智能体校验中，完成后推送终审待办' : '草稿已保存',
       'success',
@@ -550,7 +311,8 @@ function applyCorrection(field: string) {
         .split('')
         .map((ch) => 'ABCDEF'.indexOf(ch))
         .filter((i) => i >= 0)
-    } else if (form.type === '填空题') {
+    } else if (form.type === '填空') {
+      /* AI 回写的是纯文本（各空以 ｜ 分隔），按空拆进富文本编辑器；等价答案需人工补 */
       form.fillAnswers = c.answer.split('｜').map((value) => ({ value: value.trim(), equivalents: '' }))
     } else {
       form.essayAnswer = c.answer
@@ -566,8 +328,13 @@ function applyMetaCorrection() {
   const c = corrected.value
   const meta = metaCorrection.value
   if (!c || !meta) return
-  if (c.subject && subjects.value.includes(c.subject)) form.subject = c.subject
-  if (c.grade && grades.value.includes(c.grade)) form.grade = c.grade
+  /* 年级与学科一起回写：先前先写学科再写年级，学科是按**旧年级**校验的，
+     若两者同时被纠正，落地的可能是新年级不开的组合。统一交给 setDraftGrade 一次算完。 */
+  const nextGrade = c.grade && grades.value.includes(c.grade) ? c.grade : form.grade
+  /* 学科仍按「启用字典」先归一道，再交给 setDraftGrade 按年级收窄（同一套口径只此一份） */
+  const nextSubject = c.subject && subjects.value.includes(c.subject) ? c.subject : ''
+  if (nextGrade !== form.grade) setDraftGrade(form, nextGrade, nextSubject || undefined, optionsForGrade)
+  else if (nextSubject && optionsForGrade(nextGrade).includes(nextSubject)) form.subject = nextSubject
   if (c.difficulty && difficulties.value.includes(c.difficulty)) form.difficulty = c.difficulty
   if (meta.knowledge.length) {
     form.knowledge = [...new Set([...form.knowledge, ...meta.knowledge])].slice(0, 5)
@@ -616,9 +383,11 @@ const phase = ref<'idle' | 'running' | 'result'>('idle')
 const busy = computed(() => phase.value === 'running')
 const progress = ref(0)
 const results = ref<GeneratedQuestion[]>([])
-/** 已采纳 / 已转入手动编辑：都按题目 id 记 —— 丢弃中间一题不会让标记错位 */
+/** 已采纳 / 已编辑入库：都按题目 id 记 —— 丢弃中间一题不会让标记错位 */
 const adoptedIds = ref<Set<string>>(new Set())
-const handedOff = ref<Set<string>>(new Set())
+const savedIds = ref<Set<string>>(new Set())
+/** 已入库的题，按生成结果 id 索引：卡片正文改用它渲染，「重新编辑」也用它重建草稿 */
+const savedById = ref<Record<string, OrgQuestion>>({})
 /** 最后一轮质检结论（按题目 id 索引），与 results 同步重建 */
 const issueById = ref<Record<string, VerifyIssue>>({})
 /** 最近一次质检报告（告警条 / 通过条 / 逐题质检标用） */
@@ -626,9 +395,9 @@ const verifyReport = ref<AiVerifyReport | null>(null)
 /** 运行阶段的质检进度文案 */
 const verifyStage = ref('')
 
-/** 待处理题数：既没采纳也没转手动编辑（重新生成会丢的正是这些） */
+/** 待处理题数：既没采纳也没编辑入库（重新生成会丢的正是这些） */
 const pendingCount = computed(
-  () => results.value.filter((row) => !adoptedIds.value.has(row.id) && !handedOff.value.has(row.id)).length,
+  () => results.value.filter((row) => !adoptedIds.value.has(row.id) && !savedIds.value.has(row.id)).length,
 )
 
 /** 把逐轮调用（每轮 rounds=1）的报告合并成一份：轮次连续编号、token 累加 */
@@ -707,7 +476,8 @@ async function run() {
     })
     results.value = result.list
     adoptedIds.value = new Set()
-    handedOff.value = new Set()
+    savedIds.value = new Set()
+    savedById.value = {}
     engine.value = result.engine
     lastTokens.value = result.tokens
     /* AI 质检：按设置轮次复核答案/解析（超轮仍有 error → 结果页提醒人工介入）。
@@ -754,8 +524,8 @@ async function run() {
 
 /** 采纳入题库（进入待终审，FR-TM-014） */
 async function adopt(item: GeneratedQuestion) {
-  /* 已转手动编辑的不能再采纳：否则同一条题会被保存两次 */
-  if (adoptedIds.value.has(item.id) || handedOff.value.has(item.id)) return
+  /* 已编辑入库的不能再采纳：题已经在题库里了，再采纳一次会多出一条重复题 */
+  if (adoptedIds.value.has(item.id) || savedIds.value.has(item.id)) return
   await adoptGenerated({
     stem: item.stem,
     options: item.options,
@@ -765,7 +535,7 @@ async function adopt(item: GeneratedQuestion) {
     difficulty: item.difficulty,
     subject: form.subject,
     grade: form.grade,
-    type: item.options.length > 0 ? (item.answer.length > 1 ? '多选题' : '单选题') : form.type === '多选题' ? '单选题' : form.type,
+    type: item.options.length > 0 ? (item.answer.length > 1 ? '多选' : '单选') : form.type === '多选' ? '单选' : form.type,
   })
   adoptedIds.value.add(item.id)
   showToast('已入题库（待人工终审），可在题库中查看', 'success')
@@ -773,7 +543,7 @@ async function adopt(item: GeneratedQuestion) {
 
 async function adoptAll() {
   for (const item of [...results.value]) {
-    if (adoptedIds.value.has(item.id) || handedOff.value.has(item.id)) continue
+    if (adoptedIds.value.has(item.id) || savedIds.value.has(item.id)) continue
     await adopt(item)
   }
   showToast('全部采纳完成', 'success')
@@ -782,56 +552,72 @@ async function adoptAll() {
 function discard(id: string) {
   results.value = results.value.filter((row) => row.id !== id)
   adoptedIds.value.delete(id)
-  handedOff.value.delete(id)
+  savedIds.value.delete(id)
+  delete savedById.value[id]
+}
+
+/* ===== 编辑入库（弹窗） =====
+ * 结果卡片的「编辑入库」开的是与录题中心同一张「题目编辑」表单，只是装在弹窗里。
+ *
+ * 旧实现是「把生成题回填进上面的手动录入表单 + 切到手动标签」——那不算编辑，用户还得再点一次
+ * 保存；且跳转前的旧版把整个结果列表销毁了，合并成一页后列表还在，不标记的话同一道题能既采纳
+ * 又手动保存，题库里出现两条。现在卡片进入「已保存到题库」态：不再提供「采纳」，只能「重新编辑」。
+ */
+const editOpen = ref(false)
+/** 正在编辑的那条生成结果（弹窗开着期间不换） */
+const editingGen = ref<GeneratedQuestion | null>(null)
+/** 弹窗草稿：开一次建一次，取消即丢弃。对象复用，编辑器按约定始终持有同一个引用 */
+const editDraft = reactive<QuestionDraft>(emptyQuestionDraft())
+/** 编辑的是已入库的题（>0）—— 保存要带上它走 saveQuestion 的原地更新分支 */
+const editQuestionId = ref(0)
+const editSaving = ref(false)
+
+function editResult(item: GeneratedQuestion) {
+  editingGen.value = item
+  const saved = savedById.value[item.id]
+  /* 已入库的用**库里那一条**重建草稿并带 id 保存：拿原生成对象再存一次会多出一条重复题。
+     （draftFromQuestion / draftFromGenerated 都返回完整草稿，Object.assign 不会残留上一次的字段） */
+  editQuestionId.value = saved?.id ?? 0
+  Object.assign(
+    editDraft,
+    saved ? draftFromQuestion(saved) : draftFromGenerated(item, { subject: form.subject, grade: form.grade }),
+  )
+  editOpen.value = true
 }
 
 /**
- * 编辑后采纳：把生成题填进上面的手动录入表单并切到手动标签。
+ * 保存弹窗里的编辑。
  *
- * 旧实现是「暂存 sessionStorage + 跳转录题页」，跳转会把整个 AI 结果列表销毁，所以不存在
- * 「既采纳又手动保存」的问题；合并成一页后结果列表还在，若不标记，用户回到 AI 标签还能再点
- * 一次「采纳」，同一条题就进了题库两次 —— 故标记为第三态 handedOff：不再提供「采纳」，
- * 改为「回到编辑」（幂等，可反复把表单重新填成这一题）。
+ * 走 `saveQuestion` 而不是 `adoptGenerated`：后者写死 categoryId: 2，且丢掉
+ * term / examType / textbook / fillAnswers / optionColumns / sourceRemark —— 用户在弹窗里
+ * 明明填了学期与教材版本，存完却没了。
  */
-function handOff(item: GeneratedQuestion) {
-  applyDraft(item)
-  handedOff.value.add(item.id)
-  switchMode('manual')
-  showToast('已填入表单，可继续编辑后保存', 'success')
-}
-
-/** 生成题 → 手动录入表单（等价于旧 ?from=ai 草稿分支的映射） */
-function applyDraft(item: GeneratedQuestion) {
-  form.difficulty = difficulties.value.includes(item.difficulty) ? item.difficulty : form.difficulty
-  form.knowledge = [...item.knowledge].slice(0, 5)
-  form.stem = item.stem
-  form.analysis = item.analysis
-  /* 来源备注沿用旧草稿的标注，便于入库后追溯 */
-  form.sourceRemark = 'AI 智能出题'
-  if (item.options.length > 0) {
-    form.type = item.options.length === 2 && item.options[0] === '正确' ? '判断题' : item.answer.length > 1 ? '多选题' : '单选题'
-    form.options = [...item.options]
-    form.answers = item.answer
-      .toUpperCase()
-      .replace(/[^A-F]/g, '')
-      .split('')
-      .map((ch) => 'ABCDEF'.indexOf(ch))
-      .filter((i) => i >= 0)
-  } else if (form.type === '填空题') {
-    /* 填空答案是普通 input（不吃富文本），取纯文本，避免把 <p> 标签填进去 */
-    form.fillAnswers = [{ value: toPlainText(item.answer).trim(), equivalents: '' }]
-  } else {
-    /* 无选项的生成题落进解答题：题干之外只有一段富文本答案。
-       （旧 ?from=ai 分支在这里是「沿用请求时的题型」，于是选了单选题又拿到无选项的题时，
-       表单会停在「单选题 + 四个空选项框」上，而 AI 给的答案存在 essayAnswer 里根本看不见。
-       mock 生成器的题恒为 options: []，这条路径是常态，故这里改为落到解答题。） */
-    form.type = '解答题'
-    form.essayAnswer = item.answer
+async function saveEdit(submit: boolean, validate: (full: boolean) => boolean) {
+  if (!editingGen.value) return
+  if (!validate(submit)) {
+    showToast('请按红字提示修正后重试', 'error')
+    return
   }
-  /* lastType 必须跟着改：否则之后在手动标签点题型 chip、取消确认时会把结构写回旧题型 */
-  lastType = form.type
-  /* 程序化填入也是未保存改动：置脏，顶部栏切年级/学科不会覆盖它，「取消」也会如实提示 */
-  dirty.value = true
+  editSaving.value = true
+  try {
+    const saved = await saveQuestion(
+      questionPayloadOf(editDraft, {
+        id: editQuestionId.value || undefined,
+        library: library.value,
+        categoryId: categoryId.value ?? categories.value.find((row) => row.parentId != null)?.id,
+        submit,
+      }),
+    )
+    savedIds.value.add(editingGen.value.id)
+    savedById.value[editingGen.value.id] = saved
+    editOpen.value = false
+    showToast(submit ? '已提交：多智能体校验中，完成后推送终审待办' : '已保存到题库', 'success')
+  } catch (error) {
+    /* ApiError 之外还有 mock 层直接抛的 Error（题干为空 / 未设答案），别把消息吞成「保存失败」 */
+    showToast(error instanceof Error ? error.message : '保存失败', 'error')
+  } finally {
+    editSaving.value = false
+  }
 }
 
 /** 丢弃未处理题目的确认：取消返回 false */
@@ -842,7 +628,8 @@ function confirmDiscardPending(): boolean {
 function clearResults() {
   results.value = []
   adoptedIds.value = new Set()
-  handedOff.value = new Set()
+  savedIds.value = new Set()
+  savedById.value = {}
   issueById.value = {}
   verifyReport.value = null
 }
@@ -867,8 +654,31 @@ function startGenerate() {
   void run()
 }
 
-/* ===== 预览 ===== */
+/* ===== 预览 =====
+   与题库管理的「题目预览」共用一个抽屉组件（QuestionPreviewDrawer），样式与分节由它统一，
+   这里只把草稿拼成它要的字段集。 */
 const previewOpen = ref(false)
+
+const previewQuestion = computed(() => ({
+  id: editId.value || undefined,
+  subject: form.subject,
+  grade: form.grade,
+  type: form.type,
+  difficulty: form.difficulty,
+  knowledge: form.knowledge,
+  source: form.source,
+  library: library.value,
+  term: form.term,
+  examType: form.examType,
+  /* useCount 不传 → 抽屉显示「—」：草稿还没入库，写「0 次」是假数据 */
+  stem: form.stem,
+  /* 填空 / 解答题的 form.options 是占位的 ['','','','']，必须按 isChoice 收口，
+     否则预览里会凭空出现四个空选项 */
+  options: isChoice.value ? form.options : [],
+  answer: answerText.value,
+  analysis: form.analysis,
+  optionColumns: form.optionColumns,
+}))
 
 function onCancel() {
   if (dirty.value && !window.confirm('有未保存的改动，确认放弃？')) return
@@ -905,139 +715,17 @@ onMounted(load)
       </button>
     </div>
 
-    <!-- 题目基本信息：两种录题方式共用，全页唯一一处参数界面（FR-TM-008）。
-         折叠头与 chip 行走共享组件（AppFilterPanel / AppFilterChips），不再手抄题库管理的那一套；
-         每个属性一行：标签左、候选项右平铺（候选项都不多，下拉是多余的一次点击，且看不到还有什么可选）。
-         顺序取数据源现成顺序（字典 sort / 教材矩阵 / TERMS），唯一例外是年级排到学科前面
-         —— 学科选项由年级收窄，先选年级才不用回头改学科。 -->
-    <AppFilterPanel
-      :key="metaPanelKey"
-      :model-value="metaFilter"
-      :rows="metaRows"
-      title="题目基本信息"
-      @update:model-value="onMetaChange"
-    >
-      <!-- 知识点行的说明与校验红字：chip 行组件没有插槽，统一落在面板末尾 -->
-      <template #extra>
-        <p class="prop-hint">随学科 / 年级 / 教材版本加载，最多 5 个</p>
-        <p v-if="errors.knowledge" class="prop-err">{{ errors.knowledge }}</p>
-      </template>
-    </AppFilterPanel>
+    <!-- 题目编辑：三个入口共用同一张表单（手动录入 / AI 出题参数 / AI 结果与拍照识别的编辑弹窗）。
+         AI 标签页只摆四个必填项当出题参数，且切题型时不动选项结构、不弹那句清空确认 —— 故 mode="params"。
+         两种模式渲染的是同一个组件实例（位置没变，Vue 直接复用），校验只在手动态的底部操作栏用到。 -->
+    <QuestionEditor
+      ref="editorRef"
+      :draft="form"
+      :mode="mode === 'ai' ? 'params' : 'edit'"
+      @change="dirty = true"
+    />
 
-    <!-- ===== 手动录入 ===== -->
     <template v-if="mode === 'manual'">
-      <div class="panel editor-panel">
-        <div class="f-field">
-          <label class="f-label">题干<span class="req">*</span></label>
-          <RichTextEditor
-            v-model="form.stem"
-            :subject="form.subject"
-            :min-height="150"
-            placeholder="如：已知二次函数 f(x)=x²-2x-3…（工具栏可插入公式、图片，也支持粘贴 / 拖入图片）"
-            @change="dirty = true"
-          />
-          <p v-if="errors.stem" class="f-err">{{ errors.stem }}</p>
-        </div>
-
-        <!-- 选项区（FR-TM-010） -->
-        <template v-if="isChoice">
-          <div class="f-field">
-            <label class="f-label">
-              选项（{{ form.options.length }}/{{ form.type === '判断题' ? 2 : 6 }}）
-              <span class="f-hint" style="display: inline; margin-left: 8px">点击左侧圆点标记正确答案</span>
-            </label>
-            <div v-for="(opt, i) in form.options" :key="i" class="opt-row">
-              <button
-                class="answer-dot"
-                :class="{ on: form.answers.includes(i), multi: form.type === '多选题' }"
-                type="button"
-                :title="form.type === '多选题' ? '正确答案（≥2 个）' : '正确答案'"
-                @click="toggleAnswer(i)"
-              >
-                {{ 'ABCDEF'[i] }}
-              </button>
-              <RichTextEditor
-                v-model="form.options[i]"
-                class="opt-editor"
-                compact
-                :subject="form.subject"
-                :min-height="40"
-                :placeholder="`选项 ${'ABCDEF'[i]} 内容`"
-                @change="dirty = true"
-              />
-              <button
-                v-if="form.type !== '判断题'"
-                class="mini-btn danger"
-                type="button"
-                @click="removeOption(i)"
-              >
-                删除
-              </button>
-            </div>
-            <button v-if="form.type !== '判断题'" class="btn btn-ghost btn-sm" type="button" @click="addOption">
-              <AppIcon name="plus" :size="14" /> 添加选项
-            </button>
-            <p v-if="errors.options" class="f-err">{{ errors.options }}</p>
-          </div>
-        </template>
-
-        <!-- 填空答案区 -->
-        <template v-else-if="form.type === '填空题'">
-          <div class="f-field">
-            <label class="f-label">填空答案（每空独立，支持等价写法）<span class="req">*</span></label>
-            <div v-for="(blank, bi) in form.fillAnswers" :key="bi" class="blank-row">
-              <span class="blank-no">第 {{ bi + 1 }} 空</span>
-              <input v-model="blank.value" class="f-input" placeholder="答案" />
-              <input v-model="blank.equivalents" class="f-input" placeholder="等价答案（逗号分隔，选填）" />
-              <button
-                v-if="form.fillAnswers.length > 1"
-                class="mini-btn danger"
-                type="button"
-                @click="form.fillAnswers.splice(bi, 1)"
-              >
-                删除
-              </button>
-            </div>
-            <button class="btn btn-ghost btn-sm" type="button" @click="form.fillAnswers.push({ value: '', equivalents: '' })">
-              <AppIcon name="plus" :size="14" /> 添加一空
-            </button>
-            <p v-if="errors.answer" class="f-err">{{ errors.answer }}</p>
-          </div>
-        </template>
-
-        <!-- 解答题答案 -->
-        <template v-else>
-          <div class="f-field">
-            <label class="f-label">参考答案<span class="req">*</span></label>
-            <RichTextEditor
-              v-model="form.essayAnswer"
-              :subject="form.subject"
-              :min-height="110"
-              placeholder="输入解答过程…（可插入公式与图片）"
-              @change="dirty = true"
-            />
-            <p v-if="errors.answer" class="f-err">{{ errors.answer }}</p>
-          </div>
-        </template>
-
-        <div class="f-field">
-          <label class="f-label">解析</label>
-          <RichTextEditor
-            v-model="form.analysis"
-            :subject="form.subject"
-            :min-height="110"
-            placeholder="输入解析…（可插入公式与图片）"
-            @change="dirty = true"
-          />
-        </div>
-
-        <div class="f-field">
-          <label class="f-label">来源备注（选填 ≤100 字）</label>
-          <input v-model="form.sourceRemark" class="f-input" placeholder="如：改编自 2025 期中第 12 题" />
-          <p v-if="errors.sourceRemark" class="f-err">{{ errors.sourceRemark }}</p>
-        </div>
-      </div>
-
       <!-- 底部操作栏 -->
       <div class="panel action-bar">
         <button class="btn btn-ghost" @click="onCancel">取消</button>
@@ -1173,37 +861,38 @@ onMounted(load)
         <QuestionResultList
           :list="results"
           :adopted="adoptedIds"
-          :handed-off="handedOff"
+          :saved="savedIds"
+          :saved-by-id="savedById"
           :issues="issueById"
           :verify-rounds="verifyReport?.rounds.length ?? 0"
           :requested-type="form.type"
           @adopt="adopt"
-          @edit="handOff"
+          @edit="editResult"
           @discard="discard"
         />
       </template>
     </template>
 
-    <!-- 学生视角预览 -->
-    <AppModal v-if="previewOpen" title="学生视角预览" :width="620" @close="previewOpen = false">
-      <div class="preview-card">
-        <div class="pv-meta">
-          <span class="tag tag-blue">{{ form.subject }} · {{ form.grade }}</span>
-          <span class="tag tag-gray">{{ form.type }}</span>
-          <span class="tag tag-gray">{{ form.difficulty }}</span>
-        </div>
-        <RichTextViewer class="pv-stem" :content="form.stem" empty="（题干预览）" />
-        <ul v-if="isChoice" class="option-list">
-          <li v-for="(opt, i) in form.options" :key="i" :class="{ right: form.answers.includes(i) }">
-            {{ 'ABCDEF'[i] }}. <RichTextViewer :content="opt" tag="span" />
-          </li>
-        </ul>
-        <div v-if="answerText" class="pv-answer">
-          <span class="tag tag-green">答案</span>{{ answerText }}
-        </div>
-        <p v-if="hasContent(form.analysis)" class="pv-analysis"><b>解析：</b><RichTextViewer :content="form.analysis" tag="span" /></p>
-      </div>
-    </AppModal>
+    <!-- 编辑入库：AI 出题结果卡片的「编辑入库 / 重新编辑」共用这一个弹窗 -->
+    <QuestionEditorModal
+      v-if="editOpen && editingGen"
+      :draft="editDraft"
+      :title="editQuestionId ? '编辑已入库题目' : '编辑题目'"
+      @close="editOpen = false"
+    >
+      <template #footer="{ validate }">
+        <button class="btn btn-ghost" type="button" @click="editOpen = false">取消</button>
+        <button class="btn btn-ghost" type="button" :disabled="editSaving" @click="saveEdit(false, validate)">存草稿</button>
+        <button class="btn btn-primary" type="button" :disabled="editSaving" @click="saveEdit(true, validate)">
+          {{ editSaving ? '保存中…' : '提交审核' }}
+        </button>
+      </template>
+    </QuestionEditorModal>
+
+    <!-- 学生视角预览：与题库管理同一个抽屉组件，样式不再各写一份 -->
+    <QuestionPreviewDrawer v-if="previewOpen" :question="previewQuestion" @close="previewOpen = false" />
+
+    <!-- 知识点树弹窗由 QuestionEditor 自带（它就挂在编辑表单里），页面不再持有它 -->
     <!-- AI 检测：进度 + 审查结论 + 修正回写 -->
     <AppModal v-if="checkOpen" title="AI 检测" :width="660" @close="closeCheck">
       <!-- 进度 -->
@@ -1276,17 +965,11 @@ onMounted(load)
 <style scoped>
 .edit-layout { display: flex; flex-direction: column; gap: 14px; }
 
-/* 基本信息面板的折叠头 / chip 行 / 面板外观都由共享的 AppFilterPanel 自持，
-   原先手抄自题库管理的那套 `.prop-bar` / `.prop-head` / `.prop-row` / `.p-chip` 已全部删除。
-   只剩两个面板内的小字：说明文案与知识点校验红字（chip 组件没有对应插槽，放在 #extra 里）。 */
-.prop-hint { font-size: 12px; color: var(--sub); }
-/* 全局的 .f-err 选择器是 `.f-field .f-err`，面板内不在 .f-field 里，故字号与颜色要自己给 */
-.prop-err { margin: 0; font-size: 12px; color: var(--danger); }
+/* 题目编辑表单（基本信息面板 + 题干 / 选项 / 答案 / 解析）整块由 QuestionEditor 渲染，
+   它自带那一套样式（含面板末尾的小字、知识点行、选项区、判断题按钮、填空多空）。
+   本文件只剩：录题方式切换、底部操作栏，以及 AI 出题那一屏。 */
 
-/* ===== 录题方式切换 =====
-   两种方式平级，故用带说明文字的标签卡而不是小号分段控件：说明文字直接回答「我该用哪种」。
-   不撑满整行（flex: 1 会各占一半，两个短标签之间留下大片空白）：按内容宽，
-   上限 300px 防止窄屏把说明文字挤成细长条。 */
+/* ===== 录题方式切换（手动录入 / AI 出题） ===== */
 .mode-tabs { display: flex; flex-wrap: wrap; gap: 10px; }
 .mode-tab {
   flex: 0 1 auto;
@@ -1307,29 +990,9 @@ onMounted(load)
 .mode-tab:disabled { opacity: 0.55; cursor: not-allowed; }
 .mt-title { font-size: 14px; font-weight: 700; color: var(--ink); }
 .mode-tab.on .mt-title { color: var(--brand-deep); }
-.mt-desc { font-size: 12px; color: var(--sub); }
 
-.editor-panel { padding: 18px 20px; }
-
-.opt-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-/* 选项编辑器占满剩余宽度（删除按钮与答案圆点保持原尺寸） */
-.opt-editor { flex: 1; min-width: 0; }
-.answer-dot {
-  width: 30px;
-  height: 34px;
-  border-radius: 9px;
-  border: 1.5px solid var(--border);
-  background: #fff;
-  color: var(--sub);
-  font-weight: 700;
-  flex-shrink: 0;
-  transition: all 0.15s;
-}
-.answer-dot.on { border-color: var(--success); background: var(--success-soft); color: var(--success); }
-.answer-dot.multi { border-radius: 999px; }
-
-.blank-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.blank-no { font-size: 12.5px; color: var(--sub); width: 52px; flex-shrink: 0; }
+/* 变式条里那行小字（组件搬走后这条只剩这一个用处，故留在本文件） */
+.prop-hint { font-size: 12px; color: var(--sub); }
 
 .action-bar {
   display: flex;
@@ -1339,8 +1002,6 @@ onMounted(load)
   bottom: 0;
   z-index: 5;
 }
-
-.preview-card { background: #f7fafa; border-radius: 12px; padding: 16px 18px; }
 
 /* ===== AI 出题 ===== */
 .ai-panel { padding: 16px 20px; }
@@ -1461,17 +1122,4 @@ onMounted(load)
 }
 .corr-label { font-size: 12px; font-weight: 600; color: var(--brand-deep); width: 64px; flex-shrink: 0; padding-top: 2px; }
 .corr-value { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.6; max-height: 110px; overflow-y: auto; }
-.pv-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.pv-stem { font-size: 14.5px; color: var(--ink); line-height: 1.8; margin-bottom: 12px; }
-.option-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
-.option-list li {
-  background: #fff;
-  border-radius: 8px;
-  padding: 9px 12px;
-  font-size: 13.5px;
-  color: var(--ink-2);
-}
-.option-list li.right { border-left: 3px solid var(--success); color: var(--success); font-weight: 600; }
-.pv-answer { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; color: var(--success); margin-bottom: 10px; }
-.pv-analysis { font-size: 13px; color: var(--ink-2); line-height: 1.7; }
 </style>

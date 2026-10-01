@@ -10,7 +10,7 @@
  *
  * 本页只做「建任务 / 看进度 / 进组卷」，具体组卷在 `CollabTaskView.vue`。
  */
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, COLLAB_MEMBER_TEXT, COLLAB_STATUS_TEXT, showToast } from '@aiteach/shared'
 import type { CollabMember, FilterRowDef, OrgCollabTask, OrgPaper, OrgQuestion, StaffMember } from '@aiteach/shared'
@@ -22,7 +22,7 @@ import { useBaseData } from '@/composables/useBaseData'
 
 const route = useRoute()
 const router = useRouter()
-const { subjects, grades, questionTypes, difficulties, ensure, pick } = useBaseData()
+const { subjects, grades, questionTypesFor, difficulties, ensure, pick, withCurrent } = useBaseData()
 
 const tasks = ref<OrgCollabTask[]>([])
 const papers = ref<OrgPaper[]>([])
@@ -128,6 +128,33 @@ const unassignedTypes = computed(() =>
   form.structure.filter((row) => !form.picked.some((name) => (form.assignment[name] ?? []).includes(row.type))),
 )
 
+/**
+ * 结构行的题型候选项：通用题型 + 当前学科专属题型（英语的完形填空 / 七选五 / 短文改错）。
+ * 仍并入行内现值，保证下拉永远有选中项，不会渲染成空白。
+ */
+function structureTypes(current: string): string[] {
+  return withCurrent(questionTypesFor(form.subject), current)
+}
+
+/**
+ * 换学科后，原来的学科专属题型可能已不适用（英语的「完形填空」切到数学）——
+ * 静默改派该学科下的可用题型，不弹确认：切学科本身就是用户主动做的动作。
+ * 依次取未被占用的题型，避免多行一起退化成同一个。
+ */
+watch(
+  () => form.subject,
+  (subject) => {
+    const options = questionTypesFor(subject)
+    if (!options.length) return
+    const used = new Set(form.structure.map((row) => row.type).filter((type) => options.includes(type)))
+    form.structure.forEach((row) => {
+      if (options.includes(row.type)) return
+      row.type = options.find((type) => !used.has(type)) ?? options[0]
+      used.add(row.type)
+    })
+  },
+)
+
 function resetForm() {
   editingId.value = null
   sourcePaperId.value = 0
@@ -136,9 +163,9 @@ function resetForm() {
   form.grade = pick(grades.value, '高一')
   form.duration = 120
   form.structure = [
-    { type: '单选题', count: 8, score: 5 },
-    { type: '填空题', count: 4, score: 5 },
-    { type: '解答题', count: 3, score: 12 },
+    { type: '单选', count: 8, score: 5 },
+    { type: '填空', count: 4, score: 5 },
+    { type: '解答', count: 3, score: 12 },
   ]
   form.difficulty = [
     { level: '容易', ratio: 30 },
@@ -160,14 +187,21 @@ async function prefillFromPaper(paperId: number) {
   form.subject = paper.subject
   form.grade = paper.grade
   form.duration = paper.duration
-  /* 按试卷现有大题反推题型结构：大题名里带「单选/填空/解答」等关键词即可识别 */
+  /* 按试卷现有大题反推题型结构：大题名里带「单选/填空/解答」等关键词即可识别。
+     顺序敏感 ——「多选」必须排在「选择」之前，否则「多项选择题」会被当成单选。 */
   const KEYWORDS: Array<[string, string]> = [
-    ['单选', '单选题'],
-    ['多选', '多选题'],
-    ['判断', '判断题'],
-    ['填空', '填空题'],
-    ['解答', '解答题'],
-    ['问答', '解答题'],
+    ['多选', '多选'],
+    ['选择', '单选'],
+    ['单选', '单选'],
+    ['判断', '判断'],
+    ['填空', '填空'],
+    ['问答', '解答'],
+    ['解答', '解答'],
+    ['计算', '计算'],
+    ['证明', '证明'],
+    ['连线', '连线'],
+    ['作文', '作文'],
+    ['作图', '作图'],
   ]
   const derived = paper.sections
     .map((section) => {
@@ -467,7 +501,7 @@ onMounted(async () => {
         <label class="f-label">题型要求<span class="req">*</span>（题数 / 单题分值，处理人只能按此结构收题）</label>
         <div v-for="(row, i) in form.structure" :key="i" class="struct-row">
           <select v-model="row.type" class="f-select" style="width: 128px">
-            <option v-for="t in questionTypes" :key="t" :value="t">{{ t }}</option>
+            <option v-for="t in structureTypes(row.type)" :key="t" :value="t">{{ t }}</option>
           </select>
           <input v-model.number="row.count" type="number" min="1" class="f-input" style="width: 80px" />
           <span class="f-hint">题 ×</span>
@@ -476,7 +510,7 @@ onMounted(async () => {
           <span class="f-hint" style="margin-left: auto">小计 {{ (row.count || 0) * (row.score || 0) }} 分</span>
           <button class="mini-btn danger" type="button" :disabled="form.structure.length <= 1" @click="form.structure.splice(i, 1)">删除</button>
         </div>
-        <button class="btn btn-ghost btn-sm" type="button" :disabled="form.structure.length >= 8" @click="form.structure.push({ type: '单选题', count: 4, score: 5 })">
+        <button class="btn btn-ghost btn-sm" type="button" :disabled="form.structure.length >= 8" @click="form.structure.push({ type: '单选', count: 4, score: 5 })">
           <AppIcon name="plus" :size="14" /> 添加题型
         </button>
         <p class="f-hint">

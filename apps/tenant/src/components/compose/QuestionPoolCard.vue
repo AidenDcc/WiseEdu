@@ -11,6 +11,8 @@
 import { computed, ref } from 'vue'
 import { AppIcon, RichTextViewer, QUESTION_STATUS_TEXT, hasImage, toPlainText } from '@aiteach/shared'
 import type { OrgQuestion } from '@aiteach/shared'
+import QuestionOptions from '@/components/question/QuestionOptions.vue'
+import { isJudgeNoOptions, judgeAnswerText, optionColumnsOf } from '@/utils/question-card'
 
 const props = defineProps<{
   row: OrgQuestion
@@ -33,12 +35,6 @@ const emit = defineEmits<{
 }>()
 
 const analysisOpen = ref(false)
-
-/** 客观题正确答案字母（用于高亮正确选项；判断题 answer 为 A/B），与题库列表同一算法 */
-const answerLetters = computed(() => {
-  if (!props.row.options.length) return [] as string[]
-  return [...new Set(props.row.answer.toUpperCase().replace(/[^A-F]/g, '').split(''))]
-})
 
 /** 难度标签配色，与题库列表一致 */
 const difficultyClass = computed(() => {
@@ -77,17 +73,19 @@ const blocked = computed(() => props.row.status !== 'approved')
       <span>题目配图（演示占位）</span>
     </div>
 
-    <ul v-if="row.options.length > 0" class="qc-options">
-      <li v-for="(opt, i) in row.options" :key="i" :class="{ right: answerLetters.includes('ABCDEF'[i]) }">
-        <span class="opt-letter">{{ 'ABCDEF'[i] }}</span>
-        <RichTextViewer :content="opt" tag="span" />
-      </li>
-    </ul>
+    <QuestionOptions
+      class="qc-options"
+      :options="row.options"
+      :answer="row.answer"
+      :columns="optionColumnsOf(row)"
+    />
 
     <div v-if="analysisOpen" class="qc-answer">
       <p>
         <b>答案：</b>
-        <span v-if="row.options.length" class="qc-answer-text">{{ row.answer || '—' }}</span>
+        <span v-if="row.options.length || isJudgeNoOptions(row)" class="qc-answer-text">
+          {{ isJudgeNoOptions(row) ? judgeAnswerText(row.answer) : row.answer || '—' }}
+        </span>
         <RichTextViewer v-else :content="row.answer" tag="span" empty="—" />
       </p>
       <p><b>解析：</b><RichTextViewer :content="row.analysis" tag="span" empty="—" /></p>
@@ -171,20 +169,8 @@ const blocked = computed(() => props.row.status !== 'approved')
   font-size: 12.5px;
 }
 
-.qc-options { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
-.qc-options li {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  padding: 7px 11px;
-  font-size: 13px;
-  color: var(--ink-2);
-}
-.qc-options li.right { border-color: var(--success); background: var(--success-soft); }
-.opt-letter { font-weight: 700; color: var(--sub); }
-.qc-options li.right .opt-letter { color: var(--success); }
+/* 选项外观（描边块 / 正确项高亮 / 一行 N 个）由 QuestionOptions 负责，这里只管与题干的间距 */
+.qc-options { margin-top: 10px; }
 
 .qc-answer {
   margin-top: 10px;

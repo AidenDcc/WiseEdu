@@ -3,6 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import { AppIcon, PAPER_STATUS_TEXT, RichTextViewer, showToast } from '@aiteach/shared'
 import type { OrgPaper, OrgQuestion } from '@aiteach/shared'
 import { fetchPapers, fetchQuestions, reviewPaper } from '@/api/org'
+import QuestionOptions from '@/components/question/QuestionOptions.vue'
+import { isJudgeNoOptions, judgeAnswerText, optionColumnsOf } from '@/utils/question-card'
 
 const papers = ref<OrgPaper[]>([])
 const questions = ref<OrgQuestion[]>([])
@@ -103,19 +105,24 @@ onMounted(load)
               <RichTextViewer v-if="questionOf(entry.questionId)" :content="questionOf(entry.questionId)!.stem" tag="span" />
               <template v-else>题目 #{{ entry.questionId }}</template>
             </p>
-            <ul v-if="questionOf(entry.questionId)?.options.length" class="pv-q-opts">
-              <li
-                v-for="(opt, oi) in questionOf(entry.questionId)!.options"
-                :key="oi"
-                :class="{ right: questionOf(entry.questionId)!.answer.includes('ABCDEF'[oi]) }"
-              >
-                {{ 'ABCDEF'[oi] }}. <RichTextViewer :content="opt" tag="span" />
-              </li>
-            </ul>
+            <QuestionOptions
+              v-if="questionOf(entry.questionId)"
+              class="pv-q-opts"
+              variant="doc"
+              :options="questionOf(entry.questionId)!.options"
+              :answer="questionOf(entry.questionId)!.answer"
+              :columns="optionColumnsOf(questionOf(entry.questionId)!)"
+            />
             <p v-if="questionOf(entry.questionId)" class="pv-q-ans">
               <span class="tag tag-green">答案</span>
-              <!-- 客观题答案是字母；问答题答案是富文本（公式/插图） -->
-              <template v-if="questionOf(entry.questionId)!.options.length">{{ questionOf(entry.questionId)!.answer }}</template>
+              <!-- 客观题答案是字母（无选项判断题是对/错）；问答题答案是富文本（公式/插图） -->
+              <template v-if="questionOf(entry.questionId)!.options.length || isJudgeNoOptions(questionOf(entry.questionId)!)">
+                {{
+                  isJudgeNoOptions(questionOf(entry.questionId)!)
+                    ? judgeAnswerText(questionOf(entry.questionId)!.answer)
+                    : questionOf(entry.questionId)!.answer
+                }}
+              </template>
               <RichTextViewer v-else :content="questionOf(entry.questionId)!.answer" tag="span" />
             </p>
           </div>
@@ -181,9 +188,8 @@ onMounted(load)
 .pv-section h4 { font-size: 14px; color: var(--ink); border-left: 3px solid var(--brand); padding-left: 8px; margin-bottom: 10px; }
 .pv-q { margin-bottom: 12px; }
 .pv-q-stem { font-size: 13.5px; color: var(--ink-2); line-height: 1.7; }
+/* 选项外观由 QuestionOptions 负责，这里只管与题干的距离与缩进 */
 .pv-q-opts { margin-top: 6px; padding-left: 18px; }
-.pv-q-opts li { font-size: 13px; color: var(--sub); line-height: 1.8; }
-.pv-q-opts li.right { color: var(--success); font-weight: 600; }
 .pv-q-ans { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 12.5px; font-weight: 600; color: var(--success); }
 
 .report-panel { padding: 14px 16px; position: sticky; top: 0; }

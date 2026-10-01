@@ -9,11 +9,15 @@
  * 硬要泛化会把 BankView 与 StandardView 两个现有消费方一起搭进去，仓库既有做法是各页 scoped
  * 复制（见 `question/QuestionResultList.vue` 头部注释），这里沿用。
  *
- * 交互口径：**点节点 = 整棵子树的知识点标签一起选中/取消**。教师是按「三角函数」这个层级
- * 想事情的，让他逐个勾 15 个叶子标签不合理；个别不想要的标签可以在上方 chip 里单独删。
+ * 交互口径由 `mode` 决定：
+ * - `subtree`（默认，组卷工作台）：**点节点 = 整棵子树的知识点标签一起选中/取消**。教师是按
+ *   「三角函数」这个层级想事情的，让他逐个勾 15 个叶子标签不合理；个别不想要的标签可以在上方
+ *   chip 里单独删。
+ * - `node`（录题页的知识点弹窗）：**只选本节点自己的标签**，配合 `max` 限个数。分类节点没有
+ *   tag 因而不可勾选（点它只展开）—— 把分类名存进题目的 knowledge 会变成池外的孤儿值。
  */
 import { computed, ref, watch } from 'vue'
-import { AppIcon } from '@aiteach/shared'
+import { AppIcon, showToast } from '@aiteach/shared'
 import type { OrgKnowledgeNode } from '@aiteach/shared'
 import { useKnowledgePool } from '@/composables/useKnowledgePool'
 
@@ -22,6 +26,10 @@ const props = defineProps<{
   subject: string
   grade?: string
   version?: string
+  /** 选中粒度（见文件头注释），默认 `subtree` = 组卷工作台的既有行为 */
+  mode?: 'subtree' | 'node'
+  /** 最多可选几个标签；不给 = 不限（组卷侧不设上限） */
+  max?: number | null
   /** 用于节点计数（传当前题源列表即可）；不传则不显示计数 */
   rows?: Array<{ knowledge: string[] }>
   /** 树区最大高度 */
@@ -73,9 +81,22 @@ function subtreeTags(id: string): string[] {
 
 const selected = computed(() => new Set(props.modelValue))
 
-/** 节点三态：整棵子树都已选 / 部分已选 / 未选 */
+/** 点这个节点会选中哪些标签：`subtree` = 整棵子树，`node` = 本节点的 tag（无 tag 则为空） */
+function selectableTags(id: string): string[] {
+  const node = byId.value.get(id)
+  if (!node) return []
+  if (props.mode === 'node') return node.tag ? [node.tag] : []
+  return subtreeTags(id)
+}
+
+/** 该节点是否可勾选：`node` 模式下分类节点（无 tag）不可勾，点它只展开 */
+function selectable(id: string): boolean {
+  return selectableTags(id).length > 0
+}
+
+/** 节点三态：全部已选 / 部分已选 / 未选（`node` 模式下不会出现「部分」） */
 function nodeState(id: string): 'on' | 'part' | 'off' {
-  const tags = subtreeTags(id)
+  const tags = selectableTags(id)
   if (!tags.length) return 'off'
   const hit = tags.filter((tag) => selected.value.has(tag)).length
   if (hit === 0) return 'off'
@@ -88,12 +109,30 @@ function countOf(id: string): number | null {
   return props.rows.filter((row) => row.knowledge.some((tag) => tags.includes(tag))).length
 }
 
+/** 整行点击：可勾选的节点 = 选中/取消；分类节点 = 展开（它没有可存的标签） */
+function onRowClick(id: string) {
+  if (!selectable(id)) {
+    toggleExpand(id)
+    return
+  }
+  toggleNode(id)
+}
+
 function toggleNode(id: string) {
-  const tags = subtreeTags(id)
+  const tags = selectableTags(id)
   if (!tags.length) return
   const next = new Set(props.modelValue)
-  if (nodeState(id) === 'on') tags.forEach((tag) => next.delete(tag))
-  else tags.forEach((tag) => next.add(tag))
+  if (nodeState(id) === 'on') {
+    tags.forEach((tag) => next.delete(tag))
+  } else {
+    /* 到达上限时整次点击不落地：删了再勾是两步操作，比「勾上又被悄悄挤掉一个」好理解 */
+    const adding = tags.filter((tag) => !next.has(tag)).length
+    if (props.max != null && next.size + adding > props.max) {
+      showToast(`最多 ${props.max} 个知识点`, 'error')
+      return
+    }
+    tags.forEach((tag) => next.add(tag))
+  }
   emit('update:modelValue', [...next])
 }
 
@@ -212,9 +251,10 @@ const treeStyle = computed(() => (props.fill ? undefined : { maxHeight: props.ma
           v-for="row in treeRows"
           :key="row.node.id"
           class="kp-item"
-          :class="[`state-${nodeState(row.node.id)}`, { hit: row.hit }]"
+          :class="[`state-${nodeState(row.node.id)}`, { hit: row.hit, disabled: !selectable(row.node.id) }]"
           :style="{ paddingLeft: `${6 + row.depth * 15}px` }"
-          @click="toggleNode(row.node.id)"
+          :title="selectable(row.node.id) ? '' : '分类节点，请展开选择具体知识点'"
+          @click="onRowClick(row.node.id)"
         >
           <button
             v-if="row.hasChildren"
@@ -226,7 +266,7 @@ const treeStyle = computed(() => (props.fill ? undefined : { maxHeight: props.ma
             <AppIcon name="chevron-right" :size="12" />
           </button>
           <span v-else class="kp-dot" />
-          <span class="kp-check" :class="`s-${nodeState(row.node.id)}`">
+          <span class="kp-check" :class="selectable(row.node.id) ? `s-${nodeState(row.node.id)}` : 's-off s-locked'">
             <AppIcon v-if="nodeState(row.node.id) === 'on'" name="check" :size="10" />
             <span v-else-if="nodeState(row.node.id) === 'part'" class="kp-dash" />
           </span>
@@ -313,6 +353,8 @@ const treeStyle = computed(() => (props.fill ? undefined : { maxHeight: props.ma
 .kp-item.state-on { background: var(--brand-soft); color: var(--brand-deep); font-weight: 600; }
 .kp-item.state-part { color: var(--brand-deep); }
 .kp-item.hit .kp-name { font-weight: 700; }
+/* 分类节点（node 模式下无可选标签）：整行仍可点（展开），但勾选框置灰表明它选不了 */
+.kp-item.disabled .kp-name { color: var(--sub); }
 
 .kp-caret {
   display: flex;
@@ -342,6 +384,8 @@ const treeStyle = computed(() => (props.fill ? undefined : { maxHeight: props.ma
 }
 .kp-check.s-on { background: var(--brand); border-color: var(--brand); }
 .kp-check.s-part { background: var(--brand-soft); border-color: var(--brand); }
+/* 不可勾选（node 模式下的分类节点）：灰底虚线框，与「未选中」区分开 */
+.kp-check.s-locked { background: #f1f3f5; border-style: dashed; }
 .kp-dash { width: 7px; height: 1.5px; background: var(--brand); border-radius: 1px; }
 
 .kp-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

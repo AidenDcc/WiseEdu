@@ -7,7 +7,7 @@ import * as admin from './admin-store'
 import * as org from './org-store'
 import * as student from './student-store'
 import * as content from './content-store'
-import type { DictTypeKey, FeatureSwitches, PackageRecord, TenantRecord } from '../api/models'
+import type { DictTypeKey, FeatureSwitches, PackageRecord, PhotoResultEdit, TenantRecord } from '../api/models'
 import type { SessionUser, MockUser } from './types'
 
 function toSessionUser(user: MockUser): SessionUser {
@@ -57,12 +57,13 @@ const orgRoutes: MockRoute[] = [
   { method: 'POST', path: '/tenant/questions/delete', handler: ({ body }) => guard(() => ({ count: org.deleteQuestions(body.ids as number[]) })) },
   { method: 'POST', path: '/tenant/questions/move', handler: ({ body }) => guard(() => ({ count: org.moveQuestions(body.ids as number[], Number(body.categoryId)) })) },
   { method: 'POST', path: '/tenant/questions/review', handler: ({ body }) => guard(() => org.reviewQuestion(Number(body.id), Boolean(body.pass), String(body.opinion ?? ''))) },
+  { method: 'POST', path: '/tenant/questions/offline', handler: ({ body }) => guard(() => org.toggleQuestionOffline(Number(body.id))) },
   { method: 'POST', path: '/tenant/questions/variant', handler: ({ body }) => guard(() => org.variantOf(Number(body.id))) },
 
   // AI 出题 / 额度
   { method: 'GET', path: '/tenant/quota', handler: () => guard(() => org.QUOTA_TEXT) },
   { method: 'POST', path: '/tenant/ai/generate', handler: ({ body }) => guard(() => org.generateQuestions(Number(body.count ?? 5))) },
-  { method: 'POST', path: '/tenant/ai/adopt', handler: ({ body }) => guard(() => org.adoptGenerated(body as never, String(body.subject ?? '数学'), String(body.grade ?? '高一'), String(body.type ?? '单选题'))) },
+  { method: 'POST', path: '/tenant/ai/adopt', handler: ({ body }) => guard(() => org.adoptGenerated(body as never, String(body.subject ?? '数学'), String(body.grade ?? '高一'), String(body.type ?? '单选'))) },
 
   // 拍照识题
   { method: 'GET', path: '/tenant/photo/tasks', handler: () => guard(() => org.photoTasks) },
@@ -78,7 +79,7 @@ const orgRoutes: MockRoute[] = [
           String(body.taskId),
           String(body.resultId),
           body.decision as 'import' | 'draft' | 'drop',
-          body.edit as { stem?: string; options?: string[]; answer?: string; analysis?: string; subject?: string; grade?: string } | undefined,
+          body.edit as PhotoResultEdit | undefined,
         ),
       ),
   },
@@ -822,11 +823,11 @@ export const mockRoutes: MockRoute[] = [
   { method: 'POST', path: '/admin/system/backups/create', handler: ({ body }) => guard(() => content.createBackup(String(body.scope ?? '全平台'))) },
 ]
 
-/** 从 /admin/dict/{type}/... 中解析字典类型 */
+/** 从 /admin/dict/{type}/... 中解析字典类型；白名单直接取 DICT_TYPES，新增字典类型时不必再改这里 */
 function parseDictType(path: string): DictTypeKey {
   const segments = path.split('/').filter(Boolean)
   const type = segments[2]
-  const valid: DictTypeKey[] = ['subject', 'grade', 'term', 'questionType', 'difficulty', 'examType', 'copyright']
+  const valid: DictTypeKey[] = admin.DICT_TYPES.map((item) => item.key)
   if (!valid.includes(type as DictTypeKey)) mockFail(404, `未知字典类型：${type}`)
   return type as DictTypeKey
 }

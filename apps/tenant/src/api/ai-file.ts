@@ -61,9 +61,9 @@ export function recognizeEngine(file: OrgFile): FileRecognizeEngine {
 
 const MAX_QUESTIONS_PER_FILE = 12
 const TYPE_BY_OPTIONS = (options: string[], answer: string): string => {
-  if (!options.length) return '解答题'
-  if (options.length === 2 && options[0] === '正确') return '判断题'
-  return answer.replace(/[^A-F]/g, '').length > 1 ? '多选题' : '单选题'
+  if (!options.length) return '解答'
+  if (options.length === 2 && options[0] === '正确') return '判断'
+  return answer.replace(/[^A-F]/g, '').length > 1 ? '多选' : '单选'
 }
 
 /* ===== 真实引擎（图片 + 视觉通道） ===== */

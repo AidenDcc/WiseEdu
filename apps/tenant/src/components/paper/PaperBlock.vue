@@ -9,6 +9,7 @@
 import { computed } from 'vue'
 import { RichTextViewer } from '@aiteach/shared'
 import type { OrgPaper, OrgQuestion } from '@aiteach/shared'
+import { isJudgeNoOptions, judgeAnswerText, optionColumnsOf } from '@/utils/question-card'
 import type { PaperBlock, PaperLayoutPreset } from './paper-layouts'
 
 const props = defineProps<{
@@ -67,14 +68,20 @@ const sectionMeta = computed(() => {
 
 /** 判断题选项按试卷习惯渲染 √ / ×，其余题型渲染 A/B/C…（选项字母由序号推出） */
 function optionMarks(row: OrgQuestion | undefined): string[] {
-  return row ? row.options.map((_, i) => (row.type === '判断题' ? (i === 0 ? '√' : '×') : 'ABCDEF'[i])) : []
+  return row ? row.options.map((_, i) => (row.type === '判断' ? (i === 0 ? '√' : '×') : 'ABCDEF'[i])) : []
 }
 
-/** 正确答案对应的选项序号（单选 'C' → [2]，多选 'AC' → [0, 2]，判断题按 √/× 归位） */
+/**
+ * 正确答案对应的选项序号（单选 'C' → [2]，多选 'AC' → [0, 2]，判断题按 √/× 归位）。
+ *
+ * 判断题的答案在库里存的是 'A' / 'B'（选项就是「正确 / 错误」两项），但也可能是
+ * 「对 / 错 / √ / ×」这类文字 —— 两个口径都要认。只认后者的话，'A' 会落进兜底的
+ * 「×」分支，把错的选项标成正确答案。
+ */
 function correctIndexes(row: OrgQuestion): number[] {
   const text = (row.answer || '').trim()
   if (!text) return []
-  if (row.type === '判断题') return [/^(√|对|正确|是|T|TRUE)/i.test(text) ? 0 : 1]
+  if (row.type === '判断') return [/^(A|√|对|正确|是|T|TRUE)/i.test(text) ? 0 : 1]
   const marks = optionMarks(row)
   return marks.map((mark, i) => (mark && text.toUpperCase().includes(mark) ? i : -1)).filter((i) => i >= 0)
 }
@@ -94,8 +101,12 @@ function isCorrect(questionId: number, index: number): boolean {
   return props.teacher && (correctMap.value.get(questionId) ?? []).includes(index)
 }
 
-/** 有选项即为客观题；无选项（解答题、问答题、作文…）才留答题空白 */
-const subjective = computed(() => !!item.value && item.value.options.length === 0)
+/**
+ * 有选项即为客观题；无选项（解答题、问答题、作文…）才留答题空白。
+ * 例外是「无选项判断题」—— 它没有选项但也不是主观题：学生在题干前的（　　）里写对错，
+ * 不能在卷面上留一大片解答题才有的作答空白。
+ */
+const subjective = computed(() => !!item.value && item.value.options.length === 0 && !isJudgeNoOptions(item.value))
 
 /** 答题空白行数：按分值给（12 分 → 4 行），并夹在 2~8 行之间 */
 const blankLines = computed(() => {
@@ -103,8 +114,20 @@ const blankLines = computed(() => {
   return Math.min(8, Math.max(2, Math.round(score / 3)))
 })
 
-/** 客观题答案是字母，直接展示；主观题答案是富文本（含公式 / 插图） */
-const answerIsPlain = computed(() => !!item.value && item.value.options.length > 0)
+/** 客观题答案是字母（无选项判断题是「对 / 错」），直接展示；主观题答案是富文本（含公式 / 插图） */
+const answerIsPlain = computed(
+  () => !!item.value && (item.value.options.length > 0 || isJudgeNoOptions(item.value)),
+)
+
+/** 卷面展示的答案：无选项判断题把 A/B 之类归一成「对 / 错」 */
+const answerText = computed(() => {
+  const row = item.value
+  if (!row) return ''
+  return isJudgeNoOptions(row) ? judgeAnswerText(row.answer) : row.answer
+})
+
+/** 本题选项一行放几个：题目自身配置优先，缺省回落纸张预设（卷级） */
+const optionColumns = computed(() => (item.value ? optionColumnsOf(item.value, props.preset.optionColumns) : 1))
 </script>
 
 <template>
@@ -165,7 +188,11 @@ const answerIsPlain = computed(() => !!item.value && item.value.options.length >
       <span v-if="preset.scoreStyle === 'trail'" class="pb-score">（{{ scoreText(block.score) }} 分）</span>
     </p>
 
-    <ul v-if="item?.options.length" class="pb-opts" :class="{ 'is-two': preset.optionColumns === 2 }">
+    <ul
+      v-if="item?.options.length"
+      class="pb-opts"
+      :class="{ 'is-two': optionColumns === 2, 'is-four': optionColumns === 4 }"
+    >
       <li v-for="(opt, oi) in item.options" :key="oi">
         <span class="pb-opt-key">{{ optionMarks(item)[oi] }}．</span>
         <RichTextViewer :content="opt" tag="span" />
@@ -180,7 +207,7 @@ const answerIsPlain = computed(() => !!item.value && item.value.options.length >
     <div v-if="teacher && item" class="pb-answer">
       <p class="pb-answer-row">
         <b>答案：</b>
-        <span v-if="answerIsPlain">{{ item.answer || '（未填写）' }}</span>
+        <span v-if="answerIsPlain">{{ answerText || '（未填写）' }}</span>
         <RichTextViewer v-else :content="item.answer" tag="span" :empty="'（未填写）'" />
       </p>
       <p class="pb-answer-row">
@@ -276,7 +303,7 @@ const answerIsPlain = computed(() => !!item.value && item.value.options.length >
     <div v-if="teacher && item" class="pb-answer">
       <p class="pb-answer-row">
         <b>答案：</b>
-        <span v-if="answerIsPlain">{{ item.answer || '（未填写）' }}</span>
+        <span v-if="answerIsPlain">{{ answerText || '（未填写）' }}</span>
         <RichTextViewer v-else :content="item.answer" tag="span" :empty="'（未填写）'" />
       </p>
       <p class="pb-answer-row">
@@ -352,6 +379,8 @@ const answerIsPlain = computed(() => !!item.value && item.value.options.length >
 .pb-score { font-size: calc(var(--pp-size) * 0.9); }
 .pb-opts { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; }
 .pb-opts.is-two { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; }
+/* 一行 4 个：由题目自身的选项排布决定（纸张预设只到双列），窄列下靠 gap 拉开，不换行 */
+.pb-opts.is-four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px 12px; }
 .pb-opts li { display: flex; align-items: baseline; gap: 6px; font-size: var(--pp-size); line-height: var(--pp-line); }
 .pb-opt-key { flex-shrink: 0; }
 

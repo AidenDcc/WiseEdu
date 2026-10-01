@@ -38,7 +38,7 @@ const emit = defineEmits<{
 }>()
 
 const { questions, loading, loaded, ensure } = useComposeData()
-const { questionTypes } = useBaseData()
+const { questionTypesFor } = useBaseData()
 const basket = useComposeBasket()
 const favorites = useQuestionFavorites()
 
@@ -135,7 +135,7 @@ function onSimilarFilter(tags: string[]) {
       <ComposeFilterBar
         :filter="filter"
         :fields="['grade', 'subject', 'difficulty', 'types']"
-        :type-options="questionTypes"
+        :type-options="questionTypesFor(filter.subject)"
         :result-count="rows.length"
         @patch="emit('patch', $event)"
         @reset="

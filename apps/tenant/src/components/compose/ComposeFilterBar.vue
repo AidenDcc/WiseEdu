@@ -33,7 +33,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{ patch: [patch: Partial<ComposeFilter>]; reset: [] }>()
 
-const { grades, subjects, optionsForGrade, difficulties } = useBaseData()
+const { grades, subjects, optionsForGrade, difficulties, questionTypesFor } = useBaseData()
 
 const show = (field: FilterField) => props.fields.includes(field)
 
@@ -58,8 +58,18 @@ function pickGrade(grade: string) {
   emit('patch', { grade, knowledge: [] })
 }
 
+/**
+ * 换学科后原学科专属题型（英语的完形填空 / 七选五 / 短文改错）不再是候选项。残留的选中项
+ * 在题型 chip 行里渲染不出来（chips 只按候选项渲染），却仍在参与筛选，结果恒为空且无处取消，
+ * 因此随学科一起清掉。
+ */
 function pickSubject(subject: string) {
-  emit('patch', { subject, knowledge: [] })
+  const available = questionTypesFor(subject)
+  emit('patch', {
+    subject,
+    knowledge: [],
+    types: props.filter.types.filter((type) => available.includes(type)),
+  })
 }
 
 /** 「重置筛选」只按本组件能显示的条件出现（知识点由左栏自清，不在这里揽） */

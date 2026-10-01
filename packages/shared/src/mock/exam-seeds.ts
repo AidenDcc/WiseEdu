@@ -11,6 +11,8 @@
  *   卷面只需印「题号 + 选项」，故 stem 留空 —— 与真实卷面上这些题型的排法一致。
  */
 import type { OrgPaper, OrgQuestion, PaperSection } from '../api/models'
+/* 杯赛 / 地区与 org-store 的种子同一口径：整卷题也必须带上，否则按地区筛选时这套卷会整卷消失 */
+import { seedQuestionMeta } from './admin-store'
 
 /** 种子时间固定写死：用相对时间会让每次刷新列表都在变 */
 const UPDATED = '2026-09-20 16:40:00'
@@ -39,7 +41,7 @@ function seedQuestion(base: PaperBase, row: Seed): OrgQuestion {
   return {
     subject: base.subject,
     grade: base.grade,
-    type: '单选题',
+    type: '单选',
     difficulty: '中等',
     source: '手动录入',
     status: 'approved',
@@ -51,6 +53,7 @@ function seedQuestion(base: PaperBase, row: Seed): OrgQuestion {
     examType: '模拟考试',
     useCount: row.id % 19,
     updatedAt: UPDATED,
+    ...seedQuestionMeta(row.id, base.subject),
     ...row,
     options: row.options ?? [],
     knowledge: row.knowledge ?? [],
@@ -145,7 +148,7 @@ const MATH_QUESTIONS: OrgQuestion[] = [
   seedQuestion(MATH, {
     id: 9209,
     stem: '已知函数 f(x) = sin x + cos x，则下列结论正确的是（　　）',
-    type: '多选题',
+    type: '多选',
     options: [
       'f(x) 的最大值为 √2',
       'f(x) 的最小正周期为 2π',
@@ -160,7 +163,7 @@ const MATH_QUESTIONS: OrgQuestion[] = [
   seedQuestion(MATH, {
     id: 9210,
     stem: '已知等比数列 {aₙ} 的首项 a₁ = 1，公比 q = −2，前 n 项和为 Sₙ，则下列结论正确的是（　　）',
-    type: '多选题',
+    type: '多选',
     options: ['a₄ = −8', 'S₄ = −5', '数列 {aₙ} 是递减数列', 'a₁ + a₃ + a₅ = 21'],
     answer: 'ABD',
     analysis:
@@ -170,7 +173,7 @@ const MATH_QUESTIONS: OrgQuestion[] = [
   seedQuestion(MATH, {
     id: 9211,
     stem: '已知直线 l: kx − y + 1 = 0 与圆 C: x² + y² = 4，则下列结论正确的是（　　）',
-    type: '多选题',
+    type: '多选',
     options: [
       '直线 l 恒过定点 (0, 1)',
       '当 k = 0 时，直线 l 与圆 C 相切',
@@ -186,7 +189,7 @@ const MATH_QUESTIONS: OrgQuestion[] = [
   seedQuestion(MATH, {
     id: 9212,
     stem: '已知函数 f(x) = x³ − 3x + 1，则下列结论正确的是（　　）',
-    type: '多选题',
+    type: '多选',
     options: ['f(x) 在区间 (−1, 1) 上单调递减', 'f(x) 的极大值为 3', 'f(x) 有三个零点', 'f(x) 在 x = 1 处取得极大值'],
     answer: 'ABC',
     analysis:
@@ -197,7 +200,7 @@ const MATH_QUESTIONS: OrgQuestion[] = [
   seedQuestion(MATH, {
     id: 9213,
     stem: '已知等差数列 {aₙ} 中，a₁ = 2，a₄ = 11，则 S₁₀ = ______。',
-    type: '填空题',
+    type: '填空',
     answer: '155',
     analysis: '公差 d = (a₄ − a₁)/3 = 3，故 S₁₀ = 10a₁ + 45d = 20 + 135 = 155。',
     difficulty: '容易',
@@ -206,7 +209,7 @@ const MATH_QUESTIONS: OrgQuestion[] = [
   seedQuestion(MATH, {
     id: 9214,
     stem: '抛物线 y² = 8x 的焦点到准线的距离为 ______。',
-    type: '填空题',
+    type: '填空',
     answer: '4',
     analysis: '由 y² = 2px 得 2p = 8，即 p = 4；焦点为 (2, 0)，准线为 x = −2，两者距离为 p = 4。',
     difficulty: '容易',
@@ -215,7 +218,7 @@ const MATH_QUESTIONS: OrgQuestion[] = [
   seedQuestion(MATH, {
     id: 9215,
     stem: '已知正方体 ABCD-A₁B₁C₁D₁ 的棱长为 2，则其外接球的表面积为 ______。',
-    type: '填空题',
+    type: '填空',
     answer: '12π',
     analysis: '正方体的体对角线长等于其外接球的直径，即 2R = √(2² + 2² + 2²) = 2√3，故 R = √3，表面积 S = 4πR² = 12π。',
     knowledge: ['立体几何'],
@@ -223,7 +226,7 @@ const MATH_QUESTIONS: OrgQuestion[] = [
   seedQuestion(MATH, {
     id: 9216,
     stem: '若函数 f(x) = x³ − 3ax 在区间 (1, +∞) 上单调递增，则实数 a 的取值范围是 ______。',
-    type: '填空题',
+    type: '填空',
     answer: 'a ≤ 1',
     analysis: 'f′(x) = 3x² − 3a，在 (1, +∞) 上单调递增需 f′(x) ≥ 0 恒成立，即 a ≤ x² 对任意 x > 1 恒成立；x² > 1，故 a ≤ 1。',
     knowledge: ['导数概念'],
@@ -233,7 +236,7 @@ const MATH_QUESTIONS: OrgQuestion[] = [
     stem: `在 △ABC 中，内角 A、B、C 的对边分别为 a、b、c，已知 b = 2，c = 3，cos A = 1/3。
 （1）求 a 的值；
 （2）求 △ABC 的面积。`,
-    type: '解答题',
+    type: '解答',
     answer: '（1）a = 3；（2）△ABC 的面积为 2√2',
     analysis: `（1）由余弦定理得 a² = b² + c² − 2bc·cos A = 4 + 9 − 2 × 2 × 3 × (1/3) = 9，故 a = 3。
 （2）由 cos A = 1/3 得 sin A = √(1 − 1/9) = 2√2/3，故 S = (1/2)bc·sin A = (1/2) × 2 × 3 × (2√2/3) = 2√2。`,
@@ -244,7 +247,7 @@ const MATH_QUESTIONS: OrgQuestion[] = [
     stem: `已知数列 {aₙ} 的前 n 项和为 Sₙ，且 Sₙ = 2aₙ − 2（n ∈ N*）。
 （1）求数列 {aₙ} 的通项公式；
 （2）设 bₙ = n·aₙ，求数列 {bₙ} 的前 n 项和 Tₙ。`,
-    type: '解答题',
+    type: '解答',
     answer: '（1）aₙ = 2ⁿ；（2）Tₙ = (n − 1)·2ⁿ⁺¹ + 2',
     analysis: `（1）当 n = 1 时 a₁ = S₁ = 2a₁ − 2，得 a₁ = 2；当 n ≥ 2 时 aₙ = Sₙ − Sₙ₋₁ = 2aₙ − 2aₙ₋₁，即 aₙ = 2aₙ₋₁，故 {aₙ} 是首项为 2、公比为 2 的等比数列，aₙ = 2ⁿ。
 （2）用错位相减法：Tₙ = 1·2 + 2·2² + … + n·2ⁿ，两边乘 2 得 2Tₙ = 1·2² + … + (n − 1)·2ⁿ + n·2ⁿ⁺¹，相减得 −Tₙ = 2 + 2² + … + 2ⁿ − n·2ⁿ⁺¹ = 2ⁿ⁺¹ − 2 − n·2ⁿ⁺¹，故 Tₙ = (n − 1)·2ⁿ⁺¹ + 2。`,
@@ -255,7 +258,7 @@ const MATH_QUESTIONS: OrgQuestion[] = [
     stem: `在四棱锥 P-ABCD 中，底面 ABCD 是边长为 2 的正方形，PA ⊥ 平面 ABCD，PA = 2，E 为 PB 的中点。
 （1）证明：AD ∥ 平面 PBC；
 （2）求二面角 E-AD-B 的余弦值。`,
-    type: '解答题',
+    type: '解答',
     answer: '（1）证明见解析；（2）二面角 E-AD-B 的余弦值为 √2/2',
     analysis: `（1）因为 ABCD 是正方形，所以 AD ∥ BC；又 BC ⊂ 平面 PBC，AD ⊄ 平面 PBC，由线面平行的判定定理得 AD ∥ 平面 PBC。
 （2）以 A 为原点，AB、AD、AP 所在直线分别为 x、y、z 轴建立空间直角坐标系，则 A(0,0,0)、B(2,0,0)、D(0,2,0)、P(0,0,2)、E(1,0,1)。平面 ABD（即底面）的一个法向量 n₁ = (0,0,1)；设平面 EAD 的法向量 n₂ = (x,y,z)，由 AE = (1,0,1)、AD = (0,2,0) 得 x + z = 0 且 y = 0，取 n₂ = (1,0,−1)。于是 cos⟨n₁,n₂⟩ = −1/√2 = −√2/2，故二面角 E-AD-B 的余弦值为 √2/2。`,
@@ -267,7 +270,7 @@ const MATH_QUESTIONS: OrgQuestion[] = [
     stem: `已知椭圆 C: x²/a² + y²/b² = 1（a > b > 0）的离心率为 √2/2，且经过点 (2, 1)。
 （1）求椭圆 C 的方程；
 （2）设直线 l: y = x + m 与椭圆 C 交于 A、B 两点，O 为坐标原点。若 OA ⊥ OB，求 m 的值。`,
-    type: '解答题',
+    type: '解答',
     answer: '（1）x²/6 + y²/3 = 1；（2）m = ±2',
     analysis: `（1）由 e = c/a = √2/2 得 c² = a²/2，故 b² = a² − c² = a²/2。把点 (2, 1) 代入得 4/a² + 1/b² = 1，即 4/a² + 2/a² = 1，解得 a² = 6，b² = 3，椭圆 C 的方程为 x²/6 + y²/3 = 1。
 （2）由 x²/6 + (x + m)²/3 = 1 整理得 3x² + 4mx + 2m² − 6 = 0，设 A(x₁,y₁)、B(x₂,y₂)，则 x₁ + x₂ = −4m/3，x₁x₂ = (2m² − 6)/3。由 OA ⊥ OB 得 x₁x₂ + y₁y₂ = 0，而 y₁y₂ = (x₁ + m)(x₂ + m) = x₁x₂ + m(x₁ + x₂) + m²，代入得 2x₁x₂ + m(x₁ + x₂) + m² = 0，即 (4m² − 12)/3 − 4m²/3 + m² = 0，解得 m² = 4，故 m = ±2（此时判别式 Δ = 72 − 8m² > 0，满足题意）。`,
@@ -279,7 +282,7 @@ const MATH_QUESTIONS: OrgQuestion[] = [
     stem: `已知函数 f(x) = ln x − ax（a ∈ R）。
 （1）讨论 f(x) 的单调性；
 （2）若 f(x) ≤ 0 对任意 x > 0 恒成立，求 a 的取值范围。`,
-    type: '解答题',
+    type: '解答',
     answer: '（1）a ≤ 0 时在 (0, +∞) 上单调递增；a > 0 时在 (0, 1/a) 上单调递增，在 (1/a, +∞) 上单调递减。（2）a ≥ 1/e',
     analysis: `（1）f′(x) = 1/x − a = (1 − ax)/x（x > 0）。当 a ≤ 0 时 f′(x) > 0 恒成立，f(x) 在 (0, +∞) 上单调递增；当 a > 0 时，x ∈ (0, 1/a) 时 f′(x) > 0，x ∈ (1/a, +∞) 时 f′(x) < 0，故 f(x) 在 (0, 1/a) 上单调递增，在 (1/a, +∞) 上单调递减。
 （2）若 a ≤ 0，当 x → +∞ 时 f(x) = ln x − ax → +∞，不满足题意。若 a > 0，f(x) 的最大值为 f(1/a) = ln(1/a) − 1 = −ln a − 1，令 −ln a − 1 ≤ 0 得 ln a ≥ −1，即 a ≥ 1/e。综上，a 的取值范围是 [1/e, +∞)。`,
@@ -291,7 +294,7 @@ const MATH_QUESTIONS: OrgQuestion[] = [
     stem: `已知数列 {aₙ} 满足 a₁ = 1，aₙ₊₁ = 2aₙ + 1（n ∈ N*）。
 （1）证明：数列 {aₙ + 1} 是等比数列；
 （2）求数列 {aₙ} 的前 n 项和 Sₙ。`,
-    type: '解答题',
+    type: '解答',
     answer: '（1）证明见解析；（2）Sₙ = 2ⁿ⁺¹ − n − 2',
     analysis: `（1）由 aₙ₊₁ = 2aₙ + 1 得 aₙ₊₁ + 1 = 2aₙ + 2 = 2(aₙ + 1)；又 a₁ + 1 = 2 ≠ 0，故数列 {aₙ + 1} 是首项为 2、公比为 2 的等比数列。
 （2）由（1）得 aₙ + 1 = 2ⁿ，即 aₙ = 2ⁿ − 1，故 Sₙ = (2 + 2² + … + 2ⁿ) − n = (2ⁿ⁺¹ − 2) − n = 2ⁿ⁺¹ − n − 2。`,
@@ -353,7 +356,7 @@ const CHINESE_QUESTIONS: OrgQuestion[] = [
   seedQuestion(CHINESE, {
     id: 9226,
     stem: '请简要分析文章第二段的论证思路。（4 分）',
-    type: '解答题',
+    type: '解答',
     answer:
       '第二段先指出「非遗进校园」「非遗入景区」等实践在收效之外引发了争论；接着摆出有学者的观点——非遗一旦被抽离原有的生活场景，就可能从「生活方式」退化为「文化符号」，其内在的创造力反而被固化；随后指出这一说法忽略了「非遗从来不是一成不变的」这一基本事实，并以昆曲从草台走向剧场、徽班进京演化为京剧为例加以论证；最后得出「所谓『原汁原味』更多是一种后设的想象」的结论。全段采用「提出争论—引述观点—反驳举例—得出结论」的层进式思路。',
     analysis:
@@ -363,7 +366,7 @@ const CHINESE_QUESTIONS: OrgQuestion[] = [
   seedQuestion(CHINESE, {
     id: 9227,
     stem: '结合文章内容，谈谈你对「活态传承的核心在于为非遗寻找当代的生活场景与意义支点」这句话的理解。（6 分）',
-    type: '解答题',
+    type: '解答',
     answer:
       '①非遗的存在方式是「人」而不是「物」，它的生命力在于被使用、被需要；一旦脱离生活场景，即使被完整记录入库也仍是死去的遗产，因此保护的关键不是静态留存，而是让它在当代继续「活」着。②所谓「寻找当代的生活场景与意义支点」，就是让传统技艺进入现代设计、让民间音乐融入当代创作语汇，为传承提供现实的场合与真实的需求，使传承人有意愿、有场合继续传下去。③这种进入不是削足适履的迎合，而是以传统为资源去回应今天的审美与需求；同时必须以是否承续遗产特有的精神内核与技艺逻辑为边界，否则不过是借非遗之名的文化消费品。',
     analysis: '6 分题，三个要点各 2 分：对「活态」的理解、对「当代场景与意义支点」的具体阐释、对「创新与守界」的把握。意思对即可。',
@@ -389,7 +392,7 @@ const CHINESE_QUESTIONS: OrgQuestion[] = [
   seedQuestion(CHINESE, {
     id: 9229,
     stem: '小说第二段为什么要写「桥」？请简要分析。（4 分）',
-    type: '解答题',
+    type: '解答',
     answer:
       '①从情节看，桥的修通是渡口冷清的直接原因，交代了故事发生的背景与祖父处境变化的外部条件。②从意象看，桥与渡口构成今昔对照：水泥的桥面、咚咚作响的脚步声与铁栏杆，同木船、均匀的桨声形成冷暖分明的对照，形象地写出了传统生活方式被现代交通方式取代的现实。③从人物看，桥衬托了祖父守候的姿态——在桥上人来人往的热闹里，只有他还守着一条空船，为下文雾中远望、「船在，渡口就在」的描写作了铺垫。',
     analysis: '4 分题。答出「交代原因与背景」「与渡口形成今昔对照」「衬托祖父形象并作铺垫」三点，每点 1～2 分，意思对即可。',
@@ -398,7 +401,7 @@ const CHINESE_QUESTIONS: OrgQuestion[] = [
   seedQuestion(CHINESE, {
     id: 9230,
     stem: '文中祖父说「你听」之后，「我」听不见任何声音，祖父却说自己听见了桨声。你如何理解这一处描写？（4 分）',
-    type: '解答题',
+    type: '解答',
     answer:
       '①从实写看，河面空无一人，桨声并不存在，祖父听见的是记忆中的声音，甚至是一种错觉。②从虚写看，桨声是祖父一生劳作的印记，已经化为他身体里的节律，「我划了一辈子桨，一听就知道」写出了技艺与生命融为一体的境界。③这一处描写把祖父对渡口岁月的守护由外在行为升华为内在精神，也暗示这样的声音只有老一辈才听得见，寄托了作者对正在消逝的生活方式的惋惜与敬意。',
     analysis: '4 分题。能从「记忆与错觉（实）」「技艺已内化为生命节律（虚）」「主题上的惋惜与敬意」三个层次作答即可。',
@@ -408,7 +411,7 @@ const CHINESE_QUESTIONS: OrgQuestion[] = [
   seedQuestion(CHINESE, {
     id: 9231,
     stem: '小说以祖父的话「总要有人记得，这河从前是怎么过来的」作结，请探究这句话的丰富意蕴。（5 分）',
-    type: '解答题',
+    type: '解答',
     answer:
       '①表层意蕴：对村里人而言，记住渡口与木船，就是记住一段真实存在过的生活史，记住这河两岸的人曾经怎样往来、怎样生活。②深层意蕴：变化不可阻挡，但被变化取代的东西不应被彻底抹去，「记得」是对过往生活方式的尊重，也是人在时代更替中保持自持的方式。③人物意蕴：这句话虽出自祖父一人之口，却把个人的守望提升为对后辈的嘱托——所谓传承，首先在于记忆的延续。④表达意蕴：以人物语言收束全篇，言近旨远、余味悠长，使小说的悲剧感与温情并存，深化了主题。',
     analysis: '5 分题，答出「记住生活史」「对旧事物的尊重与人的自持」「一代人的嘱托」「以人物语言作结的表达效果」四个层面得满分，意思对即可。',
@@ -464,7 +467,7 @@ const CHINESE_QUESTIONS: OrgQuestion[] = [
     stem: `把文中画线的句子翻译成现代汉语。（8 分）
 （1）既长，知其世家，乃感泣辞母，去之应天府。（4 分）
 （2）其后虽贵，非宾客不重肉，妻子衣食仅能自充。（4 分）`,
-    type: '解答题',
+    type: '解答',
     answer:
       '（1）长大后，他知道了自己的家世，于是感慨流泪，辞别母亲，前往应天府。\n（2）他后来虽然地位显贵，但如果不是招待宾客，吃饭就不上两种以上的肉食，妻子儿女的衣食也仅仅能够自给。',
     analysis:
@@ -474,7 +477,7 @@ const CHINESE_QUESTIONS: OrgQuestion[] = [
   seedQuestion(CHINESE, {
     id: 9236,
     stem: '文中说范仲淹「内刚外和」，请结合文章简要概括这一品质体现在哪些地方。（3 分）',
-    type: '解答题',
+    type: '解答',
     answer:
       '①求学时刻苦自励，昼夜不息，冬夜疲惫以水沃面、粮食不足以糜粥继之而不以为苦，可见其「刚」；②显贵之后生活俭朴，非宾客不重肉，妻子衣食仅能自充，可见其持身之严；③「好施予，泛爱乡族」，以俸禄赡养同族，可见其「和」。',
     analysis: '3 分题，每点 1 分（求学之刚、持身之俭、待族之和），意思对即可。',
@@ -499,7 +502,7 @@ const CHINESE_QUESTIONS: OrgQuestion[] = [
   seedQuestion(CHINESE, {
     id: 9238,
     stem: '「竹喧归浣女，莲动下渔舟」两句历来为人称道，请简要赏析。（6 分）',
-    type: '解答题',
+    type: '解答',
     answer:
       '①语序上，诗人把「竹喧」放在「归浣女」之前、把「莲动」放在「下渔舟」之前，按感知的先后顺序来写：先听到竹林里的喧笑，才想到是浣女归来；先看到莲叶摇动，才知有渔舟下行。因果倒装而更觉真切，画面也有了「先闻其声、后见其人」的层次。②写法上，以「竹喧」「莲动」的动态写人的活动，动静相衬，幽静的山居因此透出生活的热闹与生机，静而不冷。③内容上，浣女、渔舟的暮归与明月、清泉共同构成一幅和谐恬淡的山居晚景图，寄托了诗人对纯朴宁静生活的喜爱与归隐之志。④语言上，两句对仗工整，「喧」「动」以声、以形写人，不着一「人」字而人物自现，含蓄而富有余味。',
     analysis: '6 分题。答出「语序与感官的先后」「以动衬静、动静相生」「人情美与归隐之志」「对仗与含蓄的表达效果」四点中的三点即可得满分，意思对即可。',
@@ -514,7 +517,7 @@ const CHINESE_QUESTIONS: OrgQuestion[] = [
 （1）苏轼《赤壁赋》中，「______，______」两句以蜉蝣与沧海为喻，抒发人生短暂的感慨。
 （2）李白《蜀道难》中，以「______，______」极言蜀道之高险，并接以「使人听此凋朱颜」写其威慑之力。
 （3）杜甫《登高》中，「______，______」两句以落叶与江水写秋景之壮阔，成为千古名句。`,
-    type: '填空题',
+    type: '填空',
     answer: '（1）寄蜉蝣于天地　渺沧海之一粟　（2）蜀道之难　难于上青天　（3）无边落木萧萧下　不尽长江滚滚来',
     analysis: '本题共 3 小题、6 空，每答对一空得 1 分，错字、漏字、多字均不得分。注意「蜉蝣」「渺」「沧」「粟」「萧萧」的写法。',
     difficulty: '容易',
@@ -525,7 +528,7 @@ const CHINESE_QUESTIONS: OrgQuestion[] = [
   seedQuestion(CHINESE, {
     id: 9240,
     stem: '请在文中横线处填入恰当的成语。（4 分）',
-    type: '填空题',
+    type: '填空',
     answer: '①截然不同　②错落有致　③一去不返　④无所适从',
     analysis:
       '①处写两岸风物的变化，宜用「截然不同」；②处写老屋高低不齐而自有格局，宜用「错落有致」；③处指旧日光景不再，宜用「一去不返」；④处写初来者面对慢节奏的手足无措，宜用「无所适从」。答案不唯一，符合语境、合乎成语用法即可。',
@@ -534,7 +537,7 @@ const CHINESE_QUESTIONS: OrgQuestion[] = [
   seedQuestion(CHINESE, {
     id: 9241,
     stem: '文中画线的句子在表述上存在两处问题，请找出并加以修改。（4 分）',
-    type: '解答题',
+    type: '解答',
     answer:
       '①缺主语：「通过……使……」使句子没有主语，应删去「通过」或删去「使」，如改为「这次调研使我们认识到保护运河老街的紧迫性」。②两面对一面：「能否留住这些老屋」包含「能」与「不能」两面，而「关键在于资金投入的持续性」只说了一面，应改为「关键在于资金投入是否具有持续性」，或把前一分句改为「要留住这些老屋」。',
     analysis: '4 分题，每找出一处并改对得 2 分。第一处考查「通过……使……」淹没主语，第二处考查一面对两面。',
@@ -543,7 +546,7 @@ const CHINESE_QUESTIONS: OrgQuestion[] = [
   seedQuestion(CHINESE, {
     id: 9242,
     stem: '请在文中横线处补写恰当的语句，使整段文字语意完整连贯，内容贴切，逻辑严密，每处不超过 15 个字。（4 分）',
-    type: '填空题',
+    type: '填空',
     answer: '①再漫上斑驳的门楣　②四乡的船都要在这里过夜',
     analysis:
       '①处承上文「灯光先染黄了木格窗子」，应写灯光继续照亮门、墙一类的句子，并与下句「也照亮了檐下的青石台阶」构成由高到低的层次；②处要交代夜里卸货后船工需要落脚，才能与下文「谁家的灯亮着，船工就往谁家去」自然衔接。每处 2 分，意思对、字数合乎要求即可。',
@@ -553,7 +556,7 @@ const CHINESE_QUESTIONS: OrgQuestion[] = [
   seedQuestion(CHINESE, {
     id: 9243,
     stem: '请赏析文末「那些灯连成一路，像给老街系上了一串不灭的铃」一句的表达效果。（5 分）',
-    type: '解答题',
+    type: '解答',
     answer:
       '①比喻新奇：把沿街连缀的灯火比作「系在老街上的一串铃」，抓住灯「成串、相连」与铃「成串、有声」的相似点，把视觉上的光转为可以想见的声响，使静态的夜景有了动态与声音。②「不灭」一语双关：既写灯每夜照旧亮起，也暗指老街人的守望与记忆不曾断绝，赋予灯火以象征意味。③与上文「码头早已不用」形成对照，在同一条老街上把冷清的现状与温暖的坚守并置，含蓄地表达了作者对老街与守灯人的敬意，收束全文而余味悠长。',
     analysis: '5 分题，答出「比喻的相似点与表达效果」「『不灭』的双关与象征」「与全文情感的呼应」三点得满分，意思对即可。',
@@ -579,7 +582,7 @@ const CHINESE_QUESTIONS: OrgQuestion[] = [
   seedQuestion(CHINESE, {
     id: 9245,
     stem: '阅读下面的材料，根据要求写作。（60 分）',
-    type: '解答题',
+    type: '解答',
     answer: '（略）符合题意、中心明确、内容充实、结构完整、语言通顺，不少于 800 字。',
     analysis:
       '本题为材料作文。材料给出两种看似对立的看法：一是有些价值只能由「慢」来成全；二是快慢本无优劣，关键在取舍。可切入的角度有：①在效率至上的时代为「慢」辩护，论述耐心、积淀与深耕的意义；②辩证看待快慢，论述「知所先后」的判断力与分寸感；③把快与慢看作相互成就的关系，快是为慢留出空间。评分参照高考作文评分标准：一类卷 54～60 分，二类卷 42～53 分，三类卷 30～41 分，四类卷 29 分以下。',
@@ -1037,21 +1040,21 @@ const CORRECTION_ANSWERS: Array<[string, string]> = [
 
 const ENGLISH_QUESTIONS: OrgQuestion[] = [
   ...LISTENING_A.map(([id, stem, options, answer, analysis]) =>
-    seedQuestion(ENGLISH, { id, stem, options, answer, analysis, type: '单选题', difficulty: '容易', knowledge: ['听力理解'] }),
+    seedQuestion(ENGLISH, { id, stem, options, answer, analysis, type: '单选', difficulty: '容易', knowledge: ['听力理解'] }),
   ),
   ...LISTENING_B.map(([id, stem, options, answer, analysis]) =>
-    seedQuestion(ENGLISH, { id, stem, options, answer, analysis, type: '单选题', difficulty: '中等', knowledge: ['听力理解'] }),
+    seedQuestion(ENGLISH, { id, stem, options, answer, analysis, type: '单选', difficulty: '中等', knowledge: ['听力理解'] }),
   ),
   ...Object.values(READING)
     .flat()
     .map(([id, stem, options, answer, analysis]) =>
-      seedQuestion(ENGLISH, { id, stem, options, answer, analysis, type: '单选题', difficulty: '中等', knowledge: ['阅读理解'] }),
+      seedQuestion(ENGLISH, { id, stem, options, answer, analysis, type: '单选', difficulty: '中等', knowledge: ['阅读理解'] }),
     ),
   ...CLOZE.map(([id, options, answer, analysis]) =>
-    seedQuestion(ENGLISH, { id, stem: '', options, answer, analysis, type: '单选题', difficulty: '中等', knowledge: ['完形填空'] }),
+    seedQuestion(ENGLISH, { id, stem: '', options, answer, analysis, type: '单选', difficulty: '中等', knowledge: ['完形填空'] }),
   ),
   ...GRAMMAR.map(([id, answer, analysis]) =>
-    seedQuestion(ENGLISH, { id, stem: '', answer, analysis, type: '填空题', difficulty: '中等', knowledge: ['时态语态'] }),
+    seedQuestion(ENGLISH, { id, stem: '', answer, analysis, type: '填空', difficulty: '中等', knowledge: ['时态语态'] }),
   ),
   ...Array.from({ length: 10 }, (_, i) => {
     const no = 71 + i
@@ -1061,7 +1064,7 @@ const ENGLISH_QUESTIONS: OrgQuestion[] = [
       stem: '',
       answer,
       analysis,
-      type: '填空题',
+      type: '填空',
       difficulty: '较难',
       knowledge: [no % 2 ? '从句' : '时态语态'],
     })
@@ -1069,7 +1072,7 @@ const ENGLISH_QUESTIONS: OrgQuestion[] = [
   seedQuestion(ENGLISH, {
     id: 9326,
     stem: '假定你是李华，请根据下面的提示给外教 Chris 写一封邮件。（25 分）',
-    type: '解答题',
+    type: '解答',
     answer: `One possible version:
 
 Dear Chris,

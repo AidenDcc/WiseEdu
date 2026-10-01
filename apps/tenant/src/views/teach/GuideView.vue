@@ -35,6 +35,8 @@ import {
   saveTeachDoc,
   toggleTeachDocPublish,
 } from '@/api/org'
+import QuestionOptions from '@/components/question/QuestionOptions.vue'
+import { optionColumnsOf } from '@/utils/question-card'
 import { useBaseData } from '@/composables/useBaseData'
 import { GUIDE_TEMPLATES, makeGuideBlocks } from './teach-templates'
 
@@ -403,7 +405,7 @@ onMounted(async () => {
         <div class="section-title" style="margin-bottom: 10px">题库选题</div>
         <select v-model="bankFilter.type" class="f-select" style="margin-bottom: 8px">
           <option value="">全部题型</option>
-          <option v-for="t in ['单选题', '多选题', '判断题', '填空题', '解答题']" :key="t" :value="t">{{ t }}</option>
+          <option v-for="t in ['单选', '多选', '判断', '填空', '解答']" :key="t" :value="t">{{ t }}</option>
         </select>
         <select v-model="bankFilter.difficulty" class="f-select" style="margin-bottom: 8px">
           <option value="">全部难度</option>
@@ -456,12 +458,14 @@ onMounted(async () => {
                 <RichTextViewer v-if="itemOf(qid)" :content="itemOf(qid)!.stem" tag="span" />
                 <span v-if="itemOf(qid)?.type.includes('填空')">______</span>
               </p>
-              <ul v-if="itemOf(qid)?.options.length" class="te-doc-opts">
-                <li v-for="(opt, oi) in itemOf(qid)!.options" :key="oi">
-                  <span>{{ 'ABCDEF'[oi] }}．</span>
-                  <RichTextViewer :content="opt" tag="span" />
-                </li>
-              </ul>
+              <!-- 讲义正文里的题目不标正确项（学生版是练习，标出来等于给答案） -->
+              <QuestionOptions
+                v-if="itemOf(qid)"
+                class="te-doc-opts"
+                variant="doc"
+                :options="itemOf(qid)!.options"
+                :columns="optionColumnsOf(itemOf(qid)!)"
+              />
               <!-- 学生版只留作答空，教师版才给答案与解析 -->
               <p v-if="!withAnswer" class="gd-answer-line">答：______________________</p>
               <div v-else-if="itemOf(qid)" class="gd-answer">
@@ -677,8 +681,8 @@ onMounted(async () => {
 .te-doc-qs { margin-top: 10px; padding-left: 4px; }
 .te-doc-q { margin-bottom: 10px; }
 .te-doc-stem { font-size: 13.5px; line-height: 1.75; color: var(--ink); }
-.te-doc-opts { margin-top: 4px; display: flex; flex-direction: column; gap: 3px; }
-.te-doc-opts li { display: flex; gap: 6px; font-size: 13px; color: var(--ink-2); line-height: 1.7; }
+/* 选项外观由 QuestionOptions 负责，这里只管与题干的距离 */
+.te-doc-opts { margin-top: 4px; }
 .gd-answer-line { font-size: 13px; color: var(--sub); margin-top: 6px; }
 .gd-answer {
   margin-top: 6px; padding: 8px 10px; border-radius: 8px;

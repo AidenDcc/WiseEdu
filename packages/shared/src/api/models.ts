@@ -163,7 +163,17 @@ export interface TenantDetailModel {
 /* ================ 全局字典（FR-PT-015 / 016） ================ */
 
 /** copyright：机构端首页页脚文案，每条 name 为一段（版权主体 / 备案号 / 客服方式 …），按排序拼接展示 */
-export type DictTypeKey = 'subject' | 'grade' | 'term' | 'questionType' | 'difficulty' | 'examType' | 'copyright'
+export type DictTypeKey =
+  | 'subject'
+  | 'grade'
+  | 'term'
+  | 'questionType'
+  | 'difficulty'
+  | 'examType'
+  | 'copyright'
+  /* 题库筛选维度：杯赛名称、题目来源地区（地区与考纲字典，见大纲 P-04-05） */
+  | 'competition'
+  | 'region'
 
 export interface DictItem {
   id: number
@@ -182,6 +192,11 @@ export interface DictItem {
   dateTo?: string
   answerType?: string
   coefficient?: number
+  /**
+   * 适用学科（目前仅 questionType 使用）：留空 = 全学科通用题型，
+   * 有值 = 学科专属题型（如「完形填空」只属于英语），选学科后才出现在题型选项里。
+   */
+  subjects?: string[]
 }
 
 /* 知识点/考点树（最多 6 级） */
@@ -384,8 +399,28 @@ export interface PlatformNotification {
 
 /* ================ 机构端业务（FR-TM / FR-PP / FR-JC / FR-FL / FR-FX / FR-PM / FR-SQ / FR-OS / FR-GN-030） ================ */
 
-export type QuestionStatus = 'draft' | 'checking' | 'pending' | 'approved' | 'rejected'
-export type QuestionSource = '手动录入' | 'AI 出题' | 'AI 变式' | '拍照识别' | '文档导入' | '教辅导入'
+/**
+ * 题目状态。`offline`（已下架）是终态的旁支：题目仍留在机构题库里、可随时上架，
+ * 但退出可组卷池 —— 仓内「能否入卷」的判断统一是 `status === 'approved'`，加这一档
+ * 后各处自动生效，无需逐个补判断。
+ */
+export type QuestionStatus = 'draft' | 'checking' | 'pending' | 'approved' | 'rejected' | 'offline'
+export type QuestionSource = '手动录入' | 'AI 出题' | 'AI 变式' | '拍照识别' | '文档导入' | '教辅导入' | '名校考试'
+/**
+ * 来源的候选取值（与 `QuestionSource` 同值域）。
+ *
+ * 之所以给一份「值」而不只是「类型」：筛选项与录题表单都需要下拉候选，
+ * 原先组卷工作台自己抄了一份 `QUESTION_SOURCES`，加取值时必然漏改一处。
+ */
+export const QUESTION_SOURCE_OPTIONS: QuestionSource[] = [
+  '手动录入',
+  'AI 出题',
+  'AI 变式',
+  '拍照识别',
+  '文档导入',
+  '教辅导入',
+  '名校考试',
+]
 export type QuestionLibrary = 'personal' | 'org' | 'wrong'
 
 export interface AiCheckResult {
@@ -393,6 +428,43 @@ export interface AiCheckResult {
   pass: boolean
   note: string
   fixed?: string
+}
+
+/** 填空题的一空：标准答案 + 等价写法，两者都是富文本（可含公式 / 图片） */
+export interface FillBlankAnswer {
+  /** 该空的标准答案 */
+  value: string
+  /** 等价写法（多个以顿号 / 逗号分隔），没有则为空串 */
+  equivalents: string
+}
+
+/**
+ * 选项排布：1 = 单行显示（每行一个，缺省），2 = 一行 2 个，4 = 一行 4 个。
+ * 与 `OrgQuestion.optionColumns` 同一个口径，四处编辑入口（录题中心 / AI 出题 / AI 识题 /
+ * 文档识别）写进去的必须是同一个联合类型，故放在这里由 models 统一给出。
+ */
+export type OptionColumns = 1 | 2 | 4
+
+/**
+ * 拍照识别结果的校对改动：AI 识题结果卡片的「编辑」保存后，随决策一并提交给
+ * `decidePhotoResult`。
+ *
+ * 每个字段都是**选填**，语义是「教师改过才带」：`undefined` = 没动，保留识别原值。
+ * 题型 / 难度 / 知识点以前要么改不了、要么改了也不落库（`decidePhotoResult` 从没写过），
+ * 现在一并回传并由决策链路落回结果行。
+ */
+export interface PhotoResultEdit {
+  stem?: string
+  options?: string[]
+  answer?: string
+  analysis?: string
+  subject?: string
+  grade?: string
+  type?: string
+  difficulty?: string
+  knowledge?: string[]
+  optionColumns?: OptionColumns
+  fillAnswers?: FillBlankAnswer[]
 }
 
 export interface OrgQuestion {
@@ -414,6 +486,16 @@ export interface OrgQuestion {
   options: string[]
   answer: string
   analysis: string
+  /**
+   * 选项排布。仅选择题 / 多选题使用；试卷侧作为「题目级覆盖」，缺省时回落到纸张预设的列数。
+   */
+  optionColumns?: OptionColumns
+  /**
+   * 填空题各空的答案（富文本，可含公式 / 图片）。缺省表示存量题 —— 此时从 `answer`
+   * 按「｜」拆分回退，见 CreateView 的载入分支。`answer` 仍是各空纯文本的连接串，
+   * 供列表 / 试卷 / 导出等既有渲染端直接展示。
+   */
+  fillAnswers?: FillBlankAnswer[]
   variantOf?: number
   useCount: number
   updatedAt: string
@@ -421,6 +503,10 @@ export interface OrgQuestion {
   term?: string
   /** 考试类型（字典表 examType） */
   examType?: string
+  /** 杯赛名称（字典表 competition），非杯赛题为空 */
+  competition?: string
+  /** 题目来源地区（字典表 region） */
+  region?: string
   aiChecks?: AiCheckResult[]
   aiSuspects?: string[]
   reviewOpinion?: string
@@ -1289,7 +1375,7 @@ export interface ComposeSearchIntent {
   subject: string
   /** 年级；无法判断为空串 */
   grade: string
-  /** 题型，取值限于 单选题 / 多选题 / 判断题 / 填空题 / 解答题；未提及为空数组 */
+  /** 题型，取值限于 单选 / 多选 / 判断 / 填空 / 解答 / 计算 / 证明 / 连线 / 作文；未提及为空数组 */
   questionTypes: string[]
   /** 难度，取值限于 容易 / 较易 / 中等 / 较难 / 困难；未提及为空串 */
   difficulty: string

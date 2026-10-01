@@ -417,7 +417,7 @@ const TASK_SEEDS: Array<{ scene: string; title: string; status: AiCenterTask['st
   { scene: '讲义', title: '《函数概念与性质》讲义初稿', status: 'success', elapsed: 55, tokens: 24800, outputCount: 1 },
   { scene: '识题', title: '批量拍照识题 · 6 张', status: 'success', elapsed: 38, tokens: 15800, outputCount: 6 },
   { scene: '学情', title: '高一(1)班 9 月学情报告', status: 'success', elapsed: 64, tokens: 41200, outputCount: 1 },
-  { scene: '阅卷', title: '期中考试解答题 AI 批改', status: 'reviewing', elapsed: 118, tokens: 66800, outputCount: 45 },
+  { scene: '阅卷', title: '期中考试解答 AI 批改', status: 'reviewing', elapsed: 118, tokens: 66800, outputCount: 45 },
   { scene: '课件', title: '《平面向量》课件生成', status: 'failed', elapsed: 12, tokens: 2100, outputCount: 0 },
   { scene: '出题', title: '「文言文阅读」出题 · 8 题', status: 'success', elapsed: 46, tokens: 20400, outputCount: 8 },
 ]

@@ -377,7 +377,7 @@ onMounted(load)
         <template #left>
           <select v-model="bankFilter.type" class="f-select">
             <option value="">全部题型</option>
-            <option v-for="t in ['单选题', '多选题', '判断题', '填空题', '解答题']" :key="t" :value="t">{{ t }}</option>
+            <option v-for="t in ['单选', '多选', '判断', '填空', '解答']" :key="t" :value="t">{{ t }}</option>
           </select>
           <select v-model="bankFilter.difficulty" class="f-select">
             <option value="">全部难度</option>

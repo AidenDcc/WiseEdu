@@ -25,7 +25,7 @@ export const menus: MenuItem[] = [
     children: [
       { path: '/question/bank', title: '题库管理' },
       { path: '/question/create', title: '录题中心' },
-      { path: '/question/photo', title: 'AI 拍照识题' },
+      { path: '/question/photo', title: 'AI 识题' },
       { path: '/question/review', title: '题目审核中心' },
     ],
   },

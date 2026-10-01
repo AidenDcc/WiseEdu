@@ -16,6 +16,11 @@ import type { FilterRowDef } from './types'
 const props = withDefaults(
   defineProps<{
     rows: FilterRowDef[]
+    /**
+     * 收在「更多查询」里的次要条件。与 `rows` 只差一个折叠开关：选中值同样进头部汇总、
+     * 同样被「清空」清掉 —— 筛选生效了却看不见，比少一个筛选项更糟。
+     */
+    moreRows?: FilterRowDef[]
     /** 每个 key 对应的已选值 */
     modelValue: Record<string, string[]>
     defaultOpen?: boolean
@@ -27,16 +32,19 @@ const props = withDefaults(
 const emit = defineEmits<{ 'update:modelValue': [value: Record<string, string[]>] }>()
 
 const open = ref(props.defaultOpen)
+const moreOpen = ref(false)
 
 /** 折叠态每个条件值串的最大展示长度，超出省略（沿用 BankView 的取值） */
 const COLLAPSE_MAX = 18
+
+const moreRows = computed(() => props.moreRows ?? [])
 
 function selectedOf(key: string): string[] {
   return props.modelValue[key] ?? []
 }
 
 const activeRows = computed(() =>
-  props.rows
+  [...props.rows, ...moreRows.value]
     .filter((row) => selectedOf(row.key).length > 0)
     .map((row) => {
       // 摘要跟着 optionLabels 走，否则展开态写着「（已停用）」、折叠态却只剩原值
@@ -47,13 +55,16 @@ const activeRows = computed(() =>
     }),
 )
 
+/** 更多查询已选条数：收在折叠里的条件只能靠这个角标露出，否则用户看不出列表为什么变短了 */
+const moreCount = computed(() => moreRows.value.filter((row) => selectedOf(row.key).length > 0).length)
+
 function onRowChange(key: string, value: string[]) {
   emit('update:modelValue', { ...props.modelValue, [key]: value })
 }
 
 function clearAll() {
   const next: Record<string, string[]> = {}
-  for (const row of props.rows) next[row.key] = []
+  for (const row of [...props.rows, ...moreRows.value]) next[row.key] = []
   emit('update:modelValue', next)
 }
 </script>
@@ -91,6 +102,27 @@ function clearAll() {
         :model-value="selectedOf(row.key)"
         @update:model-value="onRowChange(row.key, $event)"
       />
+
+      <template v-if="moreRows.length">
+        <button class="fp-more" type="button" @click="moreOpen = !moreOpen">
+          {{ moreOpen ? '收起更多查询' : '更多查询' }}
+          <span v-if="moreCount" class="fp-more-badge">{{ moreCount }}</span>
+          <AppIcon name="chevron-down" :size="14" class="fp-caret" :class="{ up: moreOpen }" />
+        </button>
+        <template v-if="moreOpen">
+          <AppFilterChips
+            v-for="row in moreRows"
+            :key="row.key"
+            :label="row.label"
+            :options="row.options"
+            :multiple="row.multiple !== false"
+            :option-labels="row.optionLabels"
+            :model-value="selectedOf(row.key)"
+            @update:model-value="onRowChange(row.key, $event)"
+          />
+        </template>
+      </template>
+
       <slot name="extra" />
     </div>
   </div>
@@ -180,5 +212,34 @@ function clearAll() {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* 「更多查询」折叠开关：与上方条件行左对齐（不放行首标签槽里，它是分组的开头不是一组条件） */
+.fp-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  border: none;
+  background: transparent;
+  padding: 2px 0;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--brand);
+  cursor: pointer;
+}
+.fp-more:hover { color: var(--brand-deep); }
+.fp-more-badge {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
 }
 </style>

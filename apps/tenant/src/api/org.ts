@@ -52,7 +52,7 @@ import type {
   TextbookOption,
   VideoClip,
 } from '@aiteach/shared'
-import type { PhotoTask, RecognizedImportQuestion } from '@aiteach/shared'
+import type { PhotoResultEdit, PhotoTask, RecognizedImportQuestion } from '@aiteach/shared'
 
 function withQuery<T extends object>(url: string, params: T): string {
   const search = new URLSearchParams()
@@ -96,6 +96,10 @@ export function reviewQuestion(id: number, pass: boolean, opinion: string) {
 export function variantOf(id: number) {
   return request<OrgQuestion>('/tenant/questions/variant', { method: 'POST', data: { id } })
 }
+/** 上架 / 下架：`approved ⇄ offline`，返回更新后的题目（列表按返回值渲染，不本地取反） */
+export function toggleQuestionOffline(id: number) {
+  return request<OrgQuestion>('/tenant/questions/offline', { method: 'POST', data: { id } })
+}
 
 /* ===== 全局搜索（FR-GN-026） ===== */
 /** 一次检索返回题目 / 试卷 / 同步备课 / 视频 / 我的文件五个分类，搜索面板按页签展示 */
@@ -121,6 +125,8 @@ export interface TenantDictItem {
   name: string
   sort: number
   enabled: boolean
+  /** 学科专属项（如「完形填空」只属于英语）；留空即全学科通用 */
+  subjects?: string[]
 }
 export function fetchTenantDict(type: string) {
   return request<TenantDictItem[]>(withQuery('/tenant/dict', { type }))
@@ -166,7 +172,7 @@ export function decidePhoto(
   resultId: string,
   decision: 'import' | 'draft' | 'drop',
   /** 校对区改过的内容，随决策一并提交（此前未回传，改动被静默丢弃） */
-  edit?: { stem?: string; options?: string[]; answer?: string; analysis?: string; subject?: string; grade?: string },
+  edit?: PhotoResultEdit,
 ) {
   return request<PhotoTask>('/tenant/photo/decide', { method: 'POST', data: { taskId, resultId, decision, edit } })
 }

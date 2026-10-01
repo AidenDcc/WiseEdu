@@ -12,7 +12,7 @@ import { exportPaperDoc, exportPaperPdf, type ExportVersion } from '@/utils/pape
 
 const router = useRouter()
 
-const { subjects, grades, questionTypes, ensure, pick } = useBaseData()
+const { subjects, grades, questionTypesFor, ensure, pick, withCurrent } = useBaseData()
 
 const papers = ref<OrgPaper[]>([])
 const questions = ref<OrgQuestion[]>([])
@@ -65,9 +65,9 @@ const aiForm = reactive({
   subject: '数学',
   grade: '高一',
   structure: [
-    { type: '单选题', count: 8, score: 5 },
-    { type: '填空题', count: 4, score: 5 },
-    { type: '解答题', count: 2, score: 12 },
+    { type: '单选', count: 8, score: 5 },
+    { type: '填空', count: 4, score: 5 },
+    { type: '解答', count: 2, score: 12 },
   ],
 })
 const aiRunning = ref(false)
@@ -273,7 +273,8 @@ onMounted(load)
         <label class="f-label">卷面结构（按题型设置题数与单题分值）</label>
         <div v-for="(row, i) in aiForm.structure" :key="i" class="struct-row">
           <select v-model="row.type" class="f-select" style="width: 110px">
-            <option v-for="t in questionTypes" :key="t" :value="t">{{ t }}</option>
+            <!-- 题型随学科收窄（英语才有完形填空 / 七选五 / 短文改错）；已选值并入，换学科不会渲染成空白 -->
+            <option v-for="t in withCurrent(questionTypesFor(aiForm.subject), row.type)" :key="t" :value="t">{{ t }}</option>
           </select>
           <input v-model.number="row.count" type="number" min="1" class="f-input" style="width: 84px" />
           <span class="f-hint">题 ×</span>
@@ -281,7 +282,7 @@ onMounted(load)
           <span class="f-hint">分/题</span>
           <button class="mini-btn danger" type="button" :disabled="aiForm.structure.length <= 1" @click="aiForm.structure.splice(i, 1)">删除</button>
         </div>
-        <button class="btn btn-ghost btn-sm" type="button" :disabled="aiForm.structure.length >= 8" @click="aiForm.structure.push({ type: '单选题', count: 4, score: 5 })">
+        <button class="btn btn-ghost btn-sm" type="button" :disabled="aiForm.structure.length >= 8" @click="aiForm.structure.push({ type: '单选', count: 4, score: 5 })">
           <AppIcon name="plus" :size="14" /> 添加大题
         </button>
         <p class="f-hint">预计总分：{{ aiForm.structure.reduce((s, r) => s + r.count * r.score, 0) }} 分 · AI 优先从已入库题目抽取，不足时智能生成补齐</p>
@@ -317,7 +318,7 @@ onMounted(load)
       <div class="f-field">
         <label class="f-label">卷面版本</label>
         <select v-model="exportVersion" class="f-select">
-          <option value="student">学生版（只有题目，解答题留作答空白）</option>
+          <option value="student">学生版（只有题目，解答留作答空白）</option>
           <option value="teacher">教师版（附答案与解析）</option>
           <option value="answer">纯答案页</option>
         </select>

@@ -14,6 +14,7 @@
 import type { OrgPaper, OrgQuestion } from '@aiteach/shared'
 import { isRichContent, sanitizeRichHtml } from '@aiteach/shared'
 import { ANSWER_LINES } from '@/components/paper/paper-layouts'
+import { isJudgeNoOptions, judgeAnswerText, optionColumnsOf } from '@/utils/question-card'
 
 /** 学生版（只有题）/ 教师版（附答案与解析）/ 纯答案页 */
 export type ExportVersion = 'student' | 'teacher' | 'answer'
@@ -56,6 +57,20 @@ function richHtml(content: string): string {
 
 const LETTERS = 'ABCDEF'
 
+/** 选项序号：判断题按卷面习惯用 √ / ×，其余题型用 A/B/C…（与预览的 PaperBlock 同一口径） */
+function optionMark(type: string, index: number): string {
+  return type === '判断' ? (index === 0 ? '√' : '×') : LETTERS[index] ?? ''
+}
+
+/**
+ * 答案在纸面上的写法：无选项判断题归一到「对 / 错」（库里可能存 A/B），
+ * 其余题型原样（客观题是字母，主观题是富文本，交给 richHtml 转义）。
+ */
+function answerHtml(item: OrgQuestion): string {
+  const text = isJudgeNoOptions(item) ? judgeAnswerText(item.answer) : item.answer
+  return richHtml(text)
+}
+
 /** 排版共用样式：Word 与打印窗口共用，保证两条导出路径长得一样 */
 function baseCss(): string {
   return `
@@ -78,6 +93,9 @@ function baseCss(): string {
     .q-opt { margin: 4px 0 0 22px; }
     .q-opt-line { display: block; }
     .q-opt-letter { font-weight: bold; margin-right: 4px; }
+    /* 一行 N 个：由题目自身的选项排布决定，靠 inline-block 宽度分列（Word 对 grid / flex 支持不稳） */
+    .q-opt.c2 .q-opt-line { display: inline-block; width: 49%; vertical-align: top; }
+    .q-opt.c4 .q-opt-line { display: inline-block; width: 24%; vertical-align: top; }
     .q-ans { margin: 6px 0 0 22px; font-size: 10.5pt; color: #0a5; border-left: 3px solid #0a5; padding-left: 8px; }
     .q-space { height: 60px; border-bottom: 1px dashed #bbb; margin: 8px 0 0 22px; }
     .card-title { font-family: "Heiti SC", "Microsoft YaHei", sans-serif; font-size: 13pt; margin: 20px 0 8px; }
@@ -131,18 +149,20 @@ function questionHtml(q: ExportQuestion, teacher: boolean): string {
 
   const score = `<span class="q-score">（${q.score} 分）</span>`
   const stem = `<span class="q-stem">${richHtml(item.stem)}</span>`
+  const columns = optionColumnsOf(item)
   const options = item.options.length
-    ? `<div class="q-opt">${item.options
+    ? `<div class="q-opt${columns > 1 ? ` c${columns}` : ''}">${item.options
         .map(
           (opt, i) =>
-            `<span class="q-opt-line"><span class="q-opt-letter">${LETTERS[i]}.</span>${richHtml(opt)}</span>`,
+            `<span class="q-opt-line"><span class="q-opt-letter">${optionMark(item.type, i)}.</span>${richHtml(opt)}</span>`,
         )
         .join('')}</div>`
     : ''
 
-  /* 学生版给解答题留作答空白：填空 2 行、其余按分值给高度 */
+  /* 学生版给解答题留作答空白：填空 2 行、其余按分值给高度。
+     无选项判断不留 —— 它在题干前的（　　）里作答（见 isJudgeNoOptions）。 */
   let space = ''
-  if (!teacher && item.options.length === 0) {
+  if (!teacher && item.options.length === 0 && !isJudgeNoOptions(item)) {
     const lines = item.type.includes('填空') ? ANSWER_LINES : 0
     space = lines
       ? `<div class="q-space" style="height:${lines * 26}px"></div>`
@@ -151,7 +171,7 @@ function questionHtml(q: ExportQuestion, teacher: boolean): string {
 
   const answer =
     teacher && (item.answer || item.analysis)
-      ? `<div class="q-ans"><b>答案：</b>${richHtml(item.answer) || '—'}${
+      ? `<div class="q-ans"><b>答案：</b>${answerHtml(item) || '—'}${
           item.analysis ? `<br><b>解析：</b>${richHtml(item.analysis)}` : ''
         }</div>`
       : ''
@@ -163,7 +183,7 @@ function questionHtml(q: ExportQuestion, teacher: boolean): string {
 function answerOnlyHtml(q: ExportQuestion): string {
   const item = q.item
   if (!item) return `<tr><td class="no">${q.no}</td><td>题目已不存在</td></tr>`
-  const answer = item.options.length ? item.answer : richHtml(item.answer) || '—'
+  const answer = item.options.length ? item.answer : answerHtml(item) || '—'
   return `<tr><td class="no">${q.no}</td><td>${answer}</td></tr>`
 }
 

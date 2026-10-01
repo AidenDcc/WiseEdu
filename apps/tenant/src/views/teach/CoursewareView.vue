@@ -33,6 +33,8 @@ import {
   saveTeachDoc,
   toggleTeachDocPublish,
 } from '@/api/org'
+import QuestionOptions from '@/components/question/QuestionOptions.vue'
+import { optionColumnsOf } from '@/utils/question-card'
 import { useBaseData } from '@/composables/useBaseData'
 import { COURSEWARE_TEMPLATES, SLIDE_LAYOUTS, makeSlides } from './teach-templates'
 
@@ -460,12 +462,13 @@ onMounted(async () => {
                   <RichTextViewer :content="itemOf(activeSlide.questionId)!.stem" tag="span" />
                   <span v-if="itemOf(activeSlide.questionId)!.type.includes('填空')">______</span>
                 </p>
-                <ul class="cw-qopts">
-                  <li v-for="(opt, oi) in itemOf(activeSlide.questionId)!.options" :key="oi">
-                    <span>{{ 'ABCDEF'[oi] }}．</span>
-                    <RichTextViewer :content="opt" tag="span" />
-                  </li>
-                </ul>
+                <!-- 课件里的例题不标正确项（讲评时由老师点出，先标出来学生一眼就看到了） -->
+                <QuestionOptions
+                  class="cw-qopts"
+                  variant="doc"
+                  :options="itemOf(activeSlide.questionId)!.options"
+                  :columns="optionColumnsOf(itemOf(activeSlide.questionId)!)"
+                />
               </div>
               <p v-else class="cw-mute">右侧「题库选题」中挑选一道题作为本页例题</p>
             </template>
@@ -528,7 +531,7 @@ onMounted(async () => {
         <div class="section-title" style="margin-bottom: 8px">题库选题</div>
         <select v-model="bankFilter.type" class="f-select" style="margin-bottom: 8px">
           <option value="">全部题型</option>
-          <option v-for="t in ['单选题', '多选题', '判断题', '填空题', '解答题']" :key="t" :value="t">{{ t }}</option>
+          <option v-for="t in ['单选', '多选', '判断', '填空', '解答']" :key="t" :value="t">{{ t }}</option>
         </select>
         <select v-model="bankFilter.difficulty" class="f-select" style="margin-bottom: 8px">
           <option value="">全部难度</option>
@@ -575,12 +578,12 @@ onMounted(async () => {
               <p class="cw-qstem">
                 <RichTextViewer :content="itemOf(doc.slides[showIndex].questionId)!.stem" tag="span" />
               </p>
-              <ul class="cw-qopts">
-                <li v-for="(opt, oi) in itemOf(doc.slides[showIndex].questionId)!.options" :key="oi">
-                  <span>{{ 'ABCDEF'[oi] }}．</span>
-                  <RichTextViewer :content="opt" tag="span" />
-                </li>
-              </ul>
+              <QuestionOptions
+                class="cw-qopts"
+                variant="doc"
+                :options="itemOf(doc.slides[showIndex].questionId)!.options"
+                :columns="optionColumnsOf(itemOf(doc.slides[showIndex].questionId)!)"
+              />
             </div>
             <p v-else class="cw-mute">本页未关联题目</p>
           </template>
@@ -802,8 +805,8 @@ onMounted(async () => {
 .cw-qbox { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; background: #fbfdfd; overflow: auto; }
 .cw-qmeta { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
 .cw-qstem { font-size: 15px; line-height: 1.75; color: var(--ink); }
-.cw-qopts { margin-top: 8px; display: flex; flex-direction: column; gap: 5px; }
-.cw-qopts li { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--ink-2); line-height: 1.6; }
+/* 选项外观由 QuestionOptions 负责，这里只管与题干的距离 */
+.cw-qopts { margin-top: 8px; }
 .cw-tip { font-size: 11.5px; color: var(--sub); }
 .cw-empty { padding: 40px; text-align: center; color: var(--sub); font-size: 13px; }
 

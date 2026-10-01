@@ -3,6 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import { AppIcon, QUESTION_STATUS_TEXT, RichTextViewer, showToast, truncateRich } from '@aiteach/shared'
 import type { OrgQuestion } from '@aiteach/shared'
 import { fetchQuestions, reviewQuestion } from '@/api/org'
+import QuestionOptions from '@/components/question/QuestionOptions.vue'
+import { isJudgeNoOptions, judgeAnswerText, optionColumnsOf } from '@/utils/question-card'
 
 const all = ref<OrgQuestion[]>([])
 const opinion = ref('')
@@ -101,15 +103,19 @@ onMounted(load)
           <span v-for="k in active.knowledge" :key="k" class="tag tag-gray">{{ k }}</span>
         </div>
         <RichTextViewer class="pv-stem" :content="active.stem" />
-        <ul v-if="active.options.length" class="pv-options">
-          <li v-for="(opt, i) in active.options" :key="i" :class="{ right: active.answer.includes('ABCDEF'[i]) }">
-            {{ 'ABCDEF'[i] }}. <RichTextViewer :content="opt" tag="span" />
-          </li>
-        </ul>
+        <QuestionOptions
+          class="pv-options"
+          variant="soft"
+          :options="active.options"
+          :answer="active.answer"
+          :columns="optionColumnsOf(active)"
+        />
         <div class="pv-answer">
           <span class="tag tag-green">答案</span>
-          <!-- 客观题答案是字母；问答题答案是富文本（公式/插图） -->
-          <template v-if="active.options.length">{{ active.answer }}</template>
+          <!-- 客观题答案是字母（无选项判断题是「对 / 错」）；问答题答案是富文本（公式/插图） -->
+          <template v-if="active.options.length || isJudgeNoOptions(active)">
+            {{ isJudgeNoOptions(active) ? judgeAnswerText(active.answer) : active.answer }}
+          </template>
           <RichTextViewer v-else :content="active.answer" tag="span" empty="—" />
         </div>
         <p class="pv-analysis"><b>解析：</b><RichTextViewer :content="active.analysis" tag="span" /></p>
@@ -185,9 +191,8 @@ onMounted(load)
 .preview-panel { padding: 18px 20px; }
 .pv-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .pv-stem { font-size: 14.5px; color: var(--ink); line-height: 1.8; margin-bottom: 12px; }
-.pv-options { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
-.pv-options li { background: #f7fafa; border-radius: 8px; padding: 9px 12px; font-size: 13.5px; color: var(--ink-2); }
-.pv-options li.right { border-left: 3px solid var(--success); color: var(--success); font-weight: 600; }
+/* 选项外观由 QuestionOptions 负责，这里只管与下方答案行的距离 */
+.pv-options { margin-bottom: 12px; }
 .pv-answer { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; color: var(--success); margin-bottom: 10px; }
 .pv-analysis { font-size: 13px; color: var(--ink-2); line-height: 1.7; }
 .pv-variant { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 12.5px; color: var(--brand-deep); }

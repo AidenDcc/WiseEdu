@@ -12,6 +12,8 @@
  *    却没打开面板，用起来会觉得「点不动」。
  * 3. 位置在拖动结束与窗口尺寸变化时都重新钳制到视口内，避免窗口缩小后按钮留在视口外
  *    再也点不到；位置写入 localStorage 记忆，键名沿用 `aiteach:<appName>:<thing>` 规范。
+ * 4. 松手后水平方向吸附到更近的一侧（见 snapToSide）。纵向位置完全交给用户 —— 按钮是
+ *    贴边停靠的，左右各留一个固定停靠位，比停在屏幕中间既挡内容又不好再拖回来强。
  *
  * 首帧位置在 setup 阶段就算好（元素尺寸由 CSS 固定，作为参数传入），
  * 否则刷新时会先闪一下默认位置再跳到记忆位置。
@@ -93,11 +95,24 @@ export function useDraggableFab(
     }
   }
 
+  /**
+   * 吸附：按钮中心在视口左半边就贴左边距，否则贴右边距；纵向不动。
+   * 视口窄到放不下贴边位置时（右侧 left 会小于 MARGIN）退回 MARGIN，至少保证能点到。
+   */
+  function snapToSide(target: StoredPosition): StoredPosition {
+    const { width } = currentSize()
+    const right = Math.max(window.innerWidth - width - MARGIN, MARGIN)
+    const left = target.left + width / 2 <= window.innerWidth / 2 ? MARGIN : right
+    return clamp({ ...target, left })
+  }
+
   function defaultPosition(): StoredPosition {
-    return clamp({
-      left: window.innerWidth - defaultRight - size,
-      top: window.innerHeight - defaultBottom - size,
-    })
+    return snapToSide(
+      clamp({
+        left: window.innerWidth - defaultRight - size,
+        top: window.innerHeight - defaultBottom - size,
+      }),
+    )
   }
 
   /** 读取记忆位置；结构非法（改坏 / 旧版本）时当作没有记忆，退回默认位置 */
@@ -115,7 +130,8 @@ export function useDraggableFab(
         return null
       }
       const { left, top } = parsed as StoredPosition
-      return Number.isFinite(left) && Number.isFinite(top) ? clamp({ left, top }) : null
+      /* 也过一遍吸附：早期版本存下的位置可能停在屏幕中间，读回来时顺手纠正 */
+      return Number.isFinite(left) && Number.isFinite(top) ? snapToSide(clamp({ left, top })) : null
     } catch {
       return null
     }
@@ -129,9 +145,9 @@ export function useDraggableFab(
     }
   }
 
-  /** 窗口尺寸变化后按钮可能落到视口外，重新钳制一次 */
+  /** 窗口尺寸变化后按钮可能落到视口外，重新钳制并归位到最近的边 */
   function onResize(): void {
-    position.value = clamp(position.value)
+    position.value = snapToSide(position.value)
   }
 
   function onPointerDown(event: PointerEvent): void {
@@ -166,8 +182,11 @@ export function useDraggableFab(
       /* 未持有 capture（pointercancel 之后）时释放会抛错 */
     }
     activePointer = -1
-    /* 只在真的拖过之后落盘，避免每次点击都写一次 localStorage */
-    if (moved) persist()
+    /* 真的拖过才吸附并落盘：没拖过（纯点击）不该把按钮弹去边上，也避免每次点击写 localStorage */
+    if (moved) {
+      position.value = snapToSide(position.value)
+      persist()
+    }
     /* moved 不复位：紧跟其后的 click 要靠它认出「这次是拖拽」，由 consumeDrag() 复位 */
   }
 

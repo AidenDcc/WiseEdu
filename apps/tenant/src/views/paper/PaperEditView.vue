@@ -54,7 +54,7 @@ import { exportPaperDoc, exportPaperPdf, type ExportVersion } from '@/utils/pape
 
 const route = useRoute()
 const router = useRouter()
-const { subjects, grades, questionTypes, difficulties, ensure, pick } = useBaseData()
+const { subjects, grades, questionTypesFor, difficulties, ensure, pick, withCurrent } = useBaseData()
 const basket = useComposeBasket()
 
 /* ================= 卷面数据 ================= */
@@ -101,7 +101,7 @@ const objectiveScore = computed(() =>
       sum +
       row.questions.reduce((t, q) => {
         const item = itemOf(q.questionId)
-        return t + (item && ['单选题', '多选题', '判断题'].includes(item.type) ? Number(q.score) || 0 : 0)
+        return t + (item && ['单选', '多选', '判断'].includes(item.type) ? Number(q.score) || 0 : 0)
       }, 0),
     0,
   ),
@@ -599,11 +599,11 @@ function parseImportText(text: string): ParsedItem[] {
       if (!stem) return null
       const type = options.length
         ? /[（(]\s*[）)]/.test(stem) || options.length >= 4
-          ? '单选题'
-          : '多选题'
+          ? '单选'
+          : '多选'
         : /_{2,}|＿{2,}|（\s*）/.test(stem)
-          ? '填空题'
-          : '解答题'
+          ? '填空'
+          : '解答'
       return { stem, type, options }
     })
     .filter((row): row is ParsedItem => row !== null)
@@ -1315,7 +1315,8 @@ function mmOf(px: number): number {
             <div class="pe-filters">
               <select v-model="bankFilter.type" class="f-select">
                 <option value="">全部题型</option>
-                <option v-for="t in questionTypes" :key="t" :value="t">{{ t }}</option>
+                <!-- 题型随试卷学科收窄（英语才有完形填空 / 七选五 / 短文改错）；已选值并入，换学科不会渲染成空白 -->
+                <option v-for="t in withCurrent(questionTypesFor(form.subject), bankFilter.type)" :key="t" :value="t">{{ t }}</option>
               </select>
               <select v-model="bankFilter.difficulty" class="f-select">
                 <option value="">全部难度</option>
