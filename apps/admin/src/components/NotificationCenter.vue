@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { AppIcon, showToast, ApiError } from '@aiteach/shared'
+import { AppIcon, showToast, ApiError, AppDrawer } from '@aiteach/shared'
 import type { PlatformNotification } from '@aiteach/shared'
-import AppDrawer from '@/components/ui/AppDrawer.vue'
 import { fetchNotifications, markAllNotificationsRead, markNotificationRead } from '@/api/platform'
 
 const props = defineProps<{ open: boolean }>()

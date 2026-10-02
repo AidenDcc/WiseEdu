@@ -7,11 +7,9 @@
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppFilterChips, AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, AppSegmented, CLASS_NAMES, HOMEWORK_STATUS_TEXT, RichTextViewer, showToast, truncateRich } from '@aiteach/shared'
+import { AppFilterChips, AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, AppSegmented, appConfirm, CLASS_NAMES, HOMEWORK_STATUS_TEXT, RichTextViewer, showToast, truncateRich, AppModal, AppDrawer } from '@aiteach/shared'
 import type { FilterRowDef } from '@aiteach/shared'
 import type { Homework, HomeworkSubmission, OrgPaper, OrgQuestion } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
-import AppDrawer from '@/components/ui/AppDrawer.vue'
 import {
   closeHomework,
   deleteHomework,
@@ -194,7 +192,7 @@ async function submitHw() {
 }
 
 async function onCloseHw(hw: Homework) {
-  if (!window.confirm(`截止《${hw.name}》？截止后学生不可再提交`)) return
+  if (!(await appConfirm(`截止《${hw.name}》？截止后学生不可再提交`, { type: 'warning' }))) return
   try {
     await closeHomework(hw.id)
     await loadList()
@@ -206,7 +204,7 @@ async function onCloseHw(hw: Homework) {
 }
 
 async function onDeleteHw(hw: Homework) {
-  if (!window.confirm(`删除《${hw.name}》？相关提交记录将一并清除`)) return
+  if (!(await appConfirm(`删除《${hw.name}》？相关提交记录将一并清除`, { type: 'danger' }))) return
   try {
     await deleteHomework(hw.id)
     await loadList()

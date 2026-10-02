@@ -1,17 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import {
-  AppFilterChips,
-  AppIcon,
-  RichTextViewer,
-  showToast,
-  ApiError,
-  toPlainText,
-  truncateRich,
-} from '@aiteach/shared'
+import { AppFilterChips, AppIcon, RichTextViewer, showToast, appConfirm, ApiError, toPlainText, truncateRich, AppModal } from '@aiteach/shared'
 import type { GeneratedQuestion, OrgCategory, OrgQuestion } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import QuestionEditor from '@/components/question/QuestionEditor.vue'
 import QuestionEditorModal from '@/components/question/QuestionEditorModal.vue'
 import QuestionPreviewDrawer from '@/components/question/QuestionPreviewDrawer.vue'
@@ -100,7 +91,7 @@ const saving = ref(false)
 const dirty = ref(false)
 
 /** 手动标签页里那张编辑表单。校验、红字、面板展开都由它自理，页面只问一句「能不能存」 */
-const editorRef = ref<{ validate: (full: boolean) => boolean } | null>(null)
+const editorRef = ref<{ validate: (full: boolean) => Promise<boolean> } | null>(null)
 
 const categories = ref<OrgCategory[]>([])
 
@@ -171,7 +162,7 @@ async function load() {
 async function save(submit: boolean) {
   /* 校验口径与红字都在编辑组件里（含「解析为空」的那次确认）；失败时它已把基本信息面板展开，
      这里只补一句提示。full 由 submit 决定：存草稿只看必填属性，提交审核全量校验（FR-TM-012） */
-  if (!editorRef.value?.validate(submit)) {
+  if (!(await editorRef.value?.validate(submit))) {
     showToast('请按红字提示修正后重试', 'error')
     return
   }
@@ -592,9 +583,9 @@ function editResult(item: GeneratedQuestion) {
  * term / examType / textbook / fillAnswers / optionColumns / sourceRemark —— 用户在弹窗里
  * 明明填了学期与教材版本，存完却没了。
  */
-async function saveEdit(submit: boolean, validate: (full: boolean) => boolean) {
+async function saveEdit(submit: boolean, validate: (full: boolean) => Promise<boolean>) {
   if (!editingGen.value) return
-  if (!validate(submit)) {
+  if (!(await validate(submit))) {
     showToast('请按红字提示修正后重试', 'error')
     return
   }
@@ -621,8 +612,8 @@ async function saveEdit(submit: boolean, validate: (full: boolean) => boolean) {
 }
 
 /** 丢弃未处理题目的确认：取消返回 false */
-function confirmDiscardPending(): boolean {
-  return pendingCount.value === 0 || window.confirm(`还有 ${pendingCount.value} 题未处理，重新生成将丢弃，确认？`)
+async function confirmDiscardPending(): Promise<boolean> {
+  return pendingCount.value === 0 || (await appConfirm(`还有 ${pendingCount.value} 题未处理，重新生成将丢弃，确认？`, { type: 'warning' }))
 }
 
 function clearResults() {
@@ -634,8 +625,8 @@ function clearResults() {
   verifyReport.value = null
 }
 
-function onRerun() {
-  if (!confirmDiscardPending()) return
+async function onRerun() {
+  if (!(await confirmDiscardPending())) return
   clearResults()
   phase.value = 'idle'
 }
@@ -645,10 +636,10 @@ function onRerun() {
  * 结果阶段参数面板仍然可见，此时再点一次等于「重新生成」—— 必须走同一份丢弃确认：
  * 旧页面在结果阶段把参数表单卸载了，这条静默清空结果的捷径以前不存在。
  */
-function startGenerate() {
+async function startGenerate() {
   if (busy.value) return
   if (phase.value === 'result') {
-    if (!confirmDiscardPending()) return
+    if (!(await confirmDiscardPending())) return
     clearResults()
   }
   void run()
@@ -680,8 +671,8 @@ const previewQuestion = computed(() => ({
   optionColumns: form.optionColumns,
 }))
 
-function onCancel() {
-  if (dirty.value && !window.confirm('有未保存的改动，确认放弃？')) return
+async function onCancel() {
+  if (dirty.value && !(await appConfirm('有未保存的改动，确认放弃？', { type: 'danger' }))) return
   router.push('/question/bank')
 }
 

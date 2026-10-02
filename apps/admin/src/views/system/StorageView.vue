@@ -7,9 +7,8 @@
  * - 备份恢复：自动 / 手动备份记录，支持立即备份与恢复演练。
  */
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, AppTabs, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, AppTabs, showToast, AppModal, appConfirm } from '@aiteach/shared'
 import type { BackupRecord, StoragePolicy } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import { createBackup, fetchBackups, fetchStoragePolicies, saveStoragePolicy } from '@/api/content'
 
 const tab = ref<'storage' | 'backup'>('storage')
@@ -90,12 +89,12 @@ async function submitBackup() {
   }
 }
 
-function onRestore(row: BackupRecord) {
+async function onRestore(row: BackupRecord) {
   if (row.status !== 'done') {
     showToast('该备份未完成，无法恢复', 'error')
     return
   }
-  if (!window.confirm(`从「${row.name}」恢复数据？恢复为高敏操作，需二次审批（P-06-04）。`)) return
+  if (!(await appConfirm(`从「${row.name}」恢复数据？恢复为高敏操作，需二次审批（P-06-04）。`, { type: 'danger' }))) return
   showToast('恢复演练已提交二次审批', 'success')
 }
 

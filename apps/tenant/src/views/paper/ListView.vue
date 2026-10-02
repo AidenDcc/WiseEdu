@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, PAPER_STATUS_TEXT, showToast } from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, appConfirm, PAPER_STATUS_TEXT, showToast, AppModal } from '@aiteach/shared'
 import type { FilterRowDef, OrgPaper, OrgQuestion } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import PaperPreviewModal from '@/components/paper/PaperPreviewModal.vue'
 import { aiComposePaper, deletePaper, fetchPapers, fetchQuestions, generateParallels, savePaper } from '@/api/org'
@@ -167,7 +166,7 @@ function doExport(kind: 'doc' | 'pdf') {
 }
 
 async function onDelete(row: OrgPaper) {
-  if (!window.confirm(`删除《${row.name}》？将进入回收站保留 30 天`)) return
+  if (!(await appConfirm(`删除《${row.name}》？将进入回收站保留 30 天`, { type: 'danger' }))) return
   await deletePaper(row.id)
   showToast('已移入回收站', 'success')
   load()

@@ -11,18 +11,7 @@
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import {
-  AppFilterPanel,
-  AppIcon,
-  AppListToolbar,
-  AppPageHeader,
-  AppSegmented,
-  APPROVAL_STATUS_TEXT,
-  RESOURCE_SCOPE_TEXT,
-  TEACH_KIND_TEXT,
-  showToast,
-  truncateRich,
-} from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, AppSegmented, APPROVAL_STATUS_TEXT, RESOURCE_SCOPE_TEXT, TEACH_KIND_TEXT, appConfirm, showToast, truncateRich, AppModal } from '@aiteach/shared'
 import type { FilterRowDef } from '@aiteach/shared'
 import type {
   ApprovalKind,
@@ -35,7 +24,6 @@ import type {
   TeachDoc,
   TeachDocKind,
 } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import {
   fetchApprovalSummary,
@@ -114,7 +102,7 @@ function toggleLog(id: number) {
 }
 
 async function onRevoke(a: ResourceApproval) {
-  if (!window.confirm(`撤回审批单《${a.name}》？`)) return
+  if (!(await appConfirm(`撤回审批单《${a.name}》？`, { type: 'warning' }))) return
   try {
     await revokeApproval(a.id)
     await reloadApprovalTab()

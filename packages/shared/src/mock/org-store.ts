@@ -76,6 +76,7 @@ import {
   SLIDE_LAYOUT_TEXT,
   MISTAKE_REASONS,
 } from '../api/models'
+import { getCacheUser } from '../api/auth'
 import { registerMediaSrc, unregisterMediaSrc } from '../utils/media-ref'
 /* 相对导入而非 '@aiteach/shared'：从 shared 内部引自己的桶文件会形成循环依赖 */
 import { hasImage, sanitizeRichHtml, toPlainText, truncateRich } from '../utils/richtext'
@@ -168,24 +169,25 @@ export function deleteCategory(id: number): void {
 /** 运行期新建题目的自增 id：种子题与高考模拟卷已占用 9001-9326，从其后开始避免撞号 */
 let questionSeq = 9400
 
-/** AI 多智能体检测结果（8 项，FR-AI-002） */
+/** AI 多智能体检测结果（8 项，FR-AI-002）。与审核中心「AI检测」共用同一套项目名：
+ *  基础信息匹配（年级/学科/题型）、题干（语义/文字/公式/选项完整性）、答案、解析、
+ *  知识点匹配、图形描述、难度匹配、查重 —— 重跑检测时按项目名原位更新，报告结构稳定。 */
 function aiChecksFor(stem: string, suspects: string[] = []): AiCheckResult[] {
-  const base = [
-    { name: '语义完整性', pass: true, note: '题干表述完整，无歧义' },
-    { name: '计算验算', pass: true, note: '数值计算复核一致' },
-    { name: 'LaTeX 公式', pass: true, note: '公式语法合法' },
-    { name: '图形描述', pass: true, note: '无图形依赖' },
+  return [
+    { name: '基础信息匹配', pass: true, note: '年级、学科、题型与题目内容一致' },
+    { name: '题干', pass: true, note: '语义完整，文字、公式与选项无异常' },
+    { name: '答案', pass: true, note: '答案正确，公式与描述无误' },
+    { name: '解析', pass: true, note: '解析正确，语义完整' },
     {
       name: '知识点匹配',
       pass: true,
-      note: '知识点与题干一致',
+      note: '知识点标注完整、准确',
       fixed: toPlainText(stem).includes('抛物线') ? '「抛物线」→「二次函数图像」' : undefined,
     },
+    { name: '图形描述', pass: true, note: '无图形依赖' },
     { name: '难度匹配', pass: true, note: '难度系数与题干复杂度相符' },
-    { name: '查重', pass: suspects.length === 0, note: suspects.length ? `与题库 1 题相似度 87%` : '未发现相似题' },
-    { name: '试卷结构', pass: true, note: '单题不适用，通过' },
+    { name: '查重', pass: suspects.length === 0, note: suspects.length ? '与题库 1 题相似度 87%' : '未发现相似题' },
   ]
-  return base
 }
 
 function seedQuestion(input: Partial<OrgQuestion> & { stem: string; id: number }): OrgQuestion {
@@ -2215,6 +2217,74 @@ export const questions: OrgQuestion[] = [
     owner: '李文博',
     ownerId: 103,
   }),
+  /* ---- 个人题库演示（ownerId 101）：上面几条已覆盖 手动草稿/待审/驳回、AI 出题待审、拍照识别待审，
+     这里补齐「审核通过的 AI 出题」「变式草稿」「已下架」「校验中」四种组合，id 取 9337-9399 空档 ---- */
+  seedQuestion({
+    id: 9340,
+    stem: '已知 tan α=2，则 sin α·cos α 的值为（ ）',
+    type: '单选',
+    options: ['1/5', '2/5', '1/2', '4/5'],
+    answer: 'B',
+    analysis: 'sin α·cos α = tan α/(1+tan²α) = 2/5。',
+    knowledge: ['三角函数'],
+    source: 'AI 出题',
+    status: 'approved',
+    library: 'org',
+    categoryId: 12,
+    owner: '陈明远',
+    ownerId: 101,
+    aiChecks: aiChecksFor(''),
+  }),
+  seedQuestion({
+    id: 9341,
+    stem: '已知二次函数 f(x)=x²-4x+3，则其图像与 x 轴交点个数为（ ）',
+    type: '单选',
+    options: ['0 个', '1 个', '2 个', '3 个'],
+    answer: 'C',
+    analysis: '令 f(x)=0，Δ=(-4)²-12=4>0，故有两个交点。',
+    knowledge: ['二次函数'],
+    source: 'AI 变式',
+    variantOf: 9001,
+    status: 'draft',
+    library: 'personal',
+    categoryId: 2,
+    owner: '陈明远',
+    ownerId: 101,
+    useCount: 0,
+    updatedAt: nowStr(-2),
+  }),
+  seedQuestion({
+    id: 9342,
+    stem: '化简：√12 + √27 - √3 = ______',
+    type: '填空',
+    answer: '4√3',
+    analysis: '√12=2√3，√27=3√3，合并得 4√3。',
+    knowledge: ['二次根式'],
+    source: '手动录入',
+    status: 'offline',
+    library: 'org',
+    categoryId: 11,
+    owner: '陈明远',
+    ownerId: 101,
+    updatedAt: nowStr(-20),
+  }),
+  seedQuestion({
+    id: 9343,
+    stem: '函数 y=ln(x-1) 的定义域为（ ）',
+    type: '单选',
+    options: ['(0,+∞)', '(1,+∞)', '[1,+∞)', '(-∞,1)'],
+    answer: 'B',
+    analysis: '对数真数需大于 0，即 x-1>0。',
+    knowledge: ['函数概念'],
+    source: '拍照识别',
+    status: 'checking',
+    library: 'personal',
+    categoryId: 2,
+    owner: '陈明远',
+    ownerId: 101,
+    useCount: 0,
+    updatedAt: nowStr(-1),
+  }),
   ...EXAM_QUESTIONS,
 ]
 
@@ -3049,6 +3119,8 @@ export function reviewQuestion(id: number, pass: boolean, opinion: string): OrgQ
   if (!pass && opinion.trim().length < 5) throw new Error('驳回意见必填（5-500 字）')
   item.status = pass ? 'approved' : 'rejected'
   item.reviewOpinion = opinion
+  item.reviewer = getCacheUser()?.name ?? '当前审核员'
+  item.reviewedAt = nowStr()
   item.updatedAt = nowStr()
   if (pass && item.library === 'personal') item.library = 'org'
   pushMessage({
@@ -6060,7 +6132,7 @@ export const orgMenuTree: OrgMenuNode[] = [
     children: [
       { key: 'question/bank', title: '题库管理', enabled: true },
       { key: 'question/create', title: '录题中心', enabled: true },
-      { key: 'question/photo', title: 'AI 识题', enabled: true },
+      { key: 'question/photo', title: '图片识题', enabled: true },
       { key: 'question/review', title: '题目审核中心', enabled: true },
     ],
   },

@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast, ApiError } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, ApiError, AppModal } from '@aiteach/shared'
 import type { FeatureSwitches, PackageRecord } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import { fetchPackages, savePackage } from '@/api/tenant'
 

@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppIcon, showToast } from '@aiteach/shared'
+import { AppIcon, showToast, AppDrawer } from '@aiteach/shared'
 import type { OrgMessage } from '@aiteach/shared'
-import AppDrawer from '@/components/ui/AppDrawer.vue'
 import {
   deleteOrgMessage,
   fetchOrgMessages,

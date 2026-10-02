@@ -2,7 +2,7 @@
 /**
  * 「题目编辑」弹窗：AppModal 外壳 + QuestionEditor + 底部按钮插槽。
  *
- * 两个入口用它（AI 出题结果卡的「编辑入库」、AI 识题校对区的「编辑」），字段集与校验完全一致，
+ * 两个入口用它（AI 出题结果卡的「编辑入库」、图片识题校对区的「编辑」），字段集与校验完全一致，
  * 只有底部按钮不同（一个要选存草稿 / 提交审核，一个只是保存改动），所以按钮留在调用方 ——
  * 弹窗只做三件壳该管的事：
  *
@@ -14,7 +14,7 @@
  * 取消即丢弃 —— 本组件不管生命周期，`v-if` 挂载一次就是一次编辑会话。
  */
 import { ref } from 'vue'
-import AppModal from '@/components/ui/AppModal.vue'
+import { AppModal } from '@aiteach/shared'
 import QuestionEditor from '@/components/question/QuestionEditor.vue'
 import type { MetaRowKey } from '@/components/question/QuestionEditor.vue'
 import type { QuestionDraft } from '@/utils/question-draft'
@@ -32,10 +32,11 @@ withDefaults(
 
 const emit = defineEmits<{ close: [] }>()
 
-const editorRef = ref<{ validate: (full: boolean) => boolean } | null>(null)
+const editorRef = ref<{ validate: (full: boolean) => Promise<boolean> } | null>(null)
 
-/** 未挂载时返回 false（保守：说不清能不能存就别存） */
-function validate(full: boolean): boolean {
+/** 未挂载时返回 false（保守：说不清能不能存就别存）。
+ *  QuestionEditor 的「解析为空」确认走 appConfirm，因此整条链路是 async 的。 */
+async function validate(full: boolean): Promise<boolean> {
   return editorRef.value?.validate(full) ?? false
 }
 </script>

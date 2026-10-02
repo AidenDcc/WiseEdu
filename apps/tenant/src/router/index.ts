@@ -46,6 +46,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '题库管理' },
       },
       {
+        path: 'question/personal',
+        name: 'question-personal',
+        component: () => import('@/views/question/PersonalBankView.vue'),
+        meta: { title: '个人题库' },
+      },
+      {
         path: 'question/create',
         name: 'question-create',
         component: () => import('@/views/question/CreateView.vue'),
@@ -65,7 +71,7 @@ const routes: RouteRecordRaw[] = [
         path: 'question/photo',
         name: 'question-photo',
         component: () => import('@/views/question/PhotoView.vue'),
-        meta: { title: 'AI 识题' },
+        meta: { title: '图片识题' },
       },
       {
         path: 'question/review',

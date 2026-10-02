@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { AppIcon, AppPageHeader, MATERIAL_STATUS_TEXT, RichTextViewer, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, appConfirm, MATERIAL_STATUS_TEXT, RichTextViewer, showToast, AppModal } from '@aiteach/shared'
 import type { OrgMaterial } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import { decideExample, deleteMaterial, fetchMaterials, finishMaterial, reRecognizeMaterial, uploadMaterial } from '@/api/org'
 import { useBaseData } from '@/composables/useBaseData'
 
@@ -68,7 +67,7 @@ async function onDecide(exampleId: number, decision: 'import' | 'ignore') {
 
 async function onFinish() {
   if (!proofTarget.value) return
-  if (pendingExamples.value > 0 && !window.confirm(`还有 ${pendingExamples.value} 道例题未处理，完成后将永久丢弃，确认？`)) return
+  if (pendingExamples.value > 0 && !(await appConfirm(`还有 ${pendingExamples.value} 道例题未处理，完成后将永久丢弃，确认？`, { type: 'warning' }))) return
   const { message } = await finishMaterial(proofTarget.value.id, pendingExamples.value)
   proofOpen.value = false
   await load()
@@ -77,14 +76,14 @@ async function onFinish() {
 
 /* ===== 其他操作 ===== */
 async function onReRecognize(row: OrgMaterial) {
-  if (!window.confirm('重新识别将覆盖当前章节结构（消耗 1 次额度），确认？')) return
+  if (!(await appConfirm('重新识别将覆盖当前章节结构（消耗 1 次额度），确认？', { type: 'warning' }))) return
   await reRecognizeMaterial(row.id)
   await load()
   showToast('已重新识别，请进入校对', 'success')
 }
 
 async function onDelete(row: OrgMaterial) {
-  if (!window.confirm(`删除《${row.name}》？将进入回收站保留 30 天`)) return
+  if (!(await appConfirm(`删除《${row.name}》？将进入回收站保留 30 天`, { type: 'danger' }))) return
   await deleteMaterial(row.id)
   showToast('已移入回收站', 'success')
   load()

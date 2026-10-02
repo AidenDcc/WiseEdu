@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, appConfirm, showToast, AppModal } from '@aiteach/shared'
 import type { Campus } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import { deleteCampus, fetchCampuses, saveCampus, toggleCampus } from '@/api/org'
 
 const campuses = ref<Campus[]>([])
@@ -49,7 +48,7 @@ async function onToggle(row: Campus) {
 }
 
 async function onDelete(row: Campus) {
-  if (!window.confirm(`删除校区「${row.name}」？`)) return
+  if (!(await appConfirm(`删除校区「${row.name}」？`, { type: 'danger' }))) return
   try {
     await deleteCampus(row.id)
     await load()

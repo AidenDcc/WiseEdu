@@ -8,9 +8,8 @@
  * - 生成内容留痕：AI 产物溯源（traceId、模型、租户、输入摘要、安全结论）。
  */
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, AppTabs, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, AppTabs, showToast, AppModal, appConfirm } from '@aiteach/shared'
 import type { AiQualityEval, AiTraceRecord, SensitivePolicyGroup } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import {
   deleteSensitivePolicy,
   fetchQualityEvals,
@@ -86,7 +85,7 @@ async function onTogglePolicy(row: SensitivePolicyGroup) {
 }
 
 async function onDeletePolicy(row: SensitivePolicyGroup) {
-  if (!window.confirm(`删除策略「${row.name}」？`)) return
+  if (!(await appConfirm(`删除策略「${row.name}」？`, { type: 'danger' }))) return
   try {
     await deleteSensitivePolicy(row.id)
     showToast('已删除', 'success')

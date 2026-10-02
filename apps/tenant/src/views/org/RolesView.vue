@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, appConfirm, showToast } from '@aiteach/shared'
 import type { OrgRole } from '@aiteach/shared'
 import { deleteRole, fetchRoles, saveRole } from '@/api/org'
 
@@ -95,7 +95,7 @@ async function submitCreate() {
 
 async function onDelete() {
   if (!active.value) return
-  if (!window.confirm(`删除角色「${active.value.name}」？`)) return
+  if (!(await appConfirm(`删除角色「${active.value.name}」？`, { type: 'danger' }))) return
   try {
     await deleteRole(active.value.id)
     activeId.value = 0

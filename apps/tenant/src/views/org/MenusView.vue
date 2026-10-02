@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, appConfirm, showToast } from '@aiteach/shared'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import { fetchOrgMenus, saveOrgMenus } from '@/api/org'
 import type { OrgMenuNodeApi } from '@/api/org'
@@ -52,8 +52,8 @@ async function onSave() {
   }
 }
 
-function onReset() {
-  if (dirty.value && !window.confirm('放弃未保存的修改？')) return
+async function onReset() {
+  if (dirty.value && !(await appConfirm('放弃未保存的修改？', { type: 'danger' }))) return
   load()
 }
 

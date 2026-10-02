@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { AppFilterPanel, AppIcon, AppListToolbar, showToast, ApiError } from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, showToast, ApiError, AppDrawer, AppModal } from '@aiteach/shared'
 import type { FilterRowDef, PackageRecord, TenantApply } from '@aiteach/shared'
-import AppDrawer from '@/components/ui/AppDrawer.vue'
-import AppModal from '@/components/ui/AppModal.vue'
 import { approveApply, fetchApplies, fetchPackages, rejectApply } from '@/api/tenant'
 
 /* ===== 列表 ===== */

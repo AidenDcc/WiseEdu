@@ -2,9 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
-import { AppIcon, AppPageHeader, AppSegmented, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, AppSegmented, appConfirm, showToast, AppModal } from '@aiteach/shared'
 import type { OrgFormula } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import FormulaPickerModal from '@/components/ui/FormulaPickerModal.vue'
 import { deleteFormula, fetchFormulas, fetchTenantDict, saveFormula, shareFormula } from '@/api/org'
 
@@ -81,7 +80,7 @@ async function submit() {
 }
 
 async function onShare(row: OrgFormula) {
-  if (!window.confirm(`将「${row.name}」分享到机构共享库？提交后将进入审核`)) return
+  if (!(await appConfirm(`将「${row.name}」分享到机构共享库？提交后将进入审核`, { type: 'info' }))) return
   const updated = await shareFormula(row.id)
   await load()
   showToast(
@@ -91,7 +90,7 @@ async function onShare(row: OrgFormula) {
 }
 
 async function onDelete(row: OrgFormula) {
-  if (!window.confirm(`删除公式「${row.name}」？`)) return
+  if (!(await appConfirm(`删除公式「${row.name}」？`, { type: 'danger' }))) return
   await deleteFormula(row.id)
   showToast('已删除', 'success')
   load()

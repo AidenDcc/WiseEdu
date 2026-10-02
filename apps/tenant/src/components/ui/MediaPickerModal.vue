@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, resolveMediaSrc, showToast } from '@aiteach/shared'
+import { AppIcon, resolveMediaSrc, showToast, AppModal } from '@aiteach/shared'
 import type { OrgMedia } from '@aiteach/shared'
-import AppModal from './AppModal.vue'
 import { fetchMedia } from '@/api/org'
 
 /**

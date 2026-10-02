@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { AppFilterPanel, AppIcon, AppListToolbar, RichTextViewer, showToast, toPlainText } from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, RichTextViewer, showToast, toPlainText, AppDrawer } from '@aiteach/shared'
 import type { AuditRecord, FilterRowDef, PublicPaper, PublicQuestion } from '@aiteach/shared'
-import AppDrawer from '@/components/ui/AppDrawer.vue'
 import { fetchAuditRecords, fetchPublicPapers, fetchPublicQuestions } from '@/api/platform'
 
 type TabKey = 'questions' | 'papers' | 'audits'

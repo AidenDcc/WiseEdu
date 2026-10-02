@@ -14,17 +14,8 @@
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import {
-  AppIcon,
-  COLLAB_MEMBER_TEXT,
-  COLLAB_STATUS_TEXT,
-  RichTextViewer,
-  showToast,
-  toPlainText,
-  truncateRich,
-} from '@aiteach/shared'
+import { AppIcon, COLLAB_MEMBER_TEXT, COLLAB_STATUS_TEXT, RichTextViewer, showToast, toPlainText, truncateRich, AppModal } from '@aiteach/shared'
 import type { CollabMember, OrgCollabTask, OrgPaper, OrgQuestion, PaperSection } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import PaperPreviewModal from '@/components/paper/PaperPreviewModal.vue'
 import {
   collabAddQuestions,

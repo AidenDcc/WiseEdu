@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { AppFilterPanel, AppIcon, AppPageHeader, hueColor, showToast, ApiError } from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppPageHeader, hueColor, showToast, ApiError, AppModal, appConfirm } from '@aiteach/shared'
 import type { DictItem, FilterRowDef, TextbookVersion } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import { deleteTextbook, fetchDict, fetchTextbooks, saveTextbook, toggleTextbook } from '@/api/platform'
 
@@ -42,7 +41,7 @@ async function onToggle(item: TextbookVersion) {
 }
 
 async function onDelete(item: TextbookVersion) {
-  if (!window.confirm(`确认删除「${item.subject} · ${item.name}」？`)) return
+  if (!(await appConfirm(`确认删除「${item.subject} · ${item.name}」？`, { type: 'danger' }))) return
   try {
     await deleteTextbook(item.id)
     showToast('已删除', 'success')

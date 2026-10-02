@@ -81,6 +81,8 @@ const ICON_PATHS: Record<string, string[]> = {
   'chevron-right': ['M9 6l6 6-6 6'],
   clock: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z', 'M12 7v5l3.5 2'],
   warning: ['M12 3 2 21h20z', 'M12 10v4', 'M12 17.3h.01'],
+  /* 确认框 info 类型用（圆 + i） */
+  info: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z', 'M12 8h.01', 'M12 11.5V16'],
   check: ['M4 12.5l5 5L20 6.5'],
   close: ['M6 6l12 12', 'M18 6 6 18'],
   'arrow-right': ['M4 12h16', 'M13 5l7 7-7 7'],

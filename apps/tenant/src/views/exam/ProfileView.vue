@@ -9,10 +9,8 @@
  * 所有掌握度条与 AnalysisView 一致用纯 CSS 横条，不引图表库。
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { AppIcon, AppPageHeader, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, AppDrawer, AppModal } from '@aiteach/shared'
 import type { ClassProfileReport, OrgClass, OrgStudent, StudentProfile } from '@aiteach/shared'
-import AppDrawer from '@/components/ui/AppDrawer.vue'
-import AppModal from '@/components/ui/AppModal.vue'
 import { fetchClassProfile, fetchClasses, fetchStudents, fetchStudentProfile, pushPractice } from '@/api/student'
 
 const classes = ref<OrgClass[]>([])

@@ -1,15 +1,9 @@
-<script lang="ts">
-/* 弹窗栈，放在模块作用域：`<script setup>` 的顶层代码每个实例各跑一遍，跨实例的状态放不住。
-   存自增 id 而不是组件实例 —— 实例在 HMR / 复用下不是稳定的身份，数组里只关心「谁最后挂载」。 */
-const stack: number[] = []
-let seq = 0
-</script>
-
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from 'vue'
-import { AppIcon } from '@aiteach/shared'
+import AppIcon from '../AppIcon.vue'
+import { enterOverlay, exitOverlay, isTopOverlay } from '../../utils/overlay-stack'
 
-/** 居中弹窗（自绘，风格与全局令牌统一） */
+/** 居中弹窗（自绘，风格与全局令牌统一；两端共用，样式自带、只取 CSS 变量） */
 const props = withDefaults(
   defineProps<{
     title: string
@@ -30,26 +24,23 @@ function onMask() {
   if (props.closeOnMask) close()
 }
 
-const id = ++seq
+const overlayId = enterOverlay()
 
 /**
  * Escape 只关最上层。
  *
- * 弹窗里可以再开弹窗（编辑题目 → 知识点树 / 公式面板 / 媒体选择），而每个实例都在 document 上
- * 无条件监听 —— 原先按一次 Esc 会把整摞一起关掉，外层编辑弹窗连同刚填的内容一起没了。
- * 栈顶按挂载先后算：嵌套弹窗总是后挂载的，所以最后挂载的那个就是最上层。
+ * 弹窗里可以再开弹窗（编辑题目 → 知识点树 / 公式面板 / 媒体选择）或开确认框
+ * （appConfirm），而每个浮层都在 document 上监听 —— 不仲裁的话一次 Esc 会把
+ * 整摞一起关掉。浮层统一走 overlay-stack，只有栈顶响应。
  */
 function onKeydown(event: KeyboardEvent) {
-  if (event.key !== 'Escape' || stack[stack.length - 1] !== id) return
+  if (event.key !== 'Escape' || !isTopOverlay(overlayId)) return
   close()
 }
 
-onMounted(() => {
-  stack.push(id)
-  document.addEventListener('keydown', onKeydown)
-})
+onMounted(() => document.addEventListener('keydown', onKeydown))
 onBeforeUnmount(() => {
-  stack.splice(stack.indexOf(id), 1)
+  exitOverlay(overlayId)
   document.removeEventListener('keydown', onKeydown)
 })
 </script>
@@ -57,7 +48,7 @@ onBeforeUnmount(() => {
 <template>
   <Teleport to="body">
     <div class="modal-mask" @click.self="onMask">
-      <div class="modal panel" :style="{ width: `${width}px` }">
+      <div class="modal" :style="{ width: `${width}px` }">
         <header class="modal-head">
           <h3 class="modal-title">{{ title }}</h3>
           <button class="modal-x" type="button" @click="close">
@@ -89,12 +80,16 @@ onBeforeUnmount(() => {
   animation: fade-in 0.16s ease;
 }
 .modal {
+  /* 卡片自带（不依赖宿主全局 .panel 类）：shared 组件只取 CSS 变量，两端表现一致 */
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
   max-width: 100%;
   max-height: calc(100vh - 80px);
   display: flex;
   flex-direction: column;
   animation: pop-in 0.2s cubic-bezier(0.34, 1.4, 0.64, 1);
-  box-shadow: var(--shadow-lg);
 }
 .modal-head {
   display: flex;

@@ -440,13 +440,13 @@ export interface FillBlankAnswer {
 
 /**
  * 选项排布：1 = 单行显示（每行一个，缺省），2 = 一行 2 个，4 = 一行 4 个。
- * 与 `OrgQuestion.optionColumns` 同一个口径，四处编辑入口（录题中心 / AI 出题 / AI 识题 /
+ * 与 `OrgQuestion.optionColumns` 同一个口径，四处编辑入口（录题中心 / AI 出题 / 图片识题 /
  * 文档识别）写进去的必须是同一个联合类型，故放在这里由 models 统一给出。
  */
 export type OptionColumns = 1 | 2 | 4
 
 /**
- * 拍照识别结果的校对改动：AI 识题结果卡片的「编辑」保存后，随决策一并提交给
+ * 拍照识别结果的校对改动：图片识题结果卡片的「编辑」保存后，随决策一并提交给
  * `decidePhotoResult`。
  *
  * 每个字段都是**选填**，语义是「教师改过才带」：`undefined` = 没动，保留识别原值。
@@ -510,6 +510,10 @@ export interface OrgQuestion {
   aiChecks?: AiCheckResult[]
   aiSuspects?: string[]
   reviewOpinion?: string
+  /** 终审人（审核中心历史记录展示用） */
+  reviewer?: string
+  /** 终审时间 */
+  reviewedAt?: string
 }
 
 /* ================ 知识点树 / 教材（题库管理） ================ */

@@ -1,26 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import {
-  AppIcon,
-  AppFilterPanel,
-  AppListToolbar,
-  AppSegmented,
-  QUESTION_SOURCE_OPTIONS,
-  RichTextViewer,
-  showToast,
-  ApiError,
-  toPlainText,
-  truncateRich,
-} from '@aiteach/shared'
+import { AppIcon, AppFilterPanel, AppListToolbar, AppSegmented, QUESTION_SOURCE_OPTIONS, RichTextViewer, showToast, ApiError, toPlainText, truncateRich, AppModal } from '@aiteach/shared'
 import type { FilterRowDef, OrgQuestion } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import KnowledgeFilter from '@/components/ui/KnowledgeFilter.vue'
 import QuestionOptions from '@/components/question/QuestionOptions.vue'
 import QuestionPreviewDrawer from '@/components/question/QuestionPreviewDrawer.vue'
 import {
-  deleteQuestions,
   fetchQuestions,
   fetchTenantDict,
   toggleQuestionOffline,
@@ -296,17 +283,6 @@ function goAiVariant() {
   variantOpen.value = null
 }
 
-async function onDelete(row: OrgQuestion) {
-  if (!window.confirm('确认删除该题？删除后进入回收站（30 天）。')) return
-  try {
-    await deleteQuestions([row.id])
-    showToast('已删除（进入回收站）', 'success')
-    load()
-  } catch (error) {
-    showToast(error instanceof ApiError ? error.message : '删除失败', 'error')
-  }
-}
-
 /* ===== 挂载 ===== */
 onMounted(() => {
   void load()
@@ -425,7 +401,6 @@ onMounted(() => {
               <p><b>解析：</b><RichTextViewer :content="row.analysis" tag="span" empty="—" /></p>
             </div>
             <div class="qc-ops">
-              <button class="btn btn-ghost btn-sm" type="button" @click="onDelete(row)">删除</button>
               <button class="mini-btn" type="button" @click="preview = row">预览</button>
               <button class="mini-btn" type="button" @click="toggleAnalysis(row.id)">
                 {{ analysisOpen.includes(row.id) ? '收起解析' : '解析' }}

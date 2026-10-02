@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast, ApiError, ADMIN_ROLE_TEXT } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, ApiError, ADMIN_ROLE_TEXT, AppModal, appConfirm } from '@aiteach/shared'
 import type { AdminAccount, AdminRole } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import { fetchAdmins, resetAdminPassword, saveAdmin, toggleAdmin } from '@/api/platform'
 
@@ -19,7 +18,7 @@ async function load() {
 }
 
 async function onToggle(item: AdminAccount) {
-  if (item.enabled && item.role === 'super' && !window.confirm('停用后该账号将无法登录平台端，确认停用？')) {
+  if (item.enabled && item.role === 'super' && !(await appConfirm('停用后该账号将无法登录平台端，确认停用？', { type: 'warning' }))) {
     return
   }
   try {
@@ -32,7 +31,7 @@ async function onToggle(item: AdminAccount) {
 }
 
 async function onResetPassword(item: AdminAccount) {
-  if (!window.confirm(`确认重置「${item.name}」的密码？重置后初始密码将通过管理员渠道下发。`)) return
+  if (!(await appConfirm(`确认重置「${item.name}」的密码？重置后初始密码将通过管理员渠道下发。`, { type: 'warning' }))) return
   try {
     await resetAdminPassword(item.id)
     showToast('密码已重置为初始密码，请通知账号首次登录后修改', 'success')

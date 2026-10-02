@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { AppFilterChips, AppIcon, AppPageHeader, AppSearchInput, resolveMediaSrc, showToast } from '@aiteach/shared'
+import { AppFilterChips, AppIcon, AppPageHeader, AppSearchInput, appConfirm, resolveMediaSrc, showToast, AppModal } from '@aiteach/shared'
 import type { DrawEditorType, MediaKind, OrgMedia } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import MediaDrawSelectDialog from '@/components/draw/MediaDrawSelectDialog.vue'
 import AiDrawGenerateDialog from '@/components/draw/AiDrawGenerateDialog.vue'
 import DrawEditorHost from '@/components/draw/DrawEditorHost.vue'
@@ -207,7 +206,7 @@ async function submitLink() {
 /* ===== 删除（引用提示） ===== */
 async function onDelete(row: OrgMedia) {
   const tip = row.linkedCount > 0 ? `该资源已被引用 ${row.linkedCount} 次，删除后相关引用将失效，` : ''
-  if (!window.confirm(`${tip}确认删除《${row.name}》？`)) return
+  if (!(await appConfirm(`${tip}确认删除《${row.name}》？`, { type: 'danger' }))) return
   await deleteMedia(row.id)
   showToast('已删除（进入回收站）', 'success')
   load()

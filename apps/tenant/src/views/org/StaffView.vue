@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, AppListToolbar, AppPageHeader, showToast } from '@aiteach/shared'
+import { AppIcon, AppListToolbar, AppPageHeader, appConfirm, showToast, AppModal } from '@aiteach/shared'
 import type { StaffMember } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import { deleteStaff, fetchCampuses, fetchRoles, fetchStaff, saveStaff, toggleStaff } from '@/api/org'
 
 const staff = ref<StaffMember[]>([])
@@ -60,7 +59,7 @@ async function onToggle(row: StaffMember) {
 }
 
 async function onDelete(row: StaffMember) {
-  if (!window.confirm(`删除员工「${row.name}」？其名下题目将转移至机构公共库`)) return
+  if (!(await appConfirm(`删除员工「${row.name}」？其名下题目将转移至机构公共库`, { type: 'danger' }))) return
   try {
     await deleteStaff(row.id)
     await load()
@@ -74,8 +73,8 @@ function onImport() {
   showToast('批量导入模板已下载：姓名 / 手机号 / 角色 / 校区，回传后自动创建', 'success')
 }
 
-function onResetPwd(row: StaffMember) {
-  if (!window.confirm(`重置「${row.name}」的密码？新密码将通过短信下发`)) return
+async function onResetPwd(row: StaffMember) {
+  if (!(await appConfirm(`重置「${row.name}」的密码？新密码将通过短信下发`, { type: 'warning' }))) return
   showToast('密码已重置并短信通知', 'success')
 }
 

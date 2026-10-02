@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, AppSearchInput, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, AppSearchInput, appConfirm, showToast } from '@aiteach/shared'
 import type { OrgFormula } from '@aiteach/shared'
 import { fetchFormulas, offshelfFormula, reviewFormula } from '@/api/org'
 
@@ -27,14 +27,14 @@ const STATUS_TEXT: Record<string, string> = { approved: '已上架', pending: '�
 const STATUS_CLASS: Record<string, string> = { approved: 'tag-green', pending: 'tag-orange', rejected: 'tag-red', off: 'tag-gray' }
 
 async function onReview(row: OrgFormula, pass: boolean) {
-  if (!pass && !window.confirm(`驳回「${row.name}」的共享申请？`)) return
+  if (!pass && !(await appConfirm(`驳回「${row.name}」的共享申请？`, { type: 'warning' }))) return
   await reviewFormula(row.id, pass)
   await load()
   showToast(pass ? '已通过并上架，全机构可用' : '已驳回，作者会收到通知', 'success')
 }
 
 async function onOffshelf(row: OrgFormula) {
-  if (!window.confirm(`下架「${row.name}」？已引用该公式的题目不受影响，但不可再新增引用`)) return
+  if (!(await appConfirm(`下架「${row.name}」？已引用该公式的题目不受影响，但不可再新增引用`, { type: 'warning' }))) return
   await offshelfFormula(row.id)
   await load()
   showToast('已下架', 'success')

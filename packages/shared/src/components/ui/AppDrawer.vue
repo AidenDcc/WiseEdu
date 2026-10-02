@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from 'vue'
-import { AppIcon } from '@aiteach/shared'
+import AppIcon from '../AppIcon.vue'
+import { enterOverlay, exitOverlay, isTopOverlay } from '../../utils/overlay-stack'
 
-/** 右侧滑出抽屉（审核详情 / 机构资料） */
+/** 右侧滑出抽屉（审核详情 / 机构资料；两端共用，样式自带、只取 CSS 变量） */
 const props = withDefaults(
   defineProps<{
     title: string
@@ -14,18 +15,25 @@ const props = withDefaults(
 
 const emit = defineEmits<{ close: [] }>()
 
+const overlayId = enterOverlay()
+
+/* Escape 只关最上层：抽屉上可以再开弹窗 / 确认框，浮层统一走 overlay-stack 仲裁 */
 function onKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape') emit('close')
+  if (event.key !== 'Escape' || !isTopOverlay(overlayId)) return
+  emit('close')
 }
 
 onMounted(() => document.addEventListener('keydown', onKeydown))
-onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
+onBeforeUnmount(() => {
+  exitOverlay(overlayId)
+  document.removeEventListener('keydown', onKeydown)
+})
 </script>
 
 <template>
   <Teleport to="body">
     <div class="drawer-mask" @click.self="emit('close')">
-      <aside class="drawer panel" :style="{ width: `${width}px` }">
+      <aside class="drawer" :style="{ width: `${width}px` }">
         <header class="drawer-head">
           <div class="drawer-titles">
             <h3 class="drawer-title">{{ title }}</h3>
@@ -57,15 +65,14 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
   animation: fade-in 0.18s ease;
 }
 .drawer {
+  /* 卡片自带（不依赖宿主全局 .panel 类）：贴边滑出所以只留左边框、去圆角 */
+  background: var(--card);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
   max-width: calc(100vw - 40px);
   display: flex;
   flex-direction: column;
-  border-radius: 0;
-  border-top: none;
-  border-bottom: none;
-  border-right: none;
   animation: slide-in 0.24s cubic-bezier(0.3, 1, 0.4, 1);
-  box-shadow: var(--shadow-lg);
 }
 .drawer-head {
   display: flex;

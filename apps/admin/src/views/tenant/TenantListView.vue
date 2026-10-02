@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppFilterPanel, AppIcon, AppListToolbar, hueColor, showToast, ApiError } from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, hueColor, showToast, ApiError, AppModal, appConfirm } from '@aiteach/shared'
 import type { FilterRowDef, PackageRecord, TenantRecord } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import {
   activateTenant,
@@ -155,7 +154,7 @@ async function confirmDisable() {
 }
 
 async function onEnable(tenant: TenantRecord) {
-  if (!window.confirm(`确认启用「${tenant.name}」？启用后机构可正常登录使用。`)) return
+  if (!(await appConfirm(`确认启用「${tenant.name}」？启用后机构可正常登录使用。`, { type: 'info' }))) return
   try {
     await enableTenant(tenant.id)
     showToast('已启用该机构', 'success')

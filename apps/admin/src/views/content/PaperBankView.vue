@@ -6,9 +6,8 @@
  * 「解析入库」按钮体现拆解结果，真实环境接 OCR + 题目结构化服务。
  */
 import { onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, PLATFORM_CONTENT_STATUS_TEXT, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, PLATFORM_CONTENT_STATUS_TEXT, showToast, AppModal } from '@aiteach/shared'
 import type { PlatformContentStatus, PlatformPaper } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import { fetchPlatformPapers, reviewPlatformPaper } from '@/api/content'
 
 const papers = ref<PlatformPaper[]>([])

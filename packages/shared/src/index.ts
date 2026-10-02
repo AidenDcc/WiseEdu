@@ -53,6 +53,8 @@ export type { SessionUser, MockUser } from './mock/types'
 export { formatCount, formatDelta, hueColor, formatQuota } from './utils/format'
 export { showToast } from './utils/toast'
 export type { ToastType } from './utils/toast'
+export { appConfirm } from './utils/confirm'
+export type { ConfirmType, ConfirmOptions } from './utils/confirm'
 export { default as AppIcon } from './components/AppIcon.vue'
 
 /* ===== 共享 UI 组件（机构端 / 超管端通用，样式自带、只取 CSS 变量） =====
@@ -65,6 +67,9 @@ export { default as AppSearchInput } from './components/ui/AppSearchInput.vue'
 export { default as AppListToolbar } from './components/ui/AppListToolbar.vue'
 export { default as AppTabs } from './components/ui/AppTabs.vue'
 export { default as AppSegmented } from './components/ui/AppSegmented.vue'
+/* 浮层（弹窗 / 抽屉）：与 appConfirm 共用 overlay 栈，Esc 只关最上层 */
+export { default as AppModal } from './components/ui/AppModal.vue'
+export { default as AppDrawer } from './components/ui/AppDrawer.vue'
 export type { FilterRowDef, TabDef } from './components/ui/types'
 export { buildBreadcrumb } from './utils/breadcrumb'
 export type { Crumb, CrumbMenuItem } from './utils/breadcrumb'

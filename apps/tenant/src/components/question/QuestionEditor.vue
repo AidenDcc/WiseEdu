@@ -14,7 +14,7 @@
  *
  * 校验留在这里而不是全提成纯函数：`collectDraftErrors` 本身是纯的，但「解析为空要弹一次确认」
  * 与「基本信息红字在收起态看不见、失败时强制展开」是界面的事，所以 errors 由本组件持有，
- * 只对外暴露 `validate()`。同理 `window.confirm` 一律留在组件里，纯逻辑层不弹窗。
+ * 只对外暴露 `validate()`。同理 `appConfirm` 一律留在组件里，纯逻辑层不弹窗。
  */
 import { computed, ref, watch } from 'vue'
 import {
@@ -23,6 +23,7 @@ import {
   AppIcon,
   AppSegmented,
   QUESTION_SOURCE_OPTIONS,
+  appConfirm,
   showToast,
   toPlainText,
 } from '@aiteach/shared'
@@ -179,9 +180,9 @@ function resetTypeStructure() {
   draft.fillAnswers = [{ value: '', equivalents: '' }]
 }
 
-function onTypeChange() {
+async function onTypeChange() {
   if (hasContent(draft.stem) || draft.options.some((opt) => hasContent(opt))) {
-    if (!window.confirm('切换题型将清空选项结构，确认切换？')) {
+    if (!(await appConfirm('切换题型将清空选项结构，确认切换？', { type: 'danger' }))) {
       draft.type = lastType
       return
     }
@@ -376,13 +377,14 @@ const errors = ref<Record<string, string>>({})
 /**
  * 校验。`full=false` 只校验必填属性（存草稿），`full=true` 全量校验（提交审核）。
  * 返回 false 时红字已就位、该展开的面板也展开了，调用方只需再提示一句。
+ * 「解析为空」确认走 appConfirm，因此是 async —— 所有调用方都必须 await。
  */
-function validate(full: boolean): boolean {
+async function validate(full: boolean): Promise<boolean> {
   const { errors: next, analysisMissing } = collectDraftErrors(draft, full)
   errors.value = next
   /* 基本信息的红字在收起态是看不见的，校验失败时展开 */
   if (next.knowledge || next.subject) metaPanelKey.value += 1
-  if (analysisMissing && !window.confirm('解析为空（选填），提交审核时建议补充解析，确认继续提交？')) return false
+  if (analysisMissing && !(await appConfirm('解析为空（选填），提交审核时建议补充解析，确认继续提交？', { type: 'warning' }))) return false
   return Object.keys(next).length === 0
 }
 

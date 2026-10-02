@@ -12,11 +12,10 @@
  */
 import { computed, ref, watch } from 'vue'
 import type { OrgQuestion } from '@aiteach/shared'
-import { AppIcon, RichTextViewer, showToast } from '@aiteach/shared'
+import { AppIcon, RichTextViewer, showToast, AppDrawer } from '@aiteach/shared'
 import { useComposeData } from '@/composables/useComposeData'
 import { useComposeBasket } from '@/composables/useComposeBasket'
 import { useBaseData } from '@/composables/useBaseData'
-import AppDrawer from '@/components/ui/AppDrawer.vue'
 import { defaultScore } from '@/views/paper/paper-sections'
 import {
   availableKnowledges,

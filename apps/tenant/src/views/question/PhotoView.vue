@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { AppIcon, RichTextViewer, showToast } from '@aiteach/shared'
+import { AppIcon, RichTextViewer, appConfirm, showToast } from '@aiteach/shared'
 import type { PhotoResultEdit, PhotoTask } from '@aiteach/shared'
 import QuestionOptions from '@/components/question/QuestionOptions.vue'
 import QuestionEditorModal from '@/components/question/QuestionEditorModal.vue'
@@ -676,7 +676,7 @@ async function decide(row: PhotoTask['results'][number], decision: 'import' | 'd
 /** 全部存草稿：一次收尾整张卷子（连同各自校对过的改动） */
 async function draftAll() {
   if (!activeTask.value) return
-  if (!window.confirm('未处理的结果将按「存草稿」处理，确认继续？')) return
+  if (!(await appConfirm('未处理的结果将按「存草稿」处理，确认继续？', { type: 'warning' }))) return
   for (const row of activeTask.value.results.filter((item) => !item.decided)) {
     await decide(row, 'draft')
   }

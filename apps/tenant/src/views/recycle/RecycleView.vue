@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, AppTabs, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, AppTabs, showToast, AppModal } from '@aiteach/shared'
 import type { RecycleItem, TabDef } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import { fetchRecycle, purgeRecycle, restoreRecycle } from '@/api/org'
 

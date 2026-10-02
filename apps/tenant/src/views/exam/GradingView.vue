@@ -13,24 +13,7 @@
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import {
-  ANSWER_STATUS_TEXT,
-  AppIcon,
-  AppPageHeader,
-  CLASS_NAMES,
-  type AnswerItem,
-  type AnswerStatus,
-  type ExamAnswer,
-  type ExamSession,
-  type GradingDuty,
-  type OrgPaper,
-  type OrgQuestion,
-  RichTextViewer,
-  showToast,
-  truncateRich,
-} from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
-import AppDrawer from '@/components/ui/AppDrawer.vue'
+import { ANSWER_STATUS_TEXT, AppIcon, AppPageHeader, appConfirm, CLASS_NAMES, type AnswerItem, type AnswerStatus, type ExamAnswer, type ExamSession, type GradingDuty, type OrgPaper, type OrgQuestion, RichTextViewer, showToast, truncateRich, AppModal, AppDrawer } from '@aiteach/shared'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import {
   assignDuty,
@@ -124,7 +107,7 @@ async function submitCreate() {
 }
 
 async function onDelete(row: ExamSession) {
-  if (!window.confirm(`删除考试《${row.name}》？相关答卷将一并清除`)) return
+  if (!(await appConfirm(`删除考试《${row.name}》？相关答卷将一并清除`, { type: 'danger' }))) return
   await deleteExamSession(row.id)
   await loadList()
   showToast('已删除', 'success')

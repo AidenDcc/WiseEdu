@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast, ApiError } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, ApiError, appConfirm } from '@aiteach/shared'
 import type { TenantMenuItem } from '@aiteach/shared'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import { fetchTenantMenus, saveTenantMenus } from '@/api/platform'
@@ -30,7 +30,7 @@ function onGroupToggle(group: TenantMenuItem, value: boolean) {
 const enabledCount = (group: TenantMenuItem) => group.children?.filter((child) => child.enabled).length ?? 0
 
 async function save() {
-  if (!window.confirm('保存后机构端侧边栏将即时生效，确认保存？')) return
+  if (!(await appConfirm('保存后机构端侧边栏将即时生效，确认保存？', { type: 'warning' }))) return
   saving.value = true
   try {
     await saveTenantMenus(JSON.parse(JSON.stringify(items.value)))

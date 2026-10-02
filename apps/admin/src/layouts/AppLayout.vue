@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppIcon, showToast, hueColor, resolveApiMode, getAppConfig, buildBreadcrumb } from '@aiteach/shared'
+import { AppIcon, showToast, hueColor, resolveApiMode, getAppConfig, buildBreadcrumb, appConfirm } from '@aiteach/shared'
 import type { MenuItem } from '@/menu'
 import { menus } from '@/menu'
 import { useAuthStore } from '@/stores/auth'
@@ -97,7 +97,7 @@ const notifyOpen = ref(false)
 const unreadCount = ref(0)
 
 async function onLogout() {
-  if (!window.confirm('确定退出登录？')) return
+  if (!(await appConfirm('确定退出登录？', { type: 'info' }))) return
   await auth.logout()
   showToast('已退出登录', 'success')
   router.push('/login')

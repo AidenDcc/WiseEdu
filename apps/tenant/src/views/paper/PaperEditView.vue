@@ -17,9 +17,8 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppIcon, showToast, toPlainText, truncateRich } from '@aiteach/shared'
+import { AppIcon, appConfirm, showToast, toPlainText, truncateRich, AppModal } from '@aiteach/shared'
 import type { OrgCollabTask, OrgMedia, OrgPaper, OrgQuestion, PaperSection } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import PaperBlock from '@/components/paper/PaperBlock.vue'
 import PaperPreviewModal from '@/components/paper/PaperPreviewModal.vue'
 import {
@@ -479,12 +478,12 @@ function addSection() {
   nextTick(scheduleMeasure)
 }
 
-function removeSection(si: number) {
+async function removeSection(si: number) {
   if (sections.value.length <= 1) {
     showToast('至少保留 1 个大题', 'error')
     return
   }
-  if (!window.confirm(`删除《${sections.value[si].title}》及其 ${sections.value[si].questions.length} 道题？`)) return
+  if (!(await appConfirm(`删除《${sections.value[si].title}》及其 ${sections.value[si].questions.length} 道题？`, { type: 'danger' }))) return
   sections.value.splice(si, 1)
   selected.value = { kind: 'head' }
   commit('删除大题')

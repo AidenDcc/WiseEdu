@@ -1,21 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import {
-  AppIcon,
-  AppSearchInput,
-  AppSegmented,
-  FILE_KIND_COLOR,
-  FILE_KIND_GROUPS,
-  FILE_KIND_ICON,
-  FILE_KIND_TEXT,
-  UPLOAD_KIND_TEXT,
-  hasImage,
-  showToast,
-  toPlainText,
-} from '@aiteach/shared'
+import { AppIcon, AppSearchInput, AppSegmented, appConfirm, FILE_KIND_COLOR, FILE_KIND_GROUPS, FILE_KIND_ICON, FILE_KIND_TEXT, UPLOAD_KIND_TEXT, hasImage, showToast, toPlainText, AppModal } from '@aiteach/shared'
 import type { FileFolder, OrgFile } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import AppDropdownMenu from '@/components/ui/AppDropdownMenu.vue'
 import RichTextEditor from '@/components/ui/RichTextEditor.vue'
 import {
@@ -495,7 +482,7 @@ async function submitPicker() {
 async function onDeleteRows(rows: Row[]) {
   if (!rows.length) return
   const label = rows.length === 1 ? `《${rows[0].name}》` : `选中的 ${rows.length} 项`
-  if (!window.confirm(`删除 ${label}？将进入回收站保留 30 天`)) return
+  if (!(await appConfirm(`删除 ${label}？将进入回收站保留 30 天`, { type: 'danger' }))) return
   try {
     const fileIds = rows.filter((row) => row.type === 'file').map((row) => row.id)
     if (fileIds.length) await deleteFiles(fileIds)
@@ -733,7 +720,7 @@ async function onTogglePin(row: Row) {
 
 async function onConvertToCourseware(row: Row) {
   if (row.type !== 'file') return
-  if (!window.confirm(`将《${row.name}》转为课件？转换后可在「备课中心 → 课件」中编辑`)) return
+  if (!(await appConfirm(`将《${row.name}》转为课件？转换后可在「备课中心 → 课件」中编辑`, { type: 'warning' }))) return
   try {
     await convertToCourseware(row.id)
     showToast('已转为课件，可在「备课中心 → 课件」中编辑', 'success')

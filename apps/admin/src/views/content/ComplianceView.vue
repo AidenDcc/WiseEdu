@@ -6,9 +6,8 @@
  * 人工确认后处置。命中样例展示抽检依据，便于复核与追溯。
  */
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, AppModal } from '@aiteach/shared'
 import type { ComplianceSpotCheck } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import { closeSpotCheck, createSpotCheck, fetchSpotChecks } from '@/api/content'
 
 const list = ref<ComplianceSpotCheck[]>([])

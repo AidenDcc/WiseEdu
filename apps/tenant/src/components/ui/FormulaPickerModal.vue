@@ -2,9 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
-import { showToast } from '@aiteach/shared'
+import { showToast, AppModal } from '@aiteach/shared'
 import type { OrgFormula, StandardFormula } from '@aiteach/shared'
-import AppModal from './AppModal.vue'
 import { FORMULA_CATEGORIES, PLACEHOLDER } from './formula-symbols'
 import { fetchFormulas, fetchStandardFormulas } from '@/api/org'
 

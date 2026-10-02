@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast, ApiError } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, ApiError, AppModal, appConfirm } from '@aiteach/shared'
 import type { AgentConfig, AiModel } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import { fetchAgentConfig, fetchAiModels, rollbackAgentConfig, saveAgentConfig } from '@/api/platform'
 
@@ -43,7 +42,7 @@ async function save() {
     showToast(`「${missing[0].label}」已启用但未绑定模型，请先补充绑定`, 'error')
     return
   }
-  if (!window.confirm('保存后仅对新任务生效，不影响进行中任务，确认保存？')) return
+  if (!(await appConfirm('保存后仅对新任务生效，不影响进行中任务，确认保存？', { type: 'warning' }))) return
   saving.value = true
   try {
     config.value = await saveAgentConfig(JSON.parse(JSON.stringify(config.value)))
@@ -60,7 +59,7 @@ const historyOpen = ref(false)
 const rollingBack = ref(false)
 
 async function rollback(version: number) {
-  if (!window.confirm(`回滚到版本 v${version}？（将生成新版本，不物理覆盖）`)) return
+  if (!(await appConfirm(`回滚到版本 v${version}？（将生成新版本，不物理覆盖）`, { type: 'warning' }))) return
   rollingBack.value = true
   try {
     config.value = await rollbackAgentConfig(version)

@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { AppIcon } from '@aiteach/shared'
+import { AppIcon, AppModal } from '@aiteach/shared'
 import type { DrawEditorType } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 
 /**
  * 插入理科配图 · 类型选择弹窗（规格模块 1 的 MediaDrawSelectDialog）。

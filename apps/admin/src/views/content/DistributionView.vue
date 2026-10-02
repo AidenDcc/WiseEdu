@@ -6,9 +6,8 @@
  * 三种范围授权下发；灰度发布通过「暂停 / 恢复同步」控制。
  */
 import { onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, AppModal } from '@aiteach/shared'
 import type { ContentDistribution } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import { createDistribution, fetchDistributions, toggleDistribution } from '@/api/content'
 
 const list = ref<ContentDistribution[]>([])

@@ -6,9 +6,8 @@
  * 变量用 {变量名} 占位，渲染时替换。
  */
 import { onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, AppModal } from '@aiteach/shared'
 import type { MessageTemplate } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import { fetchMessageTemplates, saveMessageTemplate, toggleMessageTemplate } from '@/api/content'
 
 const templates = ref<MessageTemplate[]>([])

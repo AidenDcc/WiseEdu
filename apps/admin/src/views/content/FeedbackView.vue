@@ -6,10 +6,8 @@
  * 内容错误与版权争议优先级最高，处理结果回写通知模板。
  */
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, AppDrawer, AppModal } from '@aiteach/shared'
 import type { ContentFeedbackTicket } from '@aiteach/shared'
-import AppDrawer from '@/components/ui/AppDrawer.vue'
-import AppModal from '@/components/ui/AppModal.vue'
 import { fetchFeedbackTickets, handleTicket } from '@/api/content'
 
 const tab = ref<'all' | 'open' | 'processing' | 'resolved'>('all')

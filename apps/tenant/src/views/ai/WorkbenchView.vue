@@ -7,7 +7,7 @@
  * （状态、耗时、token 消耗、产物数），token 计量对应机构 AI 用量计费。
  */
 import { computed, onMounted, ref } from 'vue'
-import { AI_TASK_STATUS_TEXT, AppIcon, AppPageHeader, showToast } from '@aiteach/shared'
+import { AI_TASK_STATUS_TEXT, AppIcon, AppPageHeader, appConfirm, showToast } from '@aiteach/shared'
 import type { AiCapabilityCard, AiCenterTask } from '@aiteach/shared'
 import { cancelAiTask, fetchAiCapabilities, fetchAiTasks } from '@/api/student'
 
@@ -42,7 +42,7 @@ function statusTag(status: AiCenterTask['status']) {
 }
 
 async function onCancel(row: AiCenterTask) {
-  if (!window.confirm(`取消任务「${row.title}」？已消耗的 token 不退还。`)) return
+  if (!(await appConfirm(`取消任务「${row.title}」？已消耗的 token 不退还。`, { type: 'warning' }))) return
   try {
     await cancelAiTask(row.id)
     showToast('已取消', 'success')

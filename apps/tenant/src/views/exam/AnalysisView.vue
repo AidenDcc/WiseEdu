@@ -7,8 +7,7 @@
  * 区分度 < 0.2、得分率 < 50% / < 60% 等教研常用阈值直接标红，让老师一眼看到薄弱点。
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { AppIcon, AppPageHeader, type ExamSession, type PaperAnalysis, showToast } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
+import { AppIcon, AppPageHeader, type ExamSession, type PaperAnalysis, showToast, AppModal } from '@aiteach/shared'
 import { fetchExamSessions, fetchPaperAnalysis } from '@/api/org'
 import { useBaseData } from '@/composables/useBaseData'
 

@@ -7,18 +7,8 @@
  * - 知情同意：监护人知情同意记录（T-08-06），支持补签（勾选授权范围）与撤回（撤回后 AI 学情能力对该生停用）。
  */
 import { computed, onMounted, ref } from 'vue'
-import {
-  AppIcon,
-  AppPageHeader,
-  AppSearchInput,
-  AppTabs,
-  CONSENT_STATUS_TEXT,
-  STUDENT_WARNING_TEXT,
-  showToast,
-} from '@aiteach/shared'
+import { AppIcon, AppPageHeader, AppSearchInput, AppTabs, CONSENT_STATUS_TEXT, STUDENT_WARNING_TEXT, appConfirm, showToast, AppModal, AppDrawer } from '@aiteach/shared'
 import type { ConsentRecord, OrgClass, OrgStudent } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
-import AppDrawer from '@/components/ui/AppDrawer.vue'
 import {
   deleteStudent,
   fetchClasses,
@@ -122,7 +112,7 @@ async function submit() {
 }
 
 async function onDelete(row: OrgStudent) {
-  if (!window.confirm(`删除学生「${row.name}」的档案？相关学情数据将一并清除。`)) return
+  if (!(await appConfirm(`删除学生「${row.name}」的档案？相关学情数据将一并清除。`, { type: 'danger' }))) return
   try {
     await deleteStudent(row.id)
     showToast('已删除', 'success')
@@ -153,7 +143,7 @@ async function submitSign() {
 }
 
 async function onWithdraw(row: ConsentRecord) {
-  if (!window.confirm(`撤回「${row.studentName}」监护人的知情同意？撤回后 AI 学情与个性化推送将对该生停用。`)) return
+  if (!(await appConfirm(`撤回「${row.studentName}」监护人的知情同意？撤回后 AI 学情与个性化推送将对该生停用。`, { type: 'warning' }))) return
   try {
     await withdrawConsent(row.id)
     showToast('已撤回', 'success')

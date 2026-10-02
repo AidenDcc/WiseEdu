@@ -9,7 +9,7 @@
  * 「取消」只要不 emit 就丢弃，不需要额外的重置逻辑（与 MediaPickerModal / FormulaPickerModal 同款）。
  */
 import { computed, ref } from 'vue'
-import AppModal from '@/components/ui/AppModal.vue'
+import { AppModal } from '@aiteach/shared'
 import KnowledgePicker from '@/components/compose/KnowledgePicker.vue'
 
 const props = withDefaults(

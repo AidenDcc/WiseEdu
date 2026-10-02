@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppIcon, AppPageHeader, AppTabs, hueColor, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, AppTabs, hueColor, showToast, appConfirm } from '@aiteach/shared'
 import type { TabDef } from '@aiteach/shared'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -74,7 +74,7 @@ onMounted(async () => {
 })
 
 async function onLogout() {
-  if (!window.confirm('确定退出登录？')) return
+  if (!(await appConfirm('确定退出登录？', { type: 'info' }))) return
   await auth.logout()
   showToast('已退出登录', 'success')
   router.push('/login')

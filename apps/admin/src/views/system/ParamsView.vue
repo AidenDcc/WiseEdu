@@ -5,10 +5,9 @@
  * 按分组维护平台运行参数；只读参数（合规红线类）不可编辑。
  */
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, AppModal } from '@aiteach/shared'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import type { SystemParam } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import { fetchSystemParams, saveSystemParam } from '@/api/content'
 
 const params = ref<SystemParam[]>([])

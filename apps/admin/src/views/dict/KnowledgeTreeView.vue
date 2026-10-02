@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { AppFilterPanel, AppIcon, AppListToolbar, AppSearchInput, showToast, ApiError } from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, AppSearchInput, showToast, ApiError, AppModal, appConfirm } from '@aiteach/shared'
 import type { DictItem, FilterRowDef, KnowledgeNode } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import { deleteKnowledgeNode, fetchDict, fetchKnowledge, saveKnowledgeNode, toggleKnowledgeNode } from '@/api/platform'
 
 const MAX_DEPTH = 6
@@ -115,7 +114,7 @@ async function onToggle(node: KnowledgeNode) {
 }
 
 async function onDelete(node: KnowledgeNode) {
-  if (!window.confirm(`确认删除「${node.name}」？存在子节点时将无法删除。`)) return
+  if (!(await appConfirm(`确认删除「${node.name}」？存在子节点时将无法删除。`, { type: 'danger' }))) return
   try {
     await deleteKnowledgeNode(node.id)
     showToast('已删除', 'success')

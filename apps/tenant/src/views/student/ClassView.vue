@@ -6,10 +6,8 @@
  * 拆两个页面反而要多跳一次。名册直接复用学生档案接口按班过滤。
  */
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, CLASS_NAMES, STUDENT_WARNING_TEXT, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, CLASS_NAMES, STUDENT_WARNING_TEXT, showToast, AppModal, AppDrawer } from '@aiteach/shared'
 import type { OrgClass, OrgStudent } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
-import AppDrawer from '@/components/ui/AppDrawer.vue'
 import { fetchClasses, fetchStudents, saveClass, toggleClass } from '@/api/student'
 
 const classes = ref<OrgClass[]>([])

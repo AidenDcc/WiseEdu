@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { AppFilterPanel, AppIcon, AppListToolbar, showToast } from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, showToast, AppModal } from '@aiteach/shared'
 import type { ErrorLog, FilterRowDef, LoginLog, OperationLog } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import { fetchErrorLogs, fetchLoginLogs, fetchOperationLogs } from '@/api/platform'
 

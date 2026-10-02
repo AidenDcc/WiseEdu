@@ -8,23 +8,7 @@
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import {
-  AppFilterPanel,
-  AppIcon,
-  AppListToolbar,
-  AppPageHeader,
-  type FilterRowDef,
-  type MistakeEntry,
-  type MistakeMastery,
-  MISTAKE_MASTERY_TEXT,
-  MISTAKE_REASONS,
-  type OrgQuestion,
-  RichTextViewer,
-  showToast,
-  truncateRich,
-} from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
-import AppDrawer from '@/components/ui/AppDrawer.vue'
+import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, appConfirm, type FilterRowDef, type MistakeEntry, type MistakeMastery, MISTAKE_MASTERY_TEXT, MISTAKE_REASONS, type OrgQuestion, RichTextViewer, showToast, truncateRich, AppModal, AppDrawer } from '@aiteach/shared'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import {
   buildMistakeDrill,
@@ -148,7 +132,7 @@ async function markMastered(row: MistakeEntry) {
 }
 
 async function removeMistake(row: MistakeEntry) {
-  if (!window.confirm(`将《${questionMap.value[row.questionId]?.stem ? truncateRich(questionMap.value[row.questionId].stem, 20) : '该题'}》移出错题本？`)) return
+  if (!(await appConfirm(`将《${questionMap.value[row.questionId]?.stem ? truncateRich(questionMap.value[row.questionId].stem, 20) : '该题'}》移出错题本？`, { type: 'danger' }))) return
   await deleteMistake(row.id)
   await loadList()
   showToast('已移除', 'success')

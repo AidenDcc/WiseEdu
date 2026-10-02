@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { AppIcon, showToast } from '@aiteach/shared'
+import { AppIcon, showToast, AppModal } from '@aiteach/shared'
 import type { DrawEditorType } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import { generateAiDraw } from '@/api/org'
 import {
   stripInteractiveFields,

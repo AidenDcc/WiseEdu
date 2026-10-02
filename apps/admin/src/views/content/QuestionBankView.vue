@@ -7,10 +7,8 @@
  * （那是「内容分发」模块的职责）。
  */
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, PLATFORM_CONTENT_STATUS_TEXT, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, PLATFORM_CONTENT_STATUS_TEXT, showToast, AppDrawer, AppModal } from '@aiteach/shared'
 import type { PlatformContentStatus, PlatformQuestion } from '@aiteach/shared'
-import AppDrawer from '@/components/ui/AppDrawer.vue'
-import AppModal from '@/components/ui/AppModal.vue'
 import { fetchPlatformQuestions, reviewPlatformQuestion, togglePlatformQuestion } from '@/api/content'
 
 const questions = ref<PlatformQuestion[]>([])

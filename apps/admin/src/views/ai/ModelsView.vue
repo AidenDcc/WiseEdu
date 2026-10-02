@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast, ApiError, AI_MODEL_TYPE_TEXT } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, appConfirm, ApiError, AI_MODEL_TYPE_TEXT, AppModal } from '@aiteach/shared'
 import type { AiModel, AiModelType } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import { fetchAiModels, healthCheckAiModel, saveAiModel, testAiModel, toggleAiModel } from '@/api/platform'
 
@@ -20,10 +19,7 @@ async function load() {
 
 async function onToggle(model: AiModel) {
   if (model.enabled) {
-    const ok = window.confirm(
-      '停用后所有机构涉及该模型的 AI 功能将走备用模型/降级，确认停用？',
-    )
-    if (!ok) return
+    if (!(await appConfirm('停用后所有机构涉及该模型的 AI 功能将走备用模型/降级，确认停用？', { type: 'warning' }))) return
   }
   try {
     const result = await toggleAiModel(model.id)

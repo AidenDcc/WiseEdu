@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { AppIcon, AppListToolbar, showToast, ApiError, DICT_TYPES } from '@aiteach/shared'
+import { AppIcon, AppListToolbar, showToast, ApiError, DICT_TYPES, AppModal, appConfirm } from '@aiteach/shared'
 import type { DictItem, DictTypeKey } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import { deleteDictItem, fetchDict, moveDictItem, saveDictItem, toggleDictItem } from '@/api/platform'
 
@@ -46,7 +45,7 @@ async function onMove(item: DictItem, direction: -1 | 1) {
 }
 
 async function onDelete(item: DictItem) {
-  if (!window.confirm(`确认删除「${item.name}」？删除前将校验机构引用。`)) return
+  if (!(await appConfirm(`确认删除「${item.name}」？删除前将校验机构引用。`, { type: 'danger' }))) return
   try {
     await deleteDictItem(activeType.value, item.id)
     showToast('已删除', 'success')

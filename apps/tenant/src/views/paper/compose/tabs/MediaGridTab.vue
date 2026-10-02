@@ -9,9 +9,8 @@
  * `{ questionId, score }`），所以本页签**没有加入组卷车**，交接动作是「按知识点找题」。
  */
 import { computed, ref } from 'vue'
-import { AppIcon, resolveMediaSrc, showToast } from '@aiteach/shared'
+import { AppIcon, resolveMediaSrc, showToast, AppModal } from '@aiteach/shared'
 import type { MediaKind, OrgMedia } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import { useComposeData } from '@/composables/useComposeData'
 import ComposeFilterBar from '@/components/compose/ComposeFilterBar.vue'
 import MediaGridCard from '@/components/compose/MediaGridCard.vue'

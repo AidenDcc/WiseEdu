@@ -11,19 +11,8 @@
  */
 import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import {
-  AppFilterPanel,
-  AppIcon,
-  AppListToolbar,
-  AppPageHeader,
-  RichTextViewer,
-  SLIDE_LAYOUT_TEXT,
-  TEACH_DOC_STATUS_TEXT,
-  showToast,
-  truncateRich,
-} from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, RichTextViewer, SLIDE_LAYOUT_TEXT, TEACH_DOC_STATUS_TEXT, appConfirm, showToast, truncateRich, AppModal } from '@aiteach/shared'
 import type { CoursewareSlide, FilterRowDef, OrgQuestion, SlideLayout, TeachDoc } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import {
   deleteTeachDoc,
@@ -310,7 +299,7 @@ async function onDuplicate(row: TeachDoc) {
 }
 
 async function onDelete(row: TeachDoc) {
-  if (!window.confirm(`删除《${row.name}》？将进入回收站保留 30 天`)) return
+  if (!(await appConfirm(`删除《${row.name}》？将进入回收站保留 30 天`, { type: 'danger' }))) return
   await deleteTeachDoc(row.id)
   await loadList()
   showToast('已移入回收站', 'success')

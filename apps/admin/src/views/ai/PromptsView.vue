@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast, ApiError, PROMPT_SCENES, PROMPT_VARIABLES } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, ApiError, PROMPT_SCENES, PROMPT_VARIABLES, AppModal, appConfirm } from '@aiteach/shared'
 import type { PromptTemplate } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import { fetchPrompts, rollbackPrompt, savePrompt, setDefaultPrompt, testPrompt, togglePrompt } from '@/api/platform'
 
 const STATUS_TEXT: Record<PromptTemplate['status'], string> = {
@@ -104,7 +103,7 @@ async function save() {
 
 /* ===== 状态 / 默认模板 ===== */
 async function onToggle(item: PromptTemplate) {
-  if (item.status === 'published' && !window.confirm(`停用「${item.name}」后机构端该场景将回退到默认模板，确认停用？`)) {
+  if (item.status === 'published' && !(await appConfirm(`停用「${item.name}」后机构端该场景将回退到默认模板，确认停用？`, { type: 'warning' }))) {
     return
   }
   try {
@@ -117,7 +116,7 @@ async function onToggle(item: PromptTemplate) {
 }
 
 async function onSetDefault(item: PromptTemplate) {
-  if (!window.confirm(`将「${item.name}」设为「${item.scene}」场景默认模板？同场景原默认模板将取消默认。`)) return
+  if (!(await appConfirm(`将「${item.name}」设为「${item.scene}」场景默认模板？同场景原默认模板将取消默认。`, { type: 'info' }))) return
   try {
     await setDefaultPrompt(item.id)
     showToast('已设为默认模板', 'success')
@@ -156,7 +155,7 @@ const rollingBack = ref(false)
 async function rollback(version: number) {
   const item = historyOpen.value
   if (!item) return
-  if (!window.confirm(`回滚到版本 v${version}？（将生成新版本，不物理覆盖）`)) return
+  if (!(await appConfirm(`回滚到版本 v${version}？（将生成新版本，不物理覆盖）`, { type: 'warning' }))) return
   rollingBack.value = true
   try {
     const updated = await rollbackPrompt(item.id, version)

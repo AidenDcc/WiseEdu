@@ -16,7 +16,7 @@
  */
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppIcon } from '@aiteach/shared'
+import { AppIcon, appConfirm } from '@aiteach/shared'
 import AiChatPanel from './AiChatPanel.vue'
 import { askAi, chatEngine, type ChatSource, type ChatTurn } from '@/api/ai-chat'
 import { useDraggableFab } from '@/composables/useDraggableFab'
@@ -144,8 +144,8 @@ function retry(): void {
   void request(failedQuestion.value, history)
 }
 
-function reset(): void {
-  if (turns.value.length && !window.confirm('确定清空当前会话？')) return
+async function reset(): Promise<void> {
+  if (turns.value.length && !(await appConfirm('确定清空当前会话？', { type: 'danger' }))) return
   /* 递增序号作废在途请求：否则刚清空又会冒出一条上一轮的迟到回答 */
   seq += 1
   turns.value = []

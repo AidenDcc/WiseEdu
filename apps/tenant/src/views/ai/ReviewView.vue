@@ -7,9 +7,8 @@
  * 复核状态与复核人。error 级必须人工复核才能放行；驳回即打回重生成。
  */
 import { computed, onMounted, ref } from 'vue'
-import { ARTIFACT_REVIEW_STATUS_TEXT, AppIcon, AppPageHeader, showToast } from '@aiteach/shared'
+import { ARTIFACT_REVIEW_STATUS_TEXT, AppIcon, AppPageHeader, showToast, AppModal } from '@aiteach/shared'
 import type { AiArtifactReview } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import { fetchAiArtifacts, reviewAiArtifact } from '@/api/student'
 
 const statusFilter = ref('')

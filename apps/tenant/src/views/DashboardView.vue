@@ -59,7 +59,7 @@ const ENTRIES = [
   { label: '同步教辅', icon: 'book', to: '/material/list' },
   { label: '录制微课', icon: 'smartphone', to: '/material/media/video' },
   { label: 'AI 出题', icon: 'sparkles', to: '/question/create?mode=ai', hot: true },
-  { label: 'AI 识题', icon: 'image', to: '/question/photo' },
+  { label: '图片识题', icon: 'image', to: '/question/photo' },
 ] as const
 
 const moreOpen = ref(false)
@@ -70,7 +70,7 @@ const moreMenus = menus
 /* ================= 模块2：运营位 ================= */
 const BANNERS = [
   { title: 'AI 智能出题', desc: '描述考点与难度，一句话生成整卷，知识点与难度自动配比', action: '立即体验', to: '/question/create?mode=ai', seed: 1 },
-  { title: 'AI 识题', desc: '拍下纸质试卷，AI 还原题干、公式与配图，确认即可入库', action: '去试试', to: '/question/photo', seed: 2 },
+  { title: '图片识题', desc: '拍下纸质试卷，AI 还原题干、公式与配图，确认即可入库', action: '去试试', to: '/question/photo', seed: 2 },
   { title: '协同组卷', desc: '多人实时协作组卷，改分值、换题全程留痕', action: '发起协作', to: '/paper/collab', seed: 3 },
   { title: '知识广场', desc: '共享机构优质资源，一键收藏到本校资料库', action: '去逛逛', to: '/square', seed: 5 },
 ]

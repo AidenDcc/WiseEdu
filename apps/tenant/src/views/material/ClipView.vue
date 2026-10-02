@@ -6,10 +6,8 @@
  * 关联题目走抽屉。顶部可按知识点/关键字跨视频检索切片。
  */
 import { computed, onMounted, reactive, ref } from 'vue'
-import { AppIcon, AppListToolbar, AppPageHeader, AppSearchInput, showToast, truncateRich } from '@aiteach/shared'
+import { AppIcon, AppListToolbar, AppPageHeader, AppSearchInput, appConfirm, showToast, truncateRich, AppModal, AppDrawer } from '@aiteach/shared'
 import type { OrgMedia, OrgQuestion, VideoClip } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
-import AppDrawer from '@/components/ui/AppDrawer.vue'
 import { deleteVideoClip, fetchMedia, fetchQuestions, fetchVideoClips, saveVideoClip } from '@/api/org'
 import { useBaseData } from '@/composables/useBaseData'
 
@@ -163,7 +161,7 @@ async function submitClip() {
 }
 
 async function onDeleteClip(clip: VideoClip) {
-  if (!window.confirm(`删除切片《${clip.title}》？`)) return
+  if (!(await appConfirm(`删除切片《${clip.title}》？`, { type: 'danger' }))) return
   try {
     await deleteVideoClip(clip.id)
     await Promise.all([loadClips(selectedId.value ?? undefined), loadAllClips()])

@@ -12,10 +12,8 @@
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, COLLAB_MEMBER_TEXT, COLLAB_STATUS_TEXT, showToast } from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, appConfirm, COLLAB_MEMBER_TEXT, COLLAB_STATUS_TEXT, showToast, AppModal, AppDrawer } from '@aiteach/shared'
 import type { CollabMember, FilterRowDef, OrgCollabTask, OrgPaper, OrgQuestion, StaffMember } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
-import AppDrawer from '@/components/ui/AppDrawer.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import { deleteCollabTask, fetchCollabTasks, fetchPapers, fetchQuestions, fetchStaff, saveCollabTask } from '@/api/org'
 import { useBaseData } from '@/composables/useBaseData'
@@ -330,7 +328,7 @@ async function submit() {
 const detail = ref<OrgCollabTask | null>(null)
 
 async function onDelete(task: OrgCollabTask) {
-  if (!window.confirm(`删除协同组卷任务《${task.name}》？将进入回收站保留 30 天`)) return
+  if (!(await appConfirm(`删除协同组卷任务《${task.name}》？将进入回收站保留 30 天`, { type: 'danger' }))) return
   await deleteCollabTask(task.id)
   showToast('任务已移入回收站', 'success')
   await load()

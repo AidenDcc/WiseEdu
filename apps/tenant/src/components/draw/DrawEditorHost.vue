@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef } from 'vue'
-import { AppIcon, showToast } from '@aiteach/shared'
+import { AppIcon, showToast, AppModal, appConfirm } from '@aiteach/shared'
 import type { DrawEditorType, OrgMedia } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import DrawDialogFooter from './DrawDialogFooter.vue'
 import JsxGraphDraw from './JsxGraphDraw.vue'
 import FabricChemDeviceDraw from './FabricChemDeviceDraw.vue'
@@ -163,9 +162,9 @@ async function onConfirm() {
   emit('close')
 }
 
-function onCancel() {
+async function onCancel() {
   const editor = editorRef.value
-  if (editor?.isDirty?.() && !window.confirm('放弃当前未保存的绘图修改？')) return
+  if (editor?.isDirty?.() && !(await appConfirm('放弃当前未保存的绘图修改？', { type: 'danger' }))) return
   emit('close')
 }
 

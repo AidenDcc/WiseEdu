@@ -11,18 +11,8 @@
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import {
-  AppFilterPanel,
-  AppIcon,
-  AppListToolbar,
-  AppPageHeader,
-  PREP_TASK_STATUS_TEXT,
-  TEACH_KIND_TEXT,
-  showToast,
-  truncateRich,
-} from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, appConfirm, PREP_TASK_STATUS_TEXT, TEACH_KIND_TEXT, showToast, truncateRich, AppModal } from '@aiteach/shared'
 import type { FilterRowDef, PrepMember, PrepTask, StaffMember, TeachDoc, TeachDocKind } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import RichTextEditor from '@/components/ui/RichTextEditor.vue'
 import {
@@ -130,7 +120,7 @@ function memberStatusClass(s: PrepMember['status']): string {
 }
 
 async function onDelete(t: PrepTask) {
-  if (!window.confirm(`删除备课任务《${t.name}》？此操作不可撤销`)) return
+  if (!(await appConfirm(`删除备课任务《${t.name}》？此操作不可撤销`, { type: 'danger' }))) return
   try {
     await deletePrepTask(t.id)
     await loadList()

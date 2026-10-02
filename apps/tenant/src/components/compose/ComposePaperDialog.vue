@@ -13,9 +13,8 @@
  */
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppIcon, showToast } from '@aiteach/shared'
+import { AppIcon, showToast, AppModal } from '@aiteach/shared'
 import type { OrgPaper } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
 import PaperPreviewModal from '@/components/paper/PaperPreviewModal.vue'
 import { savePaper } from '@/api/org'
 import { useBaseData } from '@/composables/useBaseData'

@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, AppListToolbar, AppPageHeader, AppTabs, ORG_PROMPT_SCENES, showToast } from '@aiteach/shared'
+import { AppIcon, AppListToolbar, AppPageHeader, AppTabs, appConfirm, ORG_PROMPT_SCENES, showToast, AppModal, AppDrawer } from '@aiteach/shared'
 import type { OrgPrompt, TabDef } from '@aiteach/shared'
-import AppModal from '@/components/ui/AppModal.vue'
-import AppDrawer from '@/components/ui/AppDrawer.vue'
 import {
   copyPlatformPrompt,
   deleteOrgPrompt,
@@ -118,7 +116,7 @@ const versionTarget = ref<OrgPrompt | null>(null)
 
 async function onRollback(version: number) {
   if (!versionTarget.value) return
-  if (!window.confirm(`回滚到 v${version}？当前内容将存为新版本`)) return
+  if (!(await appConfirm(`回滚到 v${version}？当前内容将存为新版本`, { type: 'warning' }))) return
   await rollbackOrgPrompt(versionTarget.value.id, version)
   versionTarget.value = null
   await load()
@@ -126,7 +124,7 @@ async function onRollback(version: number) {
 }
 
 async function onDelete(row: OrgPrompt) {
-  if (!window.confirm(`删除模板「${row.name}」？`)) return
+  if (!(await appConfirm(`删除模板「${row.name}」？`, { type: 'danger' }))) return
   try {
     await deleteOrgPrompt(row.id)
     await load()

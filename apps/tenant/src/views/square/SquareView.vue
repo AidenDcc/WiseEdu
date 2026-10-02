@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, showToast } from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, showToast, AppDrawer } from '@aiteach/shared'
 import type { FilterRowDef, SquareResource } from '@aiteach/shared'
-import AppDrawer from '@/components/ui/AppDrawer.vue'
 import { collectSquare, downloadSquare, fetchSquare } from '@/api/org'
 import { useBaseData } from '@/composables/useBaseData'
 

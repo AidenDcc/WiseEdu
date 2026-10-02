@@ -10,11 +10,10 @@
  */
 import { computed, ref } from 'vue'
 import type { OrgQuestion } from '@aiteach/shared'
-import { AppIcon, RichTextViewer } from '@aiteach/shared'
+import { AppIcon, RichTextViewer, AppModal } from '@aiteach/shared'
 import { useComposeData } from '@/composables/useComposeData'
 import { useComposeBasket } from '@/composables/useComposeBasket'
 import { useQuestionFavorites } from '@/composables/useQuestionFavorites'
-import AppModal from '@/components/ui/AppModal.vue'
 import { similarQuestions } from '@/utils/question-match'
 
 const props = defineProps<{ row: OrgQuestion }>()
