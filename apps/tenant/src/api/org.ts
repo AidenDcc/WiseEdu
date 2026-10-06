@@ -35,6 +35,8 @@ import type {
   OrgOperationLog,
   OrgPaper,
   OrgQuestion,
+  QuestionCorrection,
+  QuestionCorrectionType,
   OrgPrompt,
   OrgRole,
   OrgSearchResult,
@@ -100,6 +102,23 @@ export function variantOf(id: number) {
 export function toggleQuestionOffline(id: number) {
   return request<OrgQuestion>('/tenant/questions/offline', { method: 'POST', data: { id } })
 }
+/** 提交题目纠错反馈（类型多选 + 富文本描述），记录由题库治理侧处理 */
+export function submitQuestionCorrection(data: {
+  questionId: number
+  types: QuestionCorrectionType[]
+  description: string
+}) {
+  return request<QuestionCorrection>('/tenant/questions/correct', { method: 'POST', data })
+}
+
+/**
+ * 全部纠错记录（按提交时间倒序）。
+ * 记录量级是「一题几条」，题库管理一次拉全量、本地按 questionId 分组即可，
+ * 不为列表里的标识再补一个「哪些题有纠错」的接口。
+ */
+export function fetchQuestionCorrections() {
+  return request<QuestionCorrection[]>('/tenant/questions/corrections')
+}
 
 /* ===== 全局搜索（FR-GN-026） ===== */
 /** 一次检索返回题目 / 试卷 / 同步备课 / 视频 / 我的文件五个分类，搜索面板按页签展示 */
@@ -125,8 +144,12 @@ export interface TenantDictItem {
   name: string
   sort: number
   enabled: boolean
-  /** 学科专属项（如「完形填空」只属于英语）；留空即全学科通用 */
+  /** 学科专属项（如「完形填空」只属于英语、「数学竞赛」只属于数学）；留空即全学科通用 */
   subjects?: string[]
+  /** grade = 该年级所属学段；examType = 适配学段。留空/缺省 = 不限（全学段通用） */
+  stage?: string
+  /** 仅 examType：试卷分类（见 `PAPER_CATEGORIES`），组卷工作台试卷类型树的第一级 */
+  paperCategory?: string
 }
 export function fetchTenantDict(type: string) {
   return request<TenantDictItem[]>(withQuery('/tenant/dict', { type }))
@@ -190,14 +213,35 @@ export function deletePaper(id: number) {
 export function reviewPaper(id: number, pass: boolean, opinion: string) {
   return request<OrgPaper>('/tenant/papers/review', { method: 'POST', data: { id, pass, opinion } })
 }
-export function aiComposePaper(data: { name: string; subject: string; grade: string; structure: Array<{ type: string; count: number; score: number }> }) {
+export function aiComposePaper(data: {
+  name: string
+  subject: string
+  grade: string
+  structure: Array<{ type: string; count: number; score: number }>
+  /** 试卷存「我的文件」所选文件夹 */
+  folderId?: number
+}) {
   return request<{ paper: OrgPaper; aiPicked: number }>('/tenant/papers/ai-compose', { method: 'POST', data })
 }
 export function swapPaperQuestion(paperId: number, questionId: number) {
   return request<{ paper: OrgPaper; newId: number }>('/tenant/papers/swap-question', { method: 'POST', data: { paperId, questionId } })
 }
-export function generateParallels(motherId: number, count: number) {
-  return request<OrgPaper[]>('/tenant/papers/parallels', { method: 'POST', data: { motherId, count } })
+/**
+ * 生成平行卷（FR-PP-015）：固定产出 1 份 B 卷。
+ *
+ * 不再收「份数」：界面已固定 1 份，留着 `(number, number)` 两个相邻的裸数字参数
+ * 是给调用方埋雷（传反了编译器也不会响）。
+ */
+export function generateParallels(motherId: number, folderId: number) {
+  return request<OrgPaper[]>('/tenant/papers/parallels', { method: 'POST', data: { motherId, folderId } })
+}
+/** 浏览计数：试卷库「预览」时累加（列表本地同步 +1，无需回读） */
+export function browsePaper(id: number) {
+  return request<null>('/tenant/papers/browse', { method: 'POST', data: { id } })
+}
+/** 下载计数：试卷库「导出 Word / PDF」时累加 */
+export function downloadPaper(id: number) {
+  return request<null>('/tenant/papers/download', { method: 'POST', data: { id } })
 }
 
 /* ===== 协同组卷（FR-PP-004 ~ 007 / 017 ~ 021） =====
@@ -217,6 +261,8 @@ export function saveCollabTask(data: {
   members: Array<Pick<CollabMember, 'name' | 'questionTypes' | 'perms'>>
   /** 卷面来源：把这份已有试卷的卷面复制过来当起始卷（从「试卷编辑 → 协同组卷」进来时带） */
   sourcePaperId?: number
+  /** 新建任务的试卷存「我的文件」所选文件夹 */
+  folderId?: number
 }) {
   return request<{ task: OrgCollabTask; paper: OrgPaper }>('/tenant/collab/tasks/save', { method: 'POST', data })
 }

@@ -10,9 +10,16 @@
  *    退出登录（AppLayout.onLogout 不刷新页面）会自动把上一轮用户的对话丢掉 ——
  *    所以也不需要往 localStorage 存一份（共用机房电脑上长期留存师生问答并不合适）。
  * 2. **悬浮球在面板打开时淡出**：面板占满顶栏以下的整条右侧（见 AiChatPanel 的尺寸说明），
- *    而悬浮球默认就在右下角、z-index 90 又高于面板的 45，不淡出就会浮在面板上面压住答案。
+ *    而悬浮球层级（301，高于一切弹窗）又远高于面板的 45，不淡出就会浮在面板上面压住答案。
  * 3. **Escape 关闭绑在面板自身**（@keydown.esc，配合打开时聚焦输入框），不用 document 级监听：
  *    AppDrawer / AppModal 用的是全局 Escape，若这里也全局监听，抽屉开着时按一次会把两者一起关掉。
+ * 4. **悬浮球是「图标 + 文字」的圆钮**（图标在上、11px 文字在下）：只画一个图标时，
+ *    「这个球是干什么的」要靠猜；文字直接把用途说清。
+ * 5. **`#above-fab` 插槽**：给页面在球的**正上方**再挂一个同级悬浮球（组卷工作台用它放组卷车）。
+ *    位置由本组件从拖拽状态里算出来并透传 —— 球是可拖的、位置还记在 localStorage，
+ *    要让插槽位永远贴着球，只有共用这一份实时位置才行。做成插槽而不是 prop，
+ *    是因为本组件是全局组件（AppLayout 与组卷工作台各挂一份），把「组卷车」这个概念写进来
+ *    会把全局组件和组卷业务绑死；而另起一个组件又拿不到拖动中的位置。
  */
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -23,7 +30,9 @@ import { useDraggableFab } from '@/composables/useDraggableFab'
 import { useScope } from '@/composables/useScope'
 
 /** 悬浮球边长：与样式里的 width/height 保持一致，供拖拽定位首帧测算用 */
-const FAB_SIZE = 56
+const FAB_SIZE = 64
+/** 上方插槽球与本体球的直径差与间隙：插槽位 = 球的上沿再往上这么多 */
+const ABOVE_GAP = 8
 /** 回传给模型的历史轮数上限：够接住「那第 2 问呢」这类追问，又不至于把上下文撑爆 */
 const HISTORY_TURNS = 6
 
@@ -55,6 +64,17 @@ const { style, dragging, consumeDrag, onPointerDown, onPointerMove, onPointerUp 
   fabRef,
   { size: FAB_SIZE },
 )
+
+/**
+ * 插槽球（`#above-fab`）的位置：横向与球对齐，纵向落到球的上沿再往上一个球径 + 间隙。
+ * 用 `calc()` 串在球自己的 top 上，球一被拖动插槽位立刻同步 —— 不需要第二套拖拽状态。
+ *
+ * 插槽球请与本球同尺寸（`FAB_SIZE`）：`left` 对齐的是左沿，尺寸不同就会左右错开。
+ */
+const aboveStyle = computed(() => ({
+  left: style.value.left,
+  top: `calc(${style.value.top} - ${FAB_SIZE + ABOVE_GAP}px)`,
+}))
 
 /** 请求序号：只有最新一次请求可以写状态（清空会话 / 连发两条时作废在途回答） */
 let seq = 0
@@ -185,8 +205,18 @@ function onFabClick(): void {
         @pointercancel="onPointerUp"
         @click="onFabClick"
       >
-        <AppIcon name="sparkles" :size="24" />
+        <AppIcon name="sparkles" :size="22" />
+        <span class="ai-fab-text">AI 问答</span>
       </button>
+    </Transition>
+
+    <!-- 页面在球上方挂的同级悬浮球（组卷工作台用它放组卷车）：位置跟着本球走，面板打开时一起淡出
+         （面板压不到它，但并排空着两个球没有意义，且它们本来就是一组的入口）。
+         没传插槽时**整块不渲染** —— 一个空的 fixed 盒子会一直挡住它下面那 64×64 的区域 -->
+    <Transition name="fab">
+      <div v-if="$slots['above-fab']" v-show="!open" class="ai-fab-above" :style="aboveStyle">
+        <slot name="above-fab" />
+      </div>
     </Transition>
 
     <Transition name="panel">
@@ -209,18 +239,23 @@ function onFabClick(): void {
 </template>
 
 <style scoped>
+/* 层级 301：高于全局搜索(200)与下拉菜单(300)，即「永远在最顶层」——代价是会浮在
+   弹窗 / 试卷预览的右下角之上。低于它的浮层（如组卷车抽屉 310）反过来压在球上是刻意的，
+   免得球挡住抽屉底部的主操作，见 ComposeView 里的层级说明。 */
 .ai-fab {
   position: fixed;
-  z-index: 90;
-  width: 56px;
-  height: 56px;
+  z-index: 301;
+  width: 64px;
+  height: 64px;
   border: none;
   border-radius: 50%;
   background: var(--brand-grad);
   color: #fff;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 1px;
   box-shadow: 0 10px 24px rgba(0, 180, 166, 0.36);
   /* 移动端拖动时不要连带滚动页面（配合 useDraggableFab 的 pointer 事件） */
   touch-action: none;
@@ -238,6 +273,17 @@ function onFabClick(): void {
 .ai-fab.dragging {
   cursor: grabbing;
   transition: none;
+}
+.ai-fab-text { font-size: 11px; line-height: 1; font-weight: 600; letter-spacing: 0.2px; }
+
+/* 上方插槽球的定位壳：只管位置，球长什么样由插槽内容自己决定（组卷工作台传的是组卷车球）。
+   插槽内容请填满这个盒子（width/height: 100%），否则露出的空白区会挡住下面页面的点击 */
+.ai-fab-above {
+  position: fixed;
+  z-index: 301;
+  width: 64px;
+  height: 64px;
+  transition: left 0.26s ease-out, top 0.26s ease-out;
 }
 
 .fab-enter-active,

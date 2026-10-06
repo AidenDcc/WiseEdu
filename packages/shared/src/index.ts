@@ -55,6 +55,10 @@ export { showToast } from './utils/toast'
 export type { ToastType } from './utils/toast'
 export { appConfirm } from './utils/confirm'
 export type { ConfirmType, ConfirmOptions } from './utils/confirm'
+export { copyText } from './utils/clipboard'
+/* 浮层栈：`AppModal` / `AppConfirm` / `AppDrawer` 之外的浮层（如试卷预览）也要进来登记，
+   否则它在 document 上的 Esc 监听不受仲裁 —— 一次 Esc 会把子弹窗和它自己一起关掉 */
+export { enterOverlay, exitOverlay, isTopOverlay } from './utils/overlay-stack'
 export { default as AppIcon } from './components/AppIcon.vue'
 
 /* ===== 共享 UI 组件（机构端 / 超管端通用，样式自带、只取 CSS 变量） =====
@@ -80,6 +84,31 @@ export type ChartSeries = {
   color: string
 }
 export { default as BarChart } from './components/BarChart.vue'
+export { default as ComboChart } from './components/ComboChart.vue'
+/* 与上面的 ChartSeries 同一写法：类型在 barrel 里重述一遍，不从 .vue 里再导出 */
+export type ComboAxis = {
+  position: 'left' | 'right'
+  offset?: number
+  name: string
+  suffix?: string
+  hidden?: boolean
+}
+export type ComboBar = {
+  name: string
+  data: number[]
+  color: string
+  axis: number
+  unit?: string
+}
+export type ComboLine = {
+  name: string
+  data: number[]
+  color: string
+  axis: number
+  unit?: string
+}
+export { default as RingChart } from './components/RingChart.vue'
+export type RingDatum = { name: string; value: number }
 
 /* 富文本：正文改存 HTML 后的公共能力（渲染器 + 纯文本/净化工具） */
 export { default as RichTextViewer } from './components/RichTextViewer.vue'
@@ -114,6 +143,8 @@ export type {
   QuestionLibrary,
   AiCheckResult,
   OrgQuestion,
+  QuestionCorrection,
+  QuestionCorrectionType,
   FillBlankAnswer,
   OptionColumns,
   PhotoResultEdit,
@@ -122,6 +153,9 @@ export type {
   TextbookOption,
   PaperSection,
   PaperStatus,
+  PaperSource,
+  PaperCategory,
+  PaperAttachment,
   OrgPaper,
   CollabTaskStatus,
   CollabMemberStatus,
@@ -219,10 +253,17 @@ export {
   COLLAB_TASK_STATUS_TEXT,
   COLLAB_MEMBER_STATUS_TEXT,
   UPLOAD_KIND_TEXT,
+  /* 卷内小题总数：试卷列表的「题量」（实现在 org-store，机构端几处各抄过一份 sections.reduce） */
+  paperQuestionCount,
+  /* 卷面总分：分值占比类统计的分母，同样只在 org-store 里有一份实现 */
+  paperTotalScore,
 } from './mock/org-store'
 /* 这几个字典定义在 models 里（与类型同源），值需单独导出给前端 */
 export {
+  QUESTION_CORRECTION_TYPES,
   QUESTION_SOURCE_OPTIONS,
+  PAPER_SOURCE_OPTIONS,
+  PAPER_CATEGORIES,
   COLLAB_STATUS_TEXT,
   COLLAB_MEMBER_TEXT,
   TEACH_KIND_TEXT,

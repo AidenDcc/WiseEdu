@@ -1,14 +1,14 @@
 <script setup lang="ts">
 /**
  * AI 生成结果列表：按题库管理「详细」列表的卡片样式逐题展示
- * （标签行 / 题干 / 选项高亮 / 答案与解析 / 操作行）。
+ * （标签行 / 题干 / 选项 / 答案与解析 / 操作行）。
  *
  * 为什么复用题库那套卡片外观、而不是抽成一个公共组件：题库卡片里的编号、状态标签、组卷篮、
  * 解析折叠都依赖 OrgQuestion（status / useCount / updatedAt / variantOf），而生成结果只有
  * GeneratedQuestion（stem / options / answer / analysis / knowledge / difficulty），
  * 另外还多了质检结论与「已保存到题库」这类对方没有的状态 —— 抽成公共组件要挂一堆可选字段与插槽，
  * 两边都更难读。所以**共用的是逻辑与样式规则，不是组件**：
- * - 判定逻辑（answerLetters / difficultyClass / needsFigure）收敛在 `@/utils/question-card`，
+ * - 判定逻辑（difficultyClass / needsFigure）收敛在 `@/utils/question-card`，
  *   与 BankView 同一份实现，改一处两边都生效；
  * - 卡片外观沿用题库列表的 `.q-card` / `.qc-*` 类（同一套设计令牌，两端一致）；
  * - 页面骨架（筛选面板 / 工具条 / 分段控件 / 分页）一律用 `@aiteach/shared` 的
@@ -64,7 +64,7 @@ function bodyOf(item: GeneratedQuestion): CardBody {
   return props.savedById?.[item.id] ?? item
 }
 
-/* answerLetters / difficultyClass / needsFigure 见 @/utils/question-card
+/* difficultyClass / needsFigure 见 @/utils/question-card
    （与题库管理 BankView 共用同一份实现） */
 
 function issueOf(id: string): VerifyIssue | null {
@@ -104,7 +104,8 @@ function issueOf(id: string): VerifyIssue | null {
         <span>题目配图（演示占位）</span>
       </div>
 
-      <QuestionOptions class="qc-options" :options="bodyOf(item).options" :answer="bodyOf(item).answer" />
+      <!-- 不传 answer：结果列表要选题 / 采纳，选项里不标正确项（答案在下方答案区） -->
+      <QuestionOptions class="qc-options" :options="bodyOf(item).options" />
 
       <div class="qc-answer">
         <p>
@@ -163,7 +164,7 @@ function issueOf(id: string): VerifyIssue | null {
   color: var(--sub);
   font-size: 12.5px;
 }
-/* 选项外观（描边块 / 正确项高亮）由 QuestionOptions 负责，这里只管与题干的间距 */
+/* 选项外观（描边块）由 QuestionOptions 负责，这里只管与题干的间距 */
 .qc-options { margin-top: 10px; }
 .qc-answer {
   margin-top: 10px;

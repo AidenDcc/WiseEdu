@@ -13,17 +13,27 @@ import { useScope } from '@/composables/useScope'
 const { grade, subject, gradeOptions, optionsForGrade, ensureScope } = useScope()
 
 const rootEl = ref<HTMLElement | null>(null)
+const btnEl = ref<HTMLButtonElement | null>(null)
 const open = ref(false)
 /** 面板内的待确认选择 */
 const pick = ref({ grade: '', subject: '' })
+/** 面板锚定方向：默认贴右缘向左展开（顶栏用法，按钮在右侧）；
+ *  按钮贴屏幕左侧时（题库组卷的页签条）向左展开会超出可视区域，改为贴左缘向右展开 */
+const popAlign = ref<'left' | 'right'>('right')
 
 const label = computed(() => (grade.value ? `${grade.value} / ${subject.value}` : '选择年级 / 学科'))
 /** 面板内学科随面板内年级联动 */
 const pickSubjectOptions = computed(() => optionsForGrade(pick.value.grade))
 
+const POP_WIDTH = 440
+
 function toggle() {
   open.value = !open.value
-  if (open.value) pick.value = { grade: grade.value, subject: subject.value }
+  if (open.value) {
+    pick.value = { grade: grade.value, subject: subject.value }
+    const rect = btnEl.value?.getBoundingClientRect()
+    popAlign.value = rect && rect.right - POP_WIDTH < 8 ? 'left' : 'right'
+  }
 }
 
 function pickGrade(value: string) {
@@ -55,14 +65,14 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 
 <template>
   <div ref="rootEl" class="scope-picker">
-    <button class="sp-btn" :class="{ open }" type="button" :title="label" @click.stop="toggle">
+    <button ref="btnEl" class="sp-btn" :class="{ open }" type="button" :title="label" @click.stop="toggle">
       <AppIcon name="book" :size="15" />
       <span class="sp-label">{{ label }}</span>
       <AppIcon name="chevron-down" :size="15" class="sp-caret" :class="{ up: open }" />
     </button>
 
-    <!-- 年级 / 学科：每个维度一行，选项横向平铺 -->
-    <div v-if="open" class="sp-pop" @click.stop>
+    <!-- 年级 / 学科：每个维度一行，选项横向平铺；锚定方向随按钮位置自适应（见 popAlign） -->
+    <div v-if="open" class="sp-pop" :class="popAlign" @click.stop>
       <div class="sp-row">
         <span class="sp-row-label">年级</span>
         <div class="sp-opts">
@@ -143,6 +153,8 @@ onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
   flex-direction: column;
   gap: 7px;
 }
+/* 贴左缘向右展开：按钮在屏幕左侧时用（否则面板向左伸出可视区域） */
+.sp-pop.left { left: 0; right: auto; }
 /* 单个维度：标签 + 横向平铺的选项 */
 .sp-row { display: flex; align-items: flex-start; gap: 10px; }
 .sp-row-label {

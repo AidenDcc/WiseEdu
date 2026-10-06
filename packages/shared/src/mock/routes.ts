@@ -59,6 +59,8 @@ const orgRoutes: MockRoute[] = [
   { method: 'POST', path: '/tenant/questions/review', handler: ({ body }) => guard(() => org.reviewQuestion(Number(body.id), Boolean(body.pass), String(body.opinion ?? ''))) },
   { method: 'POST', path: '/tenant/questions/offline', handler: ({ body }) => guard(() => org.toggleQuestionOffline(Number(body.id))) },
   { method: 'POST', path: '/tenant/questions/variant', handler: ({ body }) => guard(() => org.variantOf(Number(body.id))) },
+  { method: 'POST', path: '/tenant/questions/correct', handler: ({ body }) => guard(() => org.submitQuestionCorrection(body as never)) },
+  { method: 'GET', path: '/tenant/questions/corrections', handler: () => guard(() => org.questionCorrections) },
 
   // AI 出题 / 额度
   { method: 'GET', path: '/tenant/quota', handler: () => guard(() => org.QUOTA_TEXT) },
@@ -91,7 +93,11 @@ const orgRoutes: MockRoute[] = [
   { method: 'POST', path: '/tenant/papers/review', handler: ({ body }) => guard(() => org.reviewPaper(Number(body.id), Boolean(body.pass), String(body.opinion ?? ''))) },
   { method: 'POST', path: '/tenant/papers/ai-compose', handler: ({ body }) => guard(() => org.aiComposePaper(body as never)) },
   { method: 'POST', path: '/tenant/papers/swap-question', handler: ({ body }) => guard(() => org.swapPaperQuestion(Number(body.paperId), Number(body.questionId))) },
-  { method: 'POST', path: '/tenant/papers/parallels', handler: ({ body }) => guard(() => org.generateParallels(Number(body.motherId), Number(body.count ?? 1))) },
+  // 平行卷固定 1 份；folderId 判空用 == null，写成真值判断会把根目录（0）当没选
+  { method: 'POST', path: '/tenant/papers/parallels', handler: ({ body }) => guard(() => org.generateParallels(Number(body.motherId), body.folderId == null ? undefined : Number(body.folderId))) },
+  // 浏览 / 下载计数（试卷库 预览 / 导出 时累加，无返回值）
+  { method: 'POST', path: '/tenant/papers/browse', handler: ({ body }) => guard(() => { org.browsePaper(Number(body.id)); return null }) },
+  { method: 'POST', path: '/tenant/papers/download', handler: ({ body }) => guard(() => { org.downloadPaper(Number(body.id)); return null }) },
 
   /* 协同组卷：任务（分工）+ 入卷（题型约束）+ 版本（撤销/替换）三类接口分开，
      前端能在不重传整卷的前提下只发一个「加题」请求。 */

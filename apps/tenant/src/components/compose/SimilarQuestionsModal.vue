@@ -16,7 +16,11 @@ import { useComposeBasket } from '@/composables/useComposeBasket'
 import { useQuestionFavorites } from '@/composables/useQuestionFavorites'
 import { similarQuestions } from '@/utils/question-match'
 
-const props = defineProps<{ row: OrgQuestion }>()
+const props = defineProps<{
+  row: OrgQuestion
+  /** 遮罩层级，透传给 AppModal：从试卷预览（130）里打开时要传 140 才压得住 */
+  zIndex?: number
+}>()
 const emit = defineEmits<{ close: []; findSimilar: [tags: string[]] }>()
 
 const { questions } = useComposeData()
@@ -39,7 +43,7 @@ function danger(score: number): boolean {
 </script>
 
 <template>
-  <AppModal :title="`相似题 · #${target.id}`" :width="760" @close="emit('close')">
+  <AppModal :title="`相似题 · #${target.id}`" :width="760" :z-index="zIndex" @close="emit('close')">
     <p class="sm-sub">
       以 <b>#{{ target.id }}</b>（{{ target.type }} · {{ target.difficulty }} ·
       {{ target.knowledge.join('、') || '未标知识点' }}）为基准，按题干相似度与知识点重合度排序，共

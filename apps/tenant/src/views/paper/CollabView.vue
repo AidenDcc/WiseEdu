@@ -13,6 +13,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, appConfirm, COLLAB_MEMBER_TEXT, COLLAB_STATUS_TEXT, showToast, AppModal, AppDrawer } from '@aiteach/shared'
+import PaperFolderSelect from '@/components/paper/PaperFolderSelect.vue'
 import type { CollabMember, FilterRowDef, OrgCollabTask, OrgPaper, OrgQuestion, StaffMember } from '@aiteach/shared'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import { deleteCollabTask, fetchCollabTasks, fetchPapers, fetchQuestions, fetchStaff, saveCollabTask } from '@/api/org'
@@ -108,6 +109,8 @@ const form = reactive({
   difficulty: [] as Array<{ level: string; ratio: number }>,
   knowledgeText: '',
   remark: '',
+  /* 新建任务的试卷存「我的文件」所选文件夹（编辑任务时不出现） */
+  folderId: null as number | null,
   /* 分工：姓名 → 负责题型 */
   assignment: {} as Record<string, string[]>,
   picked: [] as string[],
@@ -172,6 +175,7 @@ function resetForm() {
   ]
   form.knowledgeText = ''
   form.remark = ''
+  form.folderId = null
   form.assignment = {}
   form.picked = []
 }
@@ -263,6 +267,10 @@ async function submit() {
     showToast('试卷名称须为 2-50 字', 'error')
     return
   }
+  if (!editingId.value && form.folderId == null) {
+    showToast('请选择试卷在「我的文件」中的存储位置', 'error')
+    return
+  }
   if (!form.structure.length) {
     showToast('请至少设置 1 个题型', 'error')
     return
@@ -304,6 +312,8 @@ async function submit() {
       members,
       /* 仅新建且带来源试卷时传：把那张卷的卷面复制过来当起点，避免「发起协同后题全没了」 */
       sourcePaperId: editingId.value ? undefined : sourcePaperId.value || undefined,
+      /* 新建任务的试卷存「我的文件」所选文件夹 */
+      folderId: editingId.value ? undefined : form.folderId ?? undefined,
     })
     dialogOpen.value = false
     await load()
@@ -311,8 +321,8 @@ async function submit() {
       editingId.value
         ? '任务已更新'
         : sourcePaperId.value
-          ? '协同组卷任务已创建，已复制原卷面作为起点'
-          : '协同组卷任务已创建，已向处理人发送通知',
+          ? '协同组卷任务已创建，已复制原卷面作为起点，试卷已存入「我的文件」'
+          : '协同组卷任务已创建，已向处理人发送通知，试卷已存入「我的文件」',
       'success',
     )
     if (!editingId.value) router.push(`/paper/collab/task?id=${task.id}`)
@@ -493,6 +503,13 @@ onMounted(async () => {
           <label class="f-label">考试时长（分钟）</label>
           <input v-model.number="form.duration" type="number" min="10" max="300" step="10" class="f-input" />
         </div>
+      </div>
+
+      <!-- 存储位置只在新建时出现：协同产出的试卷也是个人试卷，同样存「我的文件」 -->
+      <div v-if="!editingId" class="f-field">
+        <label class="f-label">存储位置（我的文件）<span class="req">*</span></label>
+        <PaperFolderSelect v-model="form.folderId" />
+        <p class="f-hint" style="margin-top: 5px">任务试卷将保存到该文件夹，组卷完成后可随时打开继续编辑。</p>
       </div>
 
       <div class="f-field">

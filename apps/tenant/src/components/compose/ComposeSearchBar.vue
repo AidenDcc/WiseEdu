@@ -139,8 +139,6 @@ function onPaste(event: ClipboardEvent) {
 }
 
 /* ===== AI 检索 ===== */
-const AI_HINTS = ['找几道高一数学三角函数的中等单选题', '初二物理浮力的实验探究题', '带图的化学方程式配平填空']
-
 const inList = (list: readonly string[], value: string) => (value && list.includes(value) ? value : '')
 
 async function runAiSearch() {
@@ -177,11 +175,6 @@ async function runAiSearch() {
   } finally {
     aiBusy.value = false
   }
-}
-
-function useHint(hint: string) {
-  keyword.value = hint
-  void runAiSearch()
 }
 
 /* ===== AI 解读结果：可逐项删除的 chip ===== */
@@ -270,12 +263,6 @@ function clearIntent() {
         <AppIcon name="close" :size="11" />
       </button>
       <button class="csb-intent-clear" type="button" @click="clearIntent">清除全部解读条件</button>
-    </div>
-
-    <!-- 没搜过之前给几个例句，否则「AI 解读」这个按钮太抽象 -->
-    <div v-else-if="!keyword && !filter.keyword" class="csb-hints">
-      <span>试试：</span>
-      <button v-for="hint in AI_HINTS" :key="hint" class="csb-hint" type="button" @click="useHint(hint)">{{ hint }}</button>
     </div>
 
     <div v-if="dragging" class="csb-drop">
@@ -373,26 +360,6 @@ function clearIntent() {
   padding: 0 2px;
 }
 .csb-intent-clear:hover { color: var(--danger); }
-
-.csb-hints {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  flex-wrap: wrap;
-  justify-content: center;
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--sub);
-}
-.csb-hint {
-  border: 1px dashed var(--border);
-  border-radius: 999px;
-  background: #fff;
-  color: var(--ink-2);
-  font-size: 12px;
-  padding: 3px 10px;
-}
-.csb-hint:hover { border-color: var(--brand); border-style: solid; color: var(--brand-deep); }
 
 .csb-drop {
   position: absolute;

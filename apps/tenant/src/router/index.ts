@@ -92,6 +92,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/paper/CollabView.vue'),
         meta: { title: '协同组卷' },
       },
+      {
+        path: 'paper/ai',
+        name: 'paper-ai',
+        component: () => import('@/views/paper/AiComposeView.vue'),
+        meta: { title: 'AI 智能组卷' },
+      },
       /* 协同组卷的任务工作台：`?id=` 指定任务。处理人在此选题入卷、看整卷、看进度与版本。 */
       {
         path: 'paper/collab/task',

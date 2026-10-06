@@ -2,19 +2,25 @@
 /**
  * 组卷工作台的媒体卡片：小程序 / 视频 / 图片三个页签共用（按 kind 渲染不同外观）。
  *
- * 关键约束（决定了这张卡片的操作只有「预览」和「按知识点找题」）：
- * `PaperSection.questions` 只装 `{ questionId, score }`，媒体资源**在数据模型上进不了试卷**。
- * 所以这里不做「加入组卷车」—— 承诺一个后端装不下的动作，只会在保存时静默丢资源。
- * 媒体对组卷的真实价值是「看到一段微课/一张图 → 想配套出题」，故交接方式是按它的知识点去试题页签。
+ * 三个操作，各有各的用途：
+ * - **加入组卷车**（`inBasket` 传了才渲染）—— 媒体不能进 `PaperSection.questions`（那里只装
+ *   `{ questionId, score }`），但可以进组卷车的资源区，生成试卷时随卷存成**参考资料附件**
+ *   （`OrgPaper.attachments`）。所以这个按钮不是在承诺一个后端装不下的动作。
+ * - **按知识点找题** —— 看到一段微课 / 一张图，直接去试题页签找配套题，这是媒体对组卷的另一半价值。
+ * - **预览**。
+ *
+ * `inBasket` 用可选值（`undefined` = 不渲染按钮）而不是布尔默认 false：将来若有只读的引用场景
+ * （比如在别处陈列媒体），不该被迫显示一个点了没用的按钮。
  */
 import { computed } from 'vue'
 import { AppIcon, resolveMediaSrc } from '@aiteach/shared'
 import type { OrgMedia } from '@aiteach/shared'
 
-const props = defineProps<{ row: OrgMedia }>()
+const props = defineProps<{ row: OrgMedia; inBasket?: boolean }>()
 const emit = defineEmits<{
   preview: [row: OrgMedia]
   findSimilar: [tags: string[]]
+  toggleBasket: [row: OrgMedia]
 }>()
 
 const KIND_TEXT: Record<OrgMedia['kind'], string> = {
@@ -49,6 +55,17 @@ const durationText = computed(() => {
 
       <div class="mc-ops">
         <button class="mini-btn" type="button" @click="emit('preview', row)">预览</button>
+        <button
+          v-if="inBasket !== undefined"
+          class="mini-btn"
+          :class="inBasket ? 'danger' : 'success'"
+          type="button"
+          :title="inBasket ? '从组卷车移出' : '加入组卷车，生成试卷时随卷存为参考资料'"
+          @click="emit('toggleBasket', row)"
+        >
+          <AppIcon name="cart" :size="13" />
+          {{ inBasket ? '移出组卷车' : '加入组卷车' }}
+        </button>
         <button
           class="mini-btn success"
           type="button"

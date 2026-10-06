@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { AppIcon, AppListToolbar, showToast, ApiError, DICT_TYPES, AppModal, appConfirm } from '@aiteach/shared'
+import {
+  AppIcon,
+  AppListToolbar,
+  showToast,
+  ApiError,
+  DICT_TYPES,
+  PAPER_CATEGORIES,
+  AppModal,
+  appConfirm,
+} from '@aiteach/shared'
 import type { DictItem, DictTypeKey } from '@aiteach/shared'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import { deleteDictItem, fetchDict, moveDictItem, saveDictItem, toggleDictItem } from '@/api/platform'
@@ -77,9 +86,11 @@ const form = reactive({
   dateFrom: '',
   dateTo: '',
   answerType: '选择',
-  /* 适用学科（仅题型用）：空 = 全学科通用 */
+  /* 适用学科（题型 / 考试类型用）：空 = 全学科通用 */
   subjects: [] as string[],
   coefficient: 0.5,
+  /* 试卷分类（仅考试类型用）：组卷工作台试卷类型树的第一级 */
+  paperCategory: '',
 })
 const formError = ref('')
 const saving = ref(false)
@@ -91,20 +102,29 @@ async function loadSubjectOptions() {
   subjectOptions.value = (await fetchDict('subject')).map((item) => item.name)
 }
 
-/* 学科名只在「题型」弹窗里用到，进入该字典类型时按需加载一次，不为其他类型多打一个请求 */
+/* 学科名只在「题型」「考试类型」弹窗里用到，进入这两类时按需加载一次，不为其他类型多打一个请求 */
 watch(
   activeType,
   (type) => {
-    if (type === 'questionType' && !subjectOptions.value.length) void loadSubjectOptions()
+    if ((type === 'questionType' || type === 'examType') && !subjectOptions.value.length) {
+      void loadSubjectOptions()
+    }
   },
   { immediate: true },
 )
+
+/* 学段字段只有「年级」是必填（小学/初中/高中三选一），其余类型留空表示不限。
+   这两个函数无条件覆写 form.stage，所以初值必须在这里按类型给 —— 只改 reactive 的声明是无效的，
+   后果是编辑一条「适配学段 = 不限」的考试类型时被静默改成「仅小学」，该项在初中/高中树上消失。 */
+function defaultStage() {
+  return activeType.value === 'grade' ? '小学' : ''
+}
 
 function openCreate() {
   editing.value = 'new'
   form.name = ''
   form.code = ''
-  form.stage = '小学'
+  form.stage = defaultStage()
   form.year = `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`
   form.termHalf = '上学期'
   form.dateFrom = ''
@@ -112,6 +132,7 @@ function openCreate() {
   form.answerType = '选择'
   form.subjects = []
   form.coefficient = 0.5
+  form.paperCategory = ''
   formError.value = ''
 }
 
@@ -119,7 +140,7 @@ function openEdit(item: DictItem) {
   editing.value = item
   form.name = item.name
   form.code = item.code ?? ''
-  form.stage = item.stage ?? '小学'
+  form.stage = item.stage ?? defaultStage()
   form.year = item.year ?? ''
   form.termHalf = item.termHalf ?? '上学期'
   form.dateFrom = item.dateFrom ?? ''
@@ -127,6 +148,7 @@ function openEdit(item: DictItem) {
   form.answerType = item.answerType ?? '选择'
   form.subjects = [...(item.subjects ?? [])]
   form.coefficient = item.coefficient ?? 0.5
+  form.paperCategory = item.paperCategory ?? ''
   formError.value = ''
 }
 
@@ -135,13 +157,25 @@ async function save() {
     formError.value = '名称不能为空'
     return
   }
+  /* 考试类型没有分类就进不了组卷工作台的左树（树按 paperCategory 分组），属于静默丢数据，拦在保存前 */
+  if (activeType.value === 'examType' && !form.paperCategory) {
+    formError.value = '请选择试卷分类'
+    return
+  }
   saving.value = true
   try {
     await saveDictItem(activeType.value, {
       id: editing.value instanceof Object ? editing.value.id : undefined,
       name: form.name.trim(),
       code: activeType.value === 'subject' ? form.code.trim() : undefined,
-      stage: activeType.value === 'grade' ? form.stage : undefined,
+      /* 年级的学段必填；考试类型的适配学段留空 = 全学段，传 undefined 而非空串 ——
+         空串会在 saveDictItem 的同级重名校验里被当成一个真实分组键 */
+      stage:
+        activeType.value === 'grade'
+          ? form.stage
+          : activeType.value === 'examType'
+            ? form.stage || undefined
+            : undefined,
       year: activeType.value === 'term' ? form.year.trim() : undefined,
       termHalf: activeType.value === 'term' ? form.termHalf : undefined,
       dateFrom: activeType.value === 'term' ? form.dateFrom : undefined,
@@ -149,8 +183,11 @@ async function save() {
       answerType: activeType.value === 'questionType' ? form.answerType : undefined,
       /* 不勾任何学科即全学科通用：传 undefined 而不是空数组，两种写法在字典里都表示「不限定」 */
       subjects:
-        activeType.value === 'questionType' && form.subjects.length ? [...form.subjects] : undefined,
+        (activeType.value === 'questionType' || activeType.value === 'examType') && form.subjects.length
+          ? [...form.subjects]
+          : undefined,
       coefficient: activeType.value === 'difficulty' ? form.coefficient : undefined,
+      paperCategory: activeType.value === 'examType' ? form.paperCategory : undefined,
     })
     showToast('已保存', 'success')
     editing.value = null
@@ -216,6 +253,9 @@ onMounted(load)
               <th v-if="activeType === 'questionType'">作答类型</th>
               <th v-if="activeType === 'questionType'">适用学科</th>
               <th v-if="activeType === 'difficulty'">系数</th>
+              <th v-if="activeType === 'examType'">试卷分类</th>
+              <th v-if="activeType === 'examType'">适配学段</th>
+              <th v-if="activeType === 'examType'">适配学科</th>
               <th>排序</th>
               <th>机构引用</th>
               <th>状态</th>
@@ -242,6 +282,18 @@ onMounted(load)
                   <span v-else class="ref-zero">全学科</span>
                 </td>
                 <td v-if="activeType === 'difficulty'">{{ item.coefficient?.toFixed(1) }}</td>
+                <td v-if="activeType === 'examType'">
+                  <span v-if="item.paperCategory">{{ item.paperCategory }}</span>
+                  <span v-else class="ref-zero">未归类</span>
+                </td>
+                <td v-if="activeType === 'examType'">
+                  <span v-if="item.stage">{{ item.stage }}</span>
+                  <span v-else class="ref-zero">全学段</span>
+                </td>
+                <td v-if="activeType === 'examType'">
+                  <span v-if="item.subjects?.length">{{ item.subjects.join('、') }}</span>
+                  <span v-else class="ref-zero">全学科</span>
+                </td>
                 <td>
                   <div class="op-group">
                     <button class="mini-btn" :disabled="index === 0" type="button" @click="onMove(item, -1)">上移</button>
@@ -286,6 +338,32 @@ onMounted(load)
         <select v-model="form.stage" class="f-select">
           <option v-for="stage in STAGES" :key="stage" :value="stage">{{ stage }}</option>
         </select>
+      </div>
+      <div v-if="activeType === 'examType'" class="f-field">
+        <label class="f-label">试卷分类<span class="req">*</span></label>
+        <select v-model="form.paperCategory" class="f-select">
+          <option value="" disabled>请选择</option>
+          <option v-for="category in PAPER_CATEGORIES" :key="category" :value="category">{{ category }}</option>
+        </select>
+        <p class="f-hint">决定该项在题库组卷「试卷」页签左侧树里的归属分组。</p>
+      </div>
+      <div v-if="activeType === 'examType'" class="f-field">
+        <label class="f-label">适配学段（留空 = 全学段通用）</label>
+        <select v-model="form.stage" class="f-select">
+          <option value="">不限</option>
+          <option v-for="stage in STAGES" :key="stage" :value="stage">{{ stage }}</option>
+        </select>
+        <p class="f-hint">限定后，只在机构端选到该学段（如六年级）时才出现在试卷类型树与筛选项里。</p>
+      </div>
+      <div v-if="activeType === 'examType'" class="f-field">
+        <label class="f-label">适配学科（不勾选 = 全学科通用）</label>
+        <div class="subject-checks">
+          <label v-for="subject in subjectOptions" :key="subject" class="check-item">
+            <input v-model="form.subjects" type="checkbox" :value="subject" />
+            {{ subject }}
+          </label>
+        </div>
+        <p class="f-hint">勾选后该项只在机构端选到这些学科时出现，如「数学竞赛」只勾数学。</p>
       </div>
       <div v-if="activeType === 'term'" class="f-field">
         <label class="f-label">学年<span class="req">*</span></label>

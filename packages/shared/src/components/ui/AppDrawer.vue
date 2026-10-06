@@ -9,8 +9,16 @@ const props = withDefaults(
     title: string
     subtitle?: string
     width?: number
+    /**
+     * 遮罩层级。默认 110（介于 AI 面板 45 与弹窗 120 之间）。
+     *
+     * ⚠️ 抬到 130 以上后，固定 130 的 `appConfirm` 会落到它下面 —— 只有不会再开确认框的
+     * 抽屉才这么传；抬到 300 以上还会越过全局搜索(200)与下拉菜单(300)，那两处若在抽屉
+     * 打开时出现会被盖住。
+     */
+    zIndex?: number
   }>(),
-  { width: 560 },
+  { width: 560, zIndex: 110 },
 )
 
 const emit = defineEmits<{ close: [] }>()
@@ -32,7 +40,7 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport to="body">
-    <div class="drawer-mask" @click.self="emit('close')">
+    <div class="drawer-mask" :style="{ zIndex }" @click.self="emit('close')">
       <aside class="drawer" :style="{ width: `${width}px` }">
         <header class="drawer-head">
           <div class="drawer-titles">

@@ -18,7 +18,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AppIcon, appConfirm, showToast, toPlainText, truncateRich, AppModal } from '@aiteach/shared'
-import type { OrgCollabTask, OrgMedia, OrgPaper, OrgQuestion, PaperSection } from '@aiteach/shared'
+import type { MediaKind, OrgCollabTask, OrgMedia, OrgPaper, OrgQuestion, PaperAttachment, PaperSection } from '@aiteach/shared'
 import PaperBlock from '@/components/paper/PaperBlock.vue'
 import PaperPreviewModal from '@/components/paper/PaperPreviewModal.vue'
 import {
@@ -60,6 +60,14 @@ const basket = useComposeBasket()
 
 const form = reactive({ id: 0, name: '', subject: '', grade: '', duration: 120 })
 const sections = ref<PaperSection[]>([])
+/**
+ * 随卷参考资料（图片 / 视频 / 小程序），来自组卷车或本卷既有数据。
+ *
+ * 刻意**不进 `snapshots` 撤销栈**：那套栈快照的是 `sections`（卷面），把附件一起塞进去要连带改
+ * 历史面板的每一处；而且「撤销卷面改动」本就不该顺手把附上的素材丢掉 —— 附件是加法操作，
+ * 移错了直接在面板里移出即可。
+ */
+const attachments = ref<PaperAttachment[]>([])
 const meta = reactive({ owner: '', sharedSquare: false, status: 'draft' as OrgPaper['status'] })
 const questions = ref<OrgQuestion[]>([])
 const ownPaperIds = ref<number[]>([])
@@ -81,6 +89,7 @@ const paper = computed<OrgPaper>(() => ({
   duration: form.duration,
   status: meta.status,
   sections: sections.value,
+  attachments: attachments.value,
   owner: meta.owner || '当前用户',
   updatedAt: nowText(),
   sharedSquare: meta.sharedSquare,
@@ -667,6 +676,37 @@ function basketAddOne(questionId: number) {
   if (row) addQuestion(row)
 }
 
+/* ===== 参考资料（组卷车里的图片 / 视频 / 小程序）=====
+   组卷车的「清空」是全清（步骤、抽题池一类的场景靠它），但这里的资源篮只列题目 ——
+   若在这里调 `clear()`，用户看不见的资源会被一起清掉，属于静默丢东西。故只清题目。 */
+
+const ATTACHMENT_KIND_TEXT: Record<MediaKind, string> = { image: '图片', animation: '小程序', video: '视频' }
+
+/** 组卷车里尚未并入本卷的资源（按 类型+id 去重，重复点「并入」不会攒出重复项） */
+const pendingAttachments = computed(() => {
+  const have = new Set(attachments.value.map((row) => `${row.kind}-${row.mediaId}`))
+  return basket.resources.value.filter((row) => !have.has(`${row.kind}-${row.id}`))
+})
+
+function mergeBasketAttachments() {
+  const added = pendingAttachments.value.map((row) => ({
+    mediaId: row.id,
+    kind: row.kind,
+    name: row.name,
+    sizeMb: row.sizeMb,
+  }))
+  if (!added.length) {
+    showToast('组卷车里的参考资料都已在卷中', 'error')
+    return
+  }
+  attachments.value = [...attachments.value, ...added]
+  showToast(`已并入 ${added.length} 个参考资料，保存试卷后生效`, 'success')
+}
+
+function removeAttachment(row: PaperAttachment) {
+  attachments.value = attachments.value.filter((item) => !(item.kind === row.kind && item.mediaId === row.mediaId))
+}
+
 /* ================= 版本记录（协同组卷才有） ================= */
 
 const versions = ref<Awaited<ReturnType<typeof fetchPaperVersions>>>([])
@@ -743,6 +783,8 @@ async function save(submit = false) {
       grade: form.grade,
       duration: form.duration,
       sections: JSON.parse(JSON.stringify(sections.value)) as PaperSection[],
+      /* 随卷参考资料：显式传数组（空数组 = 清空），不传的话 savePaper 会保留原值 */
+      attachments: JSON.parse(JSON.stringify(attachments.value)) as PaperAttachment[],
       submit,
     })
     form.id = saved.id
@@ -824,6 +866,7 @@ async function load() {
     meta.sharedSquare = source.sharedSquare
     meta.status = source.status
     sections.value = JSON.parse(JSON.stringify(source.sections)) as PaperSection[]
+    attachments.value = JSON.parse(JSON.stringify(source.attachments ?? [])) as PaperAttachment[]
     sectionSeq = Math.max(...sections.value.map((row) => row.id), 0) + 1
     /* 撤销栈需要一个起点：把「刚打开时」的卷面记为第一版，否则第一次撤销是空的 */
     snapshots.value = []
@@ -1376,7 +1419,8 @@ function mmOf(px: number): number {
               <span>{{ basket.count.value }} 题 · {{ basket.scoreTotal.value }} 分</span>
               <div class="op-group">
                 <button class="mini-btn" :disabled="!basket.count.value" @click="basketAddAll">全部加入试卷</button>
-                <button class="mini-btn danger" :disabled="!basket.count.value" @click="basket.clear()">清空</button>
+                <!-- 只清题目：这个面板看不见资源，全清会把用户没看到的东西一起丢掉 -->
+                <button class="mini-btn danger" :disabled="!basket.count.value" @click="basket.clear('questions')">清空题目</button>
               </div>
             </div>
             <p v-if="!basket.count.value" class="f-hint">
@@ -1390,6 +1434,28 @@ function mmOf(px: number): number {
               <div class="op-group">
                 <button class="mini-btn" :disabled="inPaperIds.has(entry.questionId)" @click="basketAddOne(entry.questionId)">加入</button>
                 <button class="mini-btn danger" @click="basket.remove(entry.questionId)">移除</button>
+              </div>
+            </div>
+
+            <!-- 参考资料：图片 / 视频 / 小程序，随卷保存（不参与卷面排版） -->
+            <div class="pe-basket-bar pe-att-bar">
+              <span>参考资料 {{ attachments.length }} 个</span>
+              <div class="op-group">
+                <button class="mini-btn" :disabled="!pendingAttachments.length" @click="mergeBasketAttachments">
+                  并入本卷{{ pendingAttachments.length ? ` (${pendingAttachments.length})` : '' }}
+                </button>
+              </div>
+            </div>
+            <p v-if="!attachments.length" class="f-hint">
+              还没有参考资料。在「题库组卷」工作台的图片 / 视频 / 小程序页签里加入组卷车，再回这里并入。
+            </p>
+            <div v-for="row in attachments" :key="`${row.kind}-${row.mediaId}`" class="pe-basket-row">
+              <div>
+                <p class="pe-bank-stem">{{ row.name }}</p>
+                <span class="f-hint">{{ ATTACHMENT_KIND_TEXT[row.kind] }} · {{ row.sizeMb.toFixed(1) }} MB</span>
+              </div>
+              <div class="op-group">
+                <button class="mini-btn danger" @click="removeAttachment(row)">移出</button>
               </div>
             </div>
           </div>
@@ -1959,6 +2025,8 @@ function mmOf(px: number): number {
 .pe-media-name { font-size: 11.5px; color: var(--ink-2); }
 .pe-media-kind { font-size: 10.5px; color: var(--sub); }
 .pe-basket-bar { display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; color: var(--ink-2); margin-bottom: 10px; }
+/* 参考资料一栏与上面的题目列表隔开：两类东西各自的「加入 / 移出」互不相干 */
+.pe-att-bar { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
 .pe-basket-row {
   display: flex;
   align-items: flex-start;

@@ -39,6 +39,8 @@ export const menus: MenuItem[] = [
       // 紧邻试卷库：组卷是「新建」动作，与「看已有试卷」放在一起更顺手；新标签页独立全屏
       { path: '/paper/compose', title: '题库组卷', newTab: true },
       { path: '/paper/collab', title: '协同组卷' },
+      // AI 组卷是独立向导页（选结构 → 选存储位置 → 出卷进编辑），不再挂在试卷库头部弹窗里
+      { path: '/paper/ai', title: 'AI 智能组卷' },
       { path: '/paper/review', title: '试卷审核中心' },
     ],
   },

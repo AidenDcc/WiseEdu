@@ -105,12 +105,12 @@ onMounted(load)
               <RichTextViewer v-if="questionOf(entry.questionId)" :content="questionOf(entry.questionId)!.stem" tag="span" />
               <template v-else>题目 #{{ entry.questionId }}</template>
             </p>
+            <!-- 不传 answer：选项里不标正确项，答案看下方「答案」一行 -->
             <QuestionOptions
               v-if="questionOf(entry.questionId)"
               class="pv-q-opts"
               variant="doc"
               :options="questionOf(entry.questionId)!.options"
-              :answer="questionOf(entry.questionId)!.answer"
               :columns="optionColumnsOf(questionOf(entry.questionId)!)"
             />
             <p v-if="questionOf(entry.questionId)" class="pv-q-ans">

@@ -71,12 +71,14 @@ function itemCount(material: OrgMaterial): number {
 
 <template>
   <div class="mt">
+    <!-- 只留「学科」：`OrgMaterial` 没有 `grade` 字段，`matchesMaterialFilter` 也只按学科筛，
+         年级下拉选了没有任何效果——摆在那里只会让人以为筛过了 -->
     <ComposeFilterBar
       :filter="filter"
-      :fields="['grade', 'subject']"
+      :fields="['subject']"
       :result-count="rows.length"
       @patch="emit('patch', $event)"
-      @reset="emit('patch', { grade: '', subject: '' })"
+      @reset="emit('patch', { subject: '' })"
     />
 
     <p v-if="loading && !loaded" class="empty-row">正在加载教辅…</p>

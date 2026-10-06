@@ -4,19 +4,22 @@
  *
  * 为什么是**顶层路由**而不是 `/` 的子路由：机构端的侧边栏在 `AppLayout` 里无条件渲染，
  * 没有任何 meta 开关能摘掉它（见 `router/index.ts` 的路由注释）。要「无侧边栏全屏」，
- * 只能让本页根本不进 AppLayout。代价是布局层提供的服务（顶部栏、滚动容器、消息中心、
- * AI 助手悬浮球）这里都没有，故本页自备顶栏与滚动区，也**不挂 AiAssistant**。
+ * 只能让本页根本不进 AppLayout。代价是布局层提供的服务（顶部栏、滚动容器、消息中心）
+ * 这里都没有，故本页自备顶栏与滚动区；AI 助手悬浮球是 Teleport 到 body 的自包含组件，
+ * 直接挂一份即可，与 AppLayout 内的页面行为一致。
  *
  * 状态归属：`filter`（跨页签保留的检索条件）与 `activeTab` 由本页持有，页签只读 + 上抛 patch；
+ * `activeTab` 另与地址栏的 `?tab=` 双向同步（见下），刷新后回到同一个页签。
  * 组卷车是模块级单例（`useComposeBasket`），页签、抽屉、本页 FAB 共享同一份计数。
  */
-import { computed, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { AppIcon, showToast } from '@aiteach/shared'
 import { useComposeBasket } from '@/composables/useComposeBasket'
 import { useComposeData } from '@/composables/useComposeData'
-import { useQuestionFavorites } from '@/composables/useQuestionFavorites'
-import { useBaseData } from '@/composables/useBaseData'
+import { useScope } from '@/composables/useScope'
+import ScopePicker from '@/components/ui/ScopePicker.vue'
+import AiAssistant from '@/components/ai/AiAssistant.vue'
 import ComposeSearchBar from '@/components/compose/ComposeSearchBar.vue'
 import ComposeBasketPanel from '@/components/compose/ComposeBasketPanel.vue'
 import ComposePaperDialog from '@/components/compose/ComposePaperDialog.vue'
@@ -27,106 +30,88 @@ import MediaGridTab from './tabs/MediaGridTab.vue'
 import KnowledgeTab from './tabs/KnowledgeTab.vue'
 import SyncTab from './tabs/SyncTab.vue'
 import BlueprintTab from './tabs/BlueprintTab.vue'
-import {
-  COMPOSE_TABS,
-  defaultComposeFilter,
-  matchesMaterialFilter,
-  matchesMediaFilter,
-  matchesPaperFilter,
-  matchesQuestionFilter,
-  type ComposeFilter,
-  type QuestionFilterContext,
-  type TabKey,
-} from './types'
+import { COMPOSE_TABS, defaultComposeFilter, type ComposeFilter, type TabKey } from './types'
 
 const basket = useComposeBasket()
-/* 数据在 shell 层一次载入，8 个页签共用（见 useComposeData 头部）。媒体按 kind 预分好，
-   页签直接取用自己那一份，不必各自过滤。 */
-const { questions, papers, materials, videos, animations, images, questionOf, ensure } = useComposeData()
-const { ensure: ensureBase, defaultTextbook } = useBaseData()
-const favorites = useQuestionFavorites()
 
 /**
- * 页签角标必须与页签列表**同一口径**，否则「页签写着 8 条、点进去只有 3 条」会被当成丢数据。
- * 「只看收藏 / 排除已选」依赖 id 集合，故这里也要带上同一份 context。
+ * 本页这一串浮层的层级。
+ *
+ * AI 与组卷车两个悬浮球都在 301（高于全局搜索 200 与下拉 300，见 AiAssistant）。球抬上去之后，
+ * 按默认层级挂的抽屉（110）会落到**试卷预览（130）后面** —— 在预览里点组卷车根本打不开；
+ * 即便打得开，301 的球也会盖住抽屉底部的「生成试卷」。所以这一串整体提到球之上：
+ * 组卷车抽屉 310 < 抽屉里资源预览 330（复用抽屉的 `zIndex + 10`）< 生成试卷弹窗 340（压在抽屉上）。
+ *
+ * ⚠️ 高于 `appConfirm` 的 130：这三个浮层里都**不要**用 appConfirm，否则确认框会被压在下面。
+ * 真要加确认框，得先把它一起抬上来。
  */
-const filterCtx = computed<QuestionFilterContext>(() => ({
-  favorites: favorites.set.value,
-  picked: basket.ids.value,
-}))
+const BASKET_Z = 310
+const PAPER_DIALOG_Z = BASKET_Z + 30
+
+/* 数据在 shell 层一次载入，页签共用（见 useComposeData 头部）；筛选与角标都由各页签自理 */
+const { ensure } = useComposeData()
 
 const route = useRoute()
+const router = useRouter()
 const filter = ref<ComposeFilter>(defaultComposeFilter())
-/** 允许从别处直达某个页签（试卷库的「细目表组卷」按钮带 `?tab=blueprint`）。
- *  只认 COMPOSE_TABS 里存在的 key：拼错的 query 不该落到空白页。 */
-const activeTab = ref<TabKey>(
-  COMPOSE_TABS.find((tab) => tab.key === route.query.tab)?.key ?? 'questions',
+
+/**
+ * 页签 ⇄ 地址栏：`?tab=` 与 `activeTab` 双向同步，地址栏是页签的可还原表示。
+ *
+ * - **读**：进页面（刷新、把地址发给同事、从别处带 `?tab=papers` 直达）按 `?tab=` 定页签。
+ *   只认 COMPOSE_TABS 里存在的 key：拼错的 query 不该落到空白页；
+ *   **没有 `?tab=` 就是「试题」**（工作台的主入口）。
+ * - **写**：切页签把 key 写回地址栏，刷新后仍在同一页签。默认页签（试题）不带参数，
+ *   地址保持干净 —— 于是 `?tab=` 有值可读时一定是一个非默认页签。
+ *
+ * 用 `replace` 而不是 `push`：页签是**页内视图**，浏览器后退该退出工作台（回上一张页面），
+ * 而不是在九个页签里一路倒着走 —— 那会让「后退」变得不可预期。
+ */
+function tabFromQuery(): TabKey {
+  return COMPOSE_TABS.find((tab) => tab.key === route.query.tab)?.key ?? 'questions'
+}
+
+const activeTab = ref<TabKey>(tabFromQuery())
+
+watch(activeTab, (key) => {
+  const query = { ...route.query }
+  if (key === 'questions') delete query.tab
+  else query.tab = key
+  void router.replace({ query })
+})
+
+/* 地址被外部改动（手改地址栏 / 别处带参跳转）时回写页签 ——
+   上面那条只做「页签 → 地址」，两条合起来才是双向同步。
+   程序内部的页签切换（如 findSimilar）走的是 activeTab，不必各自记得改地址 */
+watch(
+  () => route.query.tab,
+  () => {
+    activeTab.value = tabFromQuery()
+  },
 )
+
 const basketOpen = ref(false)
 const paperOpen = ref(false)
 
+/* ===== 全局「年级 / 学科」作用域：页签条前的 ScopePicker 就是系统顶栏同一个组件 =====
+ * 初值取顶部栏已选的年级学科（useScope 的 localStorage 记忆），此后工作台的筛选一直
+ * 跟随它 —— 在这里改选也会写回全局作用域，行为与系统顶栏一模一样。 */
+const { grade: scopeGrade, subject: scopeSubject, ensureScope } = useScope()
+watch([scopeGrade, scopeSubject], () => {
+  patch({ grade: scopeGrade.value, subject: scopeSubject.value })
+})
+
 /**
- * 首次进入且工作台还没定范围时，落到种子题库所在的高一·数学。
+ * 启动即定范围：先归一全局作用域（字典未就绪时取不到值），再把它写进筛选。
  *
  * 为什么在 shell 而不是某个页签里：试题页签的左栏知识树要有学科才有内容，空树等于把
- * 工作台的主入口做成一个空框；但页签是 `v-if` 挂载的，把这段逻辑放进页签，用户一旦
- * 主动清空年级学科、切走再切回，被清掉的条件就会自己长回来。只在启动时做一次。
+ * 工作台的主入口做成一个空框；页签是 `v-if` 挂载的，把跟随逻辑放进页签，
+ * 用户切走再切回时会用旧值覆盖新选择。此后范围变化由上面的 watch 跟随。
  */
 void (async () => {
-  await Promise.all([ensure(), ensureBase()])
-  if (filter.value.grade || filter.value.subject) return
-  const preset = defaultTextbook()
-  if (preset.grade || preset.subject) patch({ grade: preset.grade, subject: preset.subject })
+  await Promise.all([ensure(), ensureScope().catch(() => {})])
+  patch({ grade: scopeGrade.value, subject: scopeSubject.value })
 })()
-
-/** 标题栏的教材范围提示：让教师随时知道自己搜的是哪个范围 */
-const scopeText = computed(() => [filter.value.grade, filter.value.subject].filter(Boolean).join(' · ') || '全部年级学科')
-
-interface TabCount {
-  key: TabKey
-  count: number
-}
-
-/**
- * 页签命中数：一次搜索要能跨资源类型看见结果，否则「搜了视频没搜到」会被误以为整个搜索没命中。
- *
- * 每个分支都必须与**对应页签自己的筛选口径**一致（题库走 matchesQuestionFilter，其余按
- * 关键词 + 学科/年级），否则会出现「页签写着 5 条、点进去只有 2 条」，用户会以为丢了资源。
- */
-function countFor(key: TabKey): number {
-  const current = filter.value
-  switch (key) {
-    case 'questions':
-    case 'knowledge':
-      return questions.value.filter((row) => matchesQuestionFilter(row, current, filterCtx.value)).length
-    /* 细目表角标 = 当前年级学科下**可抽的题池大小**：这一页的产出取决于池子有多大，
-       而不是「当前关键词命中几道」——细目表是按知识点抽题，不读关键词。
-       但「只看收藏 / 排除已选」仍要尊重，否则角标会与页签里的可选池对不上。 */
-    case 'blueprint':
-      return questions.value.filter(
-        (row) =>
-          matchesQuestionFilter(row, { ...current, keyword: '', types: [], knowledge: [] }, filterCtx.value),
-      ).length
-    case 'papers':
-      return papers.value.filter((row) => matchesPaperFilter(row, current, questionOf)).length
-    case 'materials':
-      return materials.value.filter((row) => matchesMaterialFilter(row, current)).length
-    case 'miniapp':
-      return animations.value.filter((row) => matchesMediaFilter(row, current, 'animation')).length
-    case 'videos':
-      return videos.value.filter((row) => matchesMediaFilter(row, current, 'video')).length
-    case 'images':
-      return images.value.filter((row) => matchesMediaFilter(row, current, 'image')).length
-    /* 同步页签列的是「可用于组卷的教辅」而非题目，故命中数就是可用教辅数 */
-    case 'sync':
-      return materials.value.filter((row) => row.status === 'done' && (!current.subject || row.subject === current.subject)).length
-    default:
-      return 0
-  }
-}
-
-const counts = computed<TabCount[]>(() => COMPOSE_TABS.map((tab) => ({ key: tab.key, count: countFor(tab.key) })))
-const countOf = (key: TabKey) => counts.value.find((row) => row.key === key)?.count ?? 0
 
 /* 页签条上「资源类」与「组卷类」之间加一道分隔，两组的用法不同（浏览检索 vs 按结构出题） */
 const resourceTabs = computed(() => COMPOSE_TABS.filter((tab) => tab.group === 'resource'))
@@ -148,14 +133,21 @@ function findSimilar(tags: string[]) {
 }
 
 function openPaper() {
+  /* 只看题数：只有参考资料成不了卷（`savePaper` 也要求至少 1 道题），
+     资源是随卷附件，不能替代题目 */
   if (basket.count.value === 0) {
-    showToast('组卷车是空的，先加入一些题目', 'error')
+    showToast(
+      basket.resourceTotal.value
+        ? '组卷车里只有参考资料、还没有题目，试卷至少需要 1 道题'
+        : '组卷车是空的，先加入一些题目',
+      'error',
+    )
     return
   }
   paperOpen.value = true
 }
 
-/** 保存成功后把车里的题清掉：题目已经落进试卷，留在车里会让人误以为还没保存 */
+/** 保存成功后清空整车：题目进了卷面、资源存成了随卷参考资料，留在车里会让人误以为还没保存 */
 function onPaperSaved() {
   basket.clear()
   basketOpen.value = false
@@ -163,58 +155,54 @@ function onPaperSaved() {
 </script>
 
 <template>
-  <div class="compose-shell" :class="{ 'basket-open': basketOpen }">
+  <div class="compose-shell">
     <header class="cs-head">
       <a class="cs-brand" href="/" target="_self" title="返回机构端">
-        <span class="cs-logo">教</span>
+        <span class="cs-logo"><img src="/logo.png" alt="AI教学云平台" /></span>
         <span class="cs-brand-text">
           <b>题库组卷</b>
-          <em>{{ scopeText }}</em>
+          <em>AI教学云平台 · 机构端</em>
         </span>
       </a>
 
       <div class="cs-search">
         <ComposeSearchBar :filter="filter" @patch="patch" />
       </div>
-
-      <div class="cs-head-ops">
-        <button class="cs-basket-btn" type="button" @click="basketOpen = !basketOpen">
-          <AppIcon name="cart" :size="16" />
-          组卷车
-          <b v-if="basket.count.value">{{ basket.count.value }}</b>
-        </button>
-      </div>
     </header>
 
-    <nav class="cs-tabs">
-      <button
-        v-for="tab in resourceTabs"
-        :key="tab.key"
-        class="cs-tab"
-        :class="{ on: activeTab === tab.key }"
-        type="button"
-        @click="activeTab = tab.key"
-      >
-        <AppIcon :name="tab.icon" :size="14" />
-        {{ tab.label }}
-        <span class="cs-tab-count">{{ countOf(tab.key) }}</span>
-      </button>
+    <!-- 页签条：年级 / 学科选择器贴左端（与系统顶栏同一个 ScopePicker 组件，选定即驱动下方
+         所有页签只展示该年级学科的内容），页签组居中于内容区。
+         居中靠三列网格实现（选择器在第 1 列，页签在中间的 auto 列，第 3 列留空），见 .cs-tabbar -->
+    <div class="cs-tabbar">
+      <div class="cs-scope"><ScopePicker /></div>
+      <nav class="cs-tabs">
+        <button
+          v-for="tab in resourceTabs"
+          :key="tab.key"
+          class="cs-tab"
+          :class="{ on: activeTab === tab.key }"
+          type="button"
+          @click="activeTab = tab.key"
+        >
+          <AppIcon :name="tab.icon" :size="14" />
+          {{ tab.label }}
+        </button>
 
-      <span class="cs-tab-sep" />
+        <span class="cs-tab-sep" />
 
-      <button
-        v-for="tab in composeTabs"
-        :key="tab.key"
-        class="cs-tab cs-tab-compose"
-        :class="{ on: activeTab === tab.key }"
-        type="button"
-        @click="activeTab = tab.key"
-      >
-        <AppIcon :name="tab.icon" :size="14" />
-        {{ tab.label }}
-        <span class="cs-tab-count">{{ countOf(tab.key) }}</span>
-      </button>
-    </nav>
+        <button
+          v-for="tab in composeTabs"
+          :key="tab.key"
+          class="cs-tab cs-tab-compose"
+          :class="{ on: activeTab === tab.key }"
+          type="button"
+          @click="activeTab = tab.key"
+        >
+          <AppIcon :name="tab.icon" :size="14" />
+          {{ tab.label }}
+        </button>
+      </nav>
+    </div>
 
     <main ref="mainRef" class="cs-main">
       <QuestionsTab v-if="activeTab === 'questions'" :filter="filter" @patch="patch" @find-similar="findSimilar" />
@@ -228,15 +216,32 @@ function onPaperSaved() {
       <BlueprintTab v-else-if="activeTab === 'blueprint'" :filter="filter" />
     </main>
 
-    <!-- 组卷车浮动按钮：抽屉关着时的常驻入口 -->
-    <button v-if="!basketOpen" class="cs-fab" :class="{ empty: basket.count.value === 0 }" type="button" @click="basketOpen = true">
-      <AppIcon name="cart" :size="18" />
-      <span v-if="basket.count.value">{{ basket.count.value }} 题 · {{ basket.scoreTotal.value }} 分</span>
-      <span v-else>组卷车空</span>
-    </button>
+    <ComposeBasketPanel
+      :open="basketOpen"
+      :z-index="BASKET_Z"
+      @close="basketOpen = false"
+      @compose="openPaper"
+    />
+    <ComposePaperDialog
+      :open="paperOpen"
+      :z-index="PAPER_DIALOG_Z"
+      @close="paperOpen = false"
+      @saved="onPaperSaved"
+    />
 
-    <ComposeBasketPanel :open="basketOpen" @close="basketOpen = false" @compose="openPaper" />
-    <ComposePaperDialog :open="paperOpen" @close="paperOpen = false" @saved="onPaperSaved" />
+    <!-- AI 问答：与系统顶栏内页面同一组件（Teleport 悬浮球 + 对话面板），逻辑共用。
+         组卷车以 `#above-fab` 挂在 AI 球正上方 —— 两个球共用同一份实时位置，
+         拖动 AI 球时组卷车跟着走（见 AiAssistant 的插槽说明） -->
+    <AiAssistant>
+      <template #above-fab>
+        <button class="cs-basket-fab" type="button" title="组卷车" @click="basketOpen = !basketOpen">
+          <AppIcon name="cart" :size="20" />
+          <span class="cs-basket-fab-text">组卷车</span>
+          <!-- 角标算「题 + 资源」：媒体进车后如果不计数，用户会以为加失败了 -->
+          <b v-if="basket.totalCount.value" class="cs-basket-count">{{ basket.totalCount.value }}</b>
+        </button>
+      </template>
+    </AiAssistant>
   </div>
 </template>
 
@@ -252,7 +257,7 @@ function onPaperSaved() {
   /* 内容居中：左右留白 = max(24px, 剩余空间的一半)。
      用 padding 而不是给某层套 max-width —— 顶栏与页签条的白底和分隔线才能仍然贯通整屏，
      否则大屏上会出现一条「断掉」的边线。 */
-  --compose-max: 1320px;
+  --compose-max: 1440px;
   --cs-gutter: max(24px, calc((100% - var(--compose-max)) / 2));
 }
 
@@ -267,18 +272,20 @@ function onPaperSaved() {
 }
 
 .cs-brand { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+/* 与系统全局侧边栏同一个 logo（/logo.png），样式对齐 AppLayout 的 .brand-logo */
 .cs-logo {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: var(--brand-grad);
-  color: #fff;
-  font-size: 18px;
-  font-weight: 700;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  background: #fff;
+  overflow: hidden;
+  box-shadow: 0 6px 14px rgba(0, 180, 166, 0.3);
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
+.cs-logo img { width: 100%; height: 100%; display: block; object-fit: contain; }
 .cs-brand-text { display: flex; flex-direction: column; line-height: 1.25; }
 .cs-brand-text b { font-size: 15px; color: var(--ink); }
 .cs-brand-text em { font-size: 11.5px; color: var(--sub); font-style: normal; }
@@ -286,63 +293,90 @@ function onPaperSaved() {
 /* 横向居中搜索条：补 align-items 让子元素按自身高度纵向居中（否则被拉伸到条高） */
 .cs-search { flex: 1; display: flex; align-items: center; justify-content: center; }
 
-.cs-head-ops { flex-shrink: 0; }
-.cs-basket-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 38px;
-  padding: 0 15px;
+/* 组卷车悬浮球：位置与层级由 AiAssistant 的 `.ai-fab-above` 壳提供（两者都是 64px 方框），
+   这里只管球本身。白色球与 AI 的渐变球并排，一眼能分出「找题」与「看车」两个入口 */
+.cs-basket-fab {
+  position: relative;
+  width: 100%;
+  height: 100%;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 50%;
   background: #fff;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink-2);
+  color: var(--brand-deep);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  box-shadow: 0 10px 24px rgba(28, 36, 52, 0.2);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
-.cs-basket-btn:hover { border-color: var(--brand); color: var(--brand-deep); }
-.cs-basket-btn b {
-  font-size: 11.5px;
-  color: #fff;
-  background: var(--brand-grad);
+.cs-basket-fab:hover { transform: scale(1.06); box-shadow: 0 12px 28px rgba(28, 36, 52, 0.26); }
+.cs-basket-fab:active { transform: scale(0.98); }
+.cs-basket-fab-text { font-size: 11px; line-height: 1; font-weight: 600; }
+.cs-basket-count {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
   border-radius: 999px;
-  padding: 1px 7px;
+  background: var(--brand-grad);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 19px;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0, 180, 166, 0.42);
 }
 
-.cs-tabs {
-  display: flex;
+/* 页签条外壳：白底贯通 + 底部分隔线；年级/学科选择器与页签同行，选择器不进滚动容器
+   （overflow-x: auto 会把它的下拉面板一起裁掉，所以整条**不能**给 overflow） */
+.cs-tabbar {
+  display: grid;
+  /* 三列：选择器 / 页签 / 空列。两侧都是 `1fr`，**与各自内容宽无关地等分剩余空间**，
+     中间那列于是正好落在内容区中点 —— 这正是「页签居中、选择器仍贴左」的做法；
+     靠 flex + margin:auto 做不到：那样页签的居中基准是「选择器右边的剩余空间」，会偏右。
+     中间列写成 minmax(0, auto)：页签放得下就取自身宽度（居中成立），
+     放不下时先收缩、由 .cs-tabs 横向滚动，而不是把整条撑出屏幕被裁掉。
+     代价：视口窄到两侧各不足选择器最小宽度（约 1250px 以下）时左列会长过右列，页签略偏右 ——
+     比让选择器与页签重叠好。 */
+  grid-template-columns: 1fr minmax(0, auto) 1fr;
   align-items: center;
-  gap: 4px;
+  gap: 14px;
   padding: 0 var(--cs-gutter);
   background: #fff;
   border-bottom: 1px solid var(--border);
-  overflow-x: auto;
   z-index: 40;
   flex-shrink: 0;
 }
+/* 选择器只占第一列并贴左；不写 min-width: 0（那会让它的自动最小尺寸变成 0，
+   第一列就可能窄过选择器、被页签压上去） */
+.cs-scope { display: flex; justify-content: flex-start; }
+.cs-tabs {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+}
+/* 页签条整体加高、间距放宽：去掉了角标之后不再拥挤，行高更舒展 */
 .cs-tab {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   border: none;
   background: none;
   font-size: 13.5px;
   color: var(--ink-2);
-  padding: 12px 13px;
+  padding: 14px 16px;
   border-bottom: 2px solid transparent;
   white-space: nowrap;
   transition: color 0.14s, border-color 0.14s;
 }
 .cs-tab:hover { color: var(--brand-deep); }
 .cs-tab.on { color: var(--brand-deep); font-weight: 600; border-bottom-color: var(--brand); }
-.cs-tab-count {
-  font-size: 10.5px;
-  color: var(--sub);
-  background: #f1f3f9;
-  border-radius: 999px;
-  padding: 1px 6px;
-}
-.cs-tab.on .cs-tab-count { background: var(--brand-soft); color: var(--brand-deep); }
 .cs-tab-compose { font-weight: 500; }
 .cs-tab-sep { width: 1px; height: 18px; background: var(--border); margin: 0 8px; flex-shrink: 0; }
 
@@ -350,34 +384,6 @@ function onPaperSaved() {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px var(--cs-gutter) 20px;
-  transition: padding-right 0.22s ease;
+  padding: 20px var(--cs-gutter) 26px;
 }
-
-.cs-fab {
-  position: fixed;
-  /* 贴视口右下角，**不**跟内容右缘对齐：内容有最大宽度，对齐后悬浮球会压住列表卡片与翻页，
-     贴视口则在大屏上自然落进右侧留白里 */
-  right: 24px;
-  bottom: 24px;
-  z-index: 55;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 46px;
-  padding: 0 20px;
-  border: none;
-  border-radius: 999px;
-  background: var(--brand-grad);
-  color: #fff;
-  font-size: 13.5px;
-  font-weight: 600;
-  box-shadow: var(--shadow-lg);
-}
-.cs-fab:hover { filter: brightness(1.06); }
-.cs-fab.empty { background: #fff; color: var(--sub); border: 1px solid var(--border); }
-/* 抽屉展开时给主区右侧留出空间，避免内容被抽屉永久压住。
-   取 max(抽屉宽, 留白)：留白本来就比抽屉宽时（超宽屏），内容离右缘已经足够远，
-   再按抽屉宽去推反而会把内容压窄。 */
-.compose-shell.basket-open .cs-main { padding-right: max(372px, var(--cs-gutter)); }
 </style>

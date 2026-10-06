@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 组卷工作台的题目卡片：题干 / 选项高亮 / 标签 / 答案与解析 / 加入组卷车。
+* 组卷工作台的题目卡片：题干 / 选项 / 标签 / 答案与解析 / 加入组卷车。
  *
  * 为什么这里抽成公共组件，而题库管理与 AI 生成结果各有一份 scoped 副本（见
  * `question/QuestionResultList.vue` 头部注释）：那两处的卡片各自背了对方没有的状态
@@ -73,12 +73,8 @@ const blocked = computed(() => props.row.status !== 'approved')
       <span>题目配图（演示占位）</span>
     </div>
 
-    <QuestionOptions
-      class="qc-options"
-      :options="row.options"
-      :answer="row.answer"
-      :columns="optionColumnsOf(row)"
-    />
+    <!-- 不传 answer：选题态不在选项里透露正确项，答案在下方「解析」展开 -->
+    <QuestionOptions class="qc-options" :options="row.options" :columns="optionColumnsOf(row)" />
 
     <div v-if="analysisOpen" class="qc-answer">
       <p>
@@ -169,7 +165,7 @@ const blocked = computed(() => props.row.status !== 'approved')
   font-size: 12.5px;
 }
 
-/* 选项外观（描边块 / 正确项高亮 / 一行 N 个）由 QuestionOptions 负责，这里只管与题干的间距 */
+/* 选项外观（描边块 / 一行 N 个）由 QuestionOptions 负责，这里只管与题干的间距 */
 .qc-options { margin-top: 10px; }
 
 .qc-answer {

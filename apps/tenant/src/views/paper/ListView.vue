@@ -1,50 +1,122 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, appConfirm, PAPER_STATUS_TEXT, showToast, AppModal } from '@aiteach/shared'
+/**
+ * 试卷库：只展示**已审核通过**的试卷（个人创建的草稿存「我的文件」，编辑从那里进），
+ * 因此列表是只读的 —— 没有「编辑 / 提交审核」入口，仅保留 预览 / 平行卷 / 导出 / 删除。
+ * 新建入口只留 手动协同组卷 与 细目表组卷；AI 智能组卷是独立菜单页（/paper/ai）。
+ */
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import {
+  AppFilterPanel,
+  AppIcon,
+  PAPER_SOURCE_OPTIONS,
+  appConfirm,
+  showToast,
+  AppModal,
+} from '@aiteach/shared'
 import type { FilterRowDef, OrgPaper, OrgQuestion } from '@aiteach/shared'
-import AppPagination from '@/components/ui/AppPagination.vue'
 import PaperPreviewModal from '@/components/paper/PaperPreviewModal.vue'
-import { aiComposePaper, deletePaper, fetchPapers, fetchQuestions, generateParallels, savePaper } from '@/api/org'
-import { useBaseData } from '@/composables/useBaseData'
+import PaperListPanel from '@/components/paper/PaperListPanel.vue'
+import ParallelPaperDialog from '@/components/paper/ParallelPaperDialog.vue'
+import { browsePaper, deletePaper, downloadPaper, fetchPapers, fetchQuestions, fetchTenantDict } from '@/api/org'
 import { exportPaperDoc, exportPaperPdf, type ExportVersion } from '@/utils/paper-export'
-
-const router = useRouter()
-
-const { subjects, grades, questionTypesFor, ensure, pick, withCurrent } = useBaseData()
 
 const papers = ref<OrgPaper[]>([])
 const questions = ref<OrgQuestion[]>([])
 
-const STATUS_CLASS: Record<string, string> = {
-  draft: 'tag-gray',
-  aiReview: 'tag-blue',
-  pending: 'tag-orange',
-  approved: 'tag-green',
-  rejected: 'tag-red',
+/* ===== 筛选 =====
+ * 年级 / 科目 / 难度 / 考试类型 / 杯赛 / 地区候选项来自租户字典（与题库管理同一口径），
+ * 字典是异步到达的，行定义只在运行时展开成 FilterRowDef；来源是试卷自己的取值域。 */
+interface PaperFilterRow {
+  key: 'grade' | 'subject' | 'difficulty' | 'examType' | 'competition' | 'region' | 'source'
+  label: string
+  dict?: string
+  options?: string[]
 }
 
-/* ===== 筛选 ===== */
-const FILTER_ROWS: FilterRowDef[] = [
-  { key: 'status', label: '状态', options: Object.values(PAPER_STATUS_TEXT), multiple: false },
+/** 主条件（产品指定的顺序：年级 / 科目 / 难度 / 考试类型） */
+const FILTER_ROWS: PaperFilterRow[] = [
+  { key: 'grade', label: '年级', dict: 'grade' },
+  { key: 'subject', label: '科目', dict: 'subject' },
+  { key: 'difficulty', label: '难度', dict: 'difficulty' },
+  { key: 'examType', label: '考试类型', dict: 'examType' },
 ]
-const filters = reactive<Record<string, string[]>>({ status: [] })
+
+/** 次要条件：收在「更多查询」里 */
+const MORE_ROWS: PaperFilterRow[] = [
+  { key: 'competition', label: '杯赛', dict: 'competition' },
+  { key: 'region', label: '地区', dict: 'region' },
+  { key: 'source', label: '来源', options: [...PAPER_SOURCE_OPTIONS] },
+]
+
+const ALL_ROWS = [...FILTER_ROWS, ...MORE_ROWS]
+const filters = reactive<Record<PaperFilterRow['key'], string[]>>({
+  grade: [],
+  subject: [],
+  difficulty: [],
+  examType: [],
+  competition: [],
+  region: [],
+  source: [],
+})
+const filterOptions = reactive<Record<string, string[]>>({})
+
+/** 每个筛选 key 从试卷上取哪个值（可缺省的维度给空串，等价于「没有该属性」） */
+const FIELD_OF: Record<PaperFilterRow['key'], (row: OrgPaper) => string> = {
+  grade: (row) => row.grade,
+  subject: (row) => row.subject,
+  difficulty: (row) => row.difficulty ?? '',
+  examType: (row) => row.examType ?? '',
+  competition: (row) => row.competition ?? '',
+  region: (row) => row.region ?? '',
+  source: (row) => row.source ?? '',
+}
+
+function toRowDefs(rows: PaperFilterRow[]): FilterRowDef[] {
+  return rows.map((row) => ({ key: row.key, label: row.label, options: row.options ?? filterOptions[row.dict ?? ''] ?? [] }))
+}
+const filterRowDefs = computed(() => toRowDefs(FILTER_ROWS))
+const moreRowDefs = computed(() => toRowDefs(MORE_ROWS))
+
+/** AppFilterPanel 回传整份筛选值（覆盖式回写） */
+function onFiltersChange(next: Record<string, string[]>) {
+  ALL_ROWS.forEach((row) => {
+    filters[row.key] = next[row.key] ?? []
+  })
+}
+
 const keyword = ref('')
 const page = ref(1)
 const filtered = computed(() =>
-  papers.value.filter(
-    (row) =>
-      (filters.status.length === 0 || filters.status.includes(PAPER_STATUS_TEXT[row.status])) &&
-      (!keyword.value || row.name.includes(keyword.value)),
-  ),
+  papers.value.filter((row) => {
+    for (const def of ALL_ROWS) {
+      const selected = filters[def.key]
+      if (selected.length > 0 && !selected.includes(FIELD_OF[def.key](row))) return false
+    }
+    return !keyword.value || row.name.includes(keyword.value)
+  }),
 )
 const rows = computed(() => filtered.value.slice((page.value - 1) * 10, page.value * 10))
 
+/* 筛选 / 关键词变动后停在原页码会看到空列表，回第一页。
+   分页已经搬进 PaperListPanel，但这条复位规则依赖的筛选状态仍归本页所有，所以留在这里。 */
+watch([() => JSON.stringify(filters), keyword], () => {
+  page.value = 1
+})
+
 async function load() {
-  await ensure()
-  aiForm.subject = pick(subjects.value, aiForm.subject)
-  aiForm.grade = pick(grades.value, aiForm.grade)
-  ;[papers.value, questions.value] = await Promise.all([fetchPapers(), fetchQuestions()])
+  /* 试卷库只放审核通过的卷；草稿 / 待审在「我的文件」与审核中心里 */
+  const [all, qs] = await Promise.all([fetchPapers(), fetchQuestions()])
+  papers.value = all.filter((row) => row.status === 'approved')
+  questions.value = qs
+}
+
+async function loadDicts() {
+  const types = [...new Set(ALL_ROWS.map((row) => row.dict).filter((d): d is string => !!d))]
+  await Promise.all(
+    types.map(async (type) => {
+      filterOptions[type] = (await fetchTenantDict(type)).map((item) => item.name)
+    }),
+  )
 }
 
 function totalScore(paper: OrgPaper) {
@@ -57,76 +129,16 @@ function totalCount(paper: OrgPaper) {
 /* ===== 预览 ===== */
 const preview = ref<OrgPaper | null>(null)
 
-/* ===== AI 组卷（FR-PP-008/009） ===== */
-const aiOpen = ref(false)
-const aiForm = reactive({
-  name: '',
-  subject: '数学',
-  grade: '高一',
-  structure: [
-    { type: '单选', count: 8, score: 5 },
-    { type: '填空', count: 4, score: 5 },
-    { type: '解答', count: 2, score: 12 },
-  ],
-})
-const aiRunning = ref(false)
-
-async function runAiCompose() {
-  if (aiForm.name.trim().length < 2) {
-    showToast('请填写试卷名称（2-50 字）', 'error')
-    return
-  }
-  if (aiForm.structure.some((row) => row.count < 1 || row.score <= 0)) {
-    showToast('每个大题的题数 ≥1、单题分值 >0', 'error')
-    return
-  }
-  aiRunning.value = true
-  try {
-    const { paper, aiPicked } = await aiComposePaper({ ...aiForm })
-    aiOpen.value = false
-    await load()
-    showToast(
-      aiPicked > 0
-        ? `AI 组卷完成：${totalCount(paper)} 题入卷，${aiPicked} 题因题量不足由 AI 新生成补足`
-        : `AI 组卷完成：${totalCount(paper)} 题 · ${totalScore(paper)} 分（草稿）`,
-      'success',
-    )
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : 'AI 组卷失败', 'error')
-  } finally {
-    aiRunning.value = false
-  }
+/** 打开整卷预览 = 一次浏览：计数发给 mock，本地同步 +1（无需为此重拉列表） */
+function onPreview(row: OrgPaper) {
+  preview.value = row
+  void browsePaper(row.id)
+  row.viewCount = (row.viewCount ?? 0) + 1
 }
 
-/* ===== 平行卷（FR-PP-015） ===== */
-const parallelOpen = ref(false)
+/* ===== 平行卷（FR-PP-015） =====
+   弹窗本体在 ParallelPaperDialog（工作台「试卷」页签也用同一个），这里只留「选中哪份卷」 */
 const parallelTarget = ref<OrgPaper | null>(null)
-const parallelCount = ref(1)
-
-function openParallel(row: OrgPaper) {
-  parallelTarget.value = row
-  parallelCount.value = 1
-  parallelOpen.value = true
-}
-
-async function runParallel() {
-  if (!parallelTarget.value) return
-  const list = await generateParallels(parallelTarget.value.id, parallelCount.value)
-  parallelOpen.value = false
-  await load()
-  showToast(`已生成平行卷：${list.map((row) => row.parallelLabel).join('、')}（草稿）`, 'success')
-}
-
-/* ===== 行内操作 ===== */
-async function onSubmit(row: OrgPaper) {
-  try {
-    await savePaper({ id: row.id, name: row.name, submit: true })
-    showToast('已提交 AI 九项检测，通过后推送人工审核', 'success')
-    load()
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : '提交失败', 'error')
-  }
-}
 
 /* ===== 导出 =====
  * 不再走「创建导出任务」的占位：试卷数据本来就在前端，直接生成文档即可。
@@ -134,7 +146,7 @@ async function onSubmit(row: OrgPaper) {
  * 所以不做「默认给最全的」这种省事的决定。
  */
 const exportTarget = ref<OrgPaper | null>(null)
-const exportVersion = ref<ExportVersion>('student')
+const exportVersion = ref<'student' | 'teacher' | 'answer'>('student')
 const exportWithCard = ref(true)
 
 function openExport(row: OrgPaper) {
@@ -159,6 +171,9 @@ function doExport(kind: 'doc' | 'pdf') {
       exportPaperPdf(paper, questions.value, options)
       showToast('已在新窗口打开，选择「另存为 PDF」即可', 'success')
     }
+    /* 导出成功才算一次下载，本地同步 +1 */
+    void downloadPaper(paper.id)
+    paper.downloadCount = (paper.downloadCount ?? 0) + 1
     exportTarget.value = null
   } catch (error) {
     showToast(error instanceof Error ? error.message : '导出失败', 'error')
@@ -166,148 +181,44 @@ function doExport(kind: 'doc' | 'pdf') {
 }
 
 async function onDelete(row: OrgPaper) {
-  if (!(await appConfirm(`删除《${row.name}》？将进入回收站保留 30 天`, { type: 'danger' }))) return
+  if (!(await appConfirm(`删除《${row.name}》？删除后放入回收站（保留 30 天可恢复）`, { type: 'danger' }))) return
   await deletePaper(row.id)
-  showToast('已移入回收站', 'success')
+  showToast('已放入回收站', 'success')
   load()
 }
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  void loadDicts()
+})
 </script>
 
 <template>
   <div class="page">
-    <AppPageHeader>
-      <template #actions>
-        <button class="btn btn-primary" @click="router.push('/paper/collab')">
-          <AppIcon name="plus" :size="15" /> 手动协同组卷
-        </button>
-        <button class="btn btn-ghost" @click="aiOpen = true">
-          <AppIcon name="sparkles" :size="15" /> AI 智能组卷
-        </button>
-        <button class="btn btn-ghost" @click="router.push('/paper/compose?tab=blueprint')">
-          <AppIcon name="grid" :size="15" /> 细目表组卷
-        </button>
+    <!-- <AppPageHeader desc="试卷库收录审核通过的试卷（只读）；个人创建的试卷存放在「我的文件」，送审通过后自动进入本库。" /> -->
+
+    <AppFilterPanel :rows="filterRowDefs" :more-rows="moreRowDefs" :model-value="filters" @update:model-value="onFiltersChange" />
+
+    <!-- 列表整块交给共享面板（工作台「试卷」页签用同一个），弹窗与筛选状态仍留在本页 -->
+    <PaperListPanel
+      :rows="rows"
+      :total="filtered.length"
+      v-model:page="page"
+      v-model:keyword="keyword"
+      placeholder="试卷名称"
+      view-key="paper-list"
+      @preview="onPreview"
+    >
+      <template #ops="{ row }">
+        <button class="mini-btn" @click="onPreview(row)">预览</button>
+        <button class="mini-btn" @click="parallelTarget = row">平行卷</button>
+        <button class="mini-btn" @click="openExport(row)">导出</button>
+        <button class="mini-btn danger" @click="onDelete(row)">删除</button>
       </template>
-    </AppPageHeader>
+    </PaperListPanel>
 
-    <AppFilterPanel v-model="filters" :rows="FILTER_ROWS" />
-
-    <div class="panel">
-      <!-- 工具条自带 14/18 的内边距，与下方表格的满幅排布配合（表格要贴着面板边才能横向滚动） -->
-      <div class="list-head">
-        <AppListToolbar v-model="keyword" placeholder="试卷名称" />
-      </div>
-
-      <div class="data-table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>试卷名称</th>
-              <th>状态</th>
-              <th>结构</th>
-              <th>总分</th>
-              <th>适用</th>
-              <th>创建人</th>
-              <th>更新时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-if="rows.length === 0">
-              <td colspan="8" class="empty-row">暂无试卷，点击右上角创建</td>
-            </tr>
-            <template v-else>
-              <tr v-for="row in rows" :key="row.id">
-                <td class="cell-strong">
-                  {{ row.name }}
-                  <span v-if="row.parallelOf" class="tag tag-blue" style="margin-left: 6px">平行卷</span>
-                  <span v-if="row.sharedSquare" class="tag tag-gray" style="margin-left: 6px">已共享广场</span>
-                </td>
-                <td><span class="tag" :class="STATUS_CLASS[row.status]">{{ PAPER_STATUS_TEXT[row.status] }}</span></td>
-                <td>{{ totalCount(row) }} 题 / {{ row.sections.length }} 大题</td>
-                <td>{{ totalScore(row) }} 分</td>
-                <td>{{ row.grade }} · {{ row.duration }} 分钟</td>
-                <td>{{ row.owner }}</td>
-                <td>{{ row.updatedAt }}</td>
-                <td>
-                  <div class="op-group">
-                    <button v-if="row.status === 'draft' || row.status === 'rejected'" class="mini-btn" @click="router.push(`/paper/edit?id=${row.id}`)">编辑</button>
-                    <button class="mini-btn" @click="preview = row">预览</button>
-                    <button v-if="row.status === 'draft' || row.status === 'rejected'" class="mini-btn success" @click="onSubmit(row)">提交审核</button>
-                    <button v-if="row.status === 'approved'" class="mini-btn" @click="openParallel(row)">平行卷</button>
-                    <button class="mini-btn" @click="openExport(row)">导出</button>
-                    <button class="mini-btn danger" @click="onDelete(row)">删除</button>
-                  </div>
-                </td>
-              </tr>
-            </template>
-          </tbody>
-        </table>
-      </div>
-      <AppPagination :total="filtered.length" v-model:page="page" :page-size="10" />
-    </div>
-
-    <!-- AI 组卷弹窗 -->
-    <AppModal v-if="aiOpen" title="AI 智能组卷" :width="560" @close="aiOpen = false">
-      <div class="f-field">
-        <label class="f-label">试卷名称<span class="req">*</span>（2-50 字）</label>
-        <input v-model="aiForm.name" class="f-input" placeholder="如：高一数学第三章随堂测" />
-      </div>
-      <div class="f-field row2">
-        <div>
-          <label class="f-label">学科</label>
-          <select v-model="aiForm.subject" class="f-select">
-            <option v-for="s in subjects" :key="s" :value="s">{{ s }}</option>
-          </select>
-        </div>
-        <div>
-          <label class="f-label">年级</label>
-          <select v-model="aiForm.grade" class="f-select">
-            <option v-for="g in grades" :key="g" :value="g">{{ g }}</option>
-          </select>
-        </div>
-      </div>
-      <div class="f-field">
-        <label class="f-label">卷面结构（按题型设置题数与单题分值）</label>
-        <div v-for="(row, i) in aiForm.structure" :key="i" class="struct-row">
-          <select v-model="row.type" class="f-select" style="width: 110px">
-            <!-- 题型随学科收窄（英语才有完形填空 / 七选五 / 短文改错）；已选值并入，换学科不会渲染成空白 -->
-            <option v-for="t in withCurrent(questionTypesFor(aiForm.subject), row.type)" :key="t" :value="t">{{ t }}</option>
-          </select>
-          <input v-model.number="row.count" type="number" min="1" class="f-input" style="width: 84px" />
-          <span class="f-hint">题 ×</span>
-          <input v-model.number="row.score" type="number" min="0.5" step="0.5" class="f-input" style="width: 84px" />
-          <span class="f-hint">分/题</span>
-          <button class="mini-btn danger" type="button" :disabled="aiForm.structure.length <= 1" @click="aiForm.structure.splice(i, 1)">删除</button>
-        </div>
-        <button class="btn btn-ghost btn-sm" type="button" :disabled="aiForm.structure.length >= 8" @click="aiForm.structure.push({ type: '单选', count: 4, score: 5 })">
-          <AppIcon name="plus" :size="14" /> 添加大题
-        </button>
-        <p class="f-hint">预计总分：{{ aiForm.structure.reduce((s, r) => s + r.count * r.score, 0) }} 分 · AI 优先从已入库题目抽取，不足时智能生成补齐</p>
-      </div>
-      <template #footer>
-        <button class="btn btn-ghost" @click="aiOpen = false">取消</button>
-        <button class="btn btn-primary" :disabled="aiRunning" @click="runAiCompose">
-          {{ aiRunning ? '组卷中…' : '开始组卷（消耗 1 次额度）' }}
-        </button>
-      </template>
-    </AppModal>
-
-    <!-- 平行卷弹窗 -->
-    <AppModal v-if="parallelOpen && parallelTarget" title="生成平行卷" :width="460" @close="parallelOpen = false">
-      <p style="font-size: 13.5px; color: var(--ink-2); margin-bottom: 12px">
-        以《{{ parallelTarget.name }}》为母卷，AI 逐题替换同构题（同知识点 / 题型 / 难度），生成结构一致、难度等值的平行卷。
-      </p>
-      <div class="f-field">
-        <label class="f-label">生成份数（1-5，B 卷起编）</label>
-        <input v-model.number="parallelCount" type="number" min="1" max="5" class="f-input" />
-      </div>
-      <template #footer>
-        <button class="btn btn-ghost" @click="parallelOpen = false">取消</button>
-        <button class="btn btn-primary" @click="runParallel">生成（消耗 {{ parallelCount }} 次额度）</button>
-      </template>
-    </AppModal>
+    <!-- 平行卷弹窗（生成 + 落库 + 提示都在组件里，本页只传母卷） -->
+    <ParallelPaperDialog :paper="parallelTarget" @close="parallelTarget = null" />
 
     <!-- 导出弹窗：版本必须显式选，避免把带答案的教师版误发给学生 -->
     <AppModal v-if="exportTarget" title="导出试卷" :width="460" @close="exportTarget = null">
@@ -343,12 +254,7 @@ onMounted(load)
 </template>
 
 <style scoped>
-/* 列表工具条与面板同宽同边距：表格满幅贴边才能横向滚动，所以内边距给在工具条这一层 */
-.list-head { padding: 14px 18px 0; }
-.struct-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-/* 横向居中的行里，f-hint 自带的 5px 上边距会把文字顶歪 */
-.struct-row .f-hint { margin-top: 0; }
-.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+/* 列表本体（工具条 / 表格 / 详细卡片 / 分页）已抽到 PaperListPanel，本页只剩导出弹窗的小样式 */
 .f-check {
   display: inline-flex;
   align-items: center;

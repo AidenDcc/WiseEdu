@@ -184,7 +184,12 @@ export interface DictItem {
   enabled: boolean
   /** 被机构引用数（>0 时禁止删除，仅可停用） */
   refCount: number
-  /** 类型特有字段：grade=学段；term=学年/学期/起止；questionType=作答类型；difficulty=系数 */
+  /**
+   * 类型特有字段：grade=学段；term=学年/学期/起止；questionType=作答类型；difficulty=系数。
+   *
+   * examType 也用它表示**适配学段**（见 `PAPER_CATEGORIES`）：留空 = 全学段通用，
+   * 有值 = 只在机构端选到该学段时才出现在试卷类型树 / 筛选条件里。
+   */
   stage?: string
   year?: string
   termHalf?: string
@@ -193,11 +198,25 @@ export interface DictItem {
   answerType?: string
   coefficient?: number
   /**
-   * 适用学科（目前仅 questionType 使用）：留空 = 全学科通用题型，
-   * 有值 = 学科专属题型（如「完形填空」只属于英语），选学科后才出现在题型选项里。
+   * 适用学科：questionType = 学科专属题型，examType = 适配学科。
+   * 留空 = 全学科通用；有值 = 只在机构端选到这些学科时才出现。
+   * （如「完形填空」只属于英语，「物理竞赛」只在物理下出现。）
    */
   subjects?: string[]
+  /**
+   * 试卷分类（仅 examType 使用，取值见 `PAPER_CATEGORIES`）：组卷工作台「试卷」页签
+   * 左侧那棵试卷类型树的第一级。留空 = 不进树（但仍可用于筛选）。
+   */
+  paperCategory?: string
 }
+
+/**
+ * 试卷分类：组卷工作台「试卷」页签左树的四个一级分组，也是考试类型字典项
+ * 「试卷分类」字段的取值域。定义在这里而不是管理端页面里 —— 管理端下拉、
+ * 工作台树的顺序、种子数据的分组共用同一份，各写一份必然对不上。
+ */
+export const PAPER_CATEGORIES = ['同步教学', '阶段测试', '小升初', '竞赛'] as const
+export type PaperCategory = (typeof PAPER_CATEGORIES)[number]
 
 /* 知识点/考点树（最多 6 级） */
 export interface KnowledgeNode {
@@ -516,6 +535,37 @@ export interface OrgQuestion {
   reviewedAt?: string
 }
 
+/**
+ * 题目纠错类型（教师反馈题目问题，可多选）。
+ *
+ * 是**问题分类**而不是题目属性，所以不落在 OrgQuestion 上：反馈只负责「说清哪里不对」，
+ * 真正的改题仍在录题中心（题库治理动作），两者靠 questionId 关联。
+ */
+export const QUESTION_CORRECTION_TYPES = [
+  '题干错误',
+  '答案错误',
+  '解析错误',
+  '知识体系不符',
+  '图片错误',
+  '补充解析',
+  '主客观有误',
+  '公式乱码',
+  '其他',
+] as const
+export type QuestionCorrectionType = (typeof QUESTION_CORRECTION_TYPES)[number]
+
+/** 题目纠错记录：组卷工作台提交，题库治理侧处理 */
+export interface QuestionCorrection {
+  id: number
+  questionId: number
+  /** 问题类型，多选，取值见 QUESTION_CORRECTION_TYPES */
+  types: QuestionCorrectionType[]
+  /** 问题描述（富文本，与题干同一套编辑器，可含公式 / 图片） */
+  description: string
+  reporter: string
+  createdAt: string
+}
+
 /* ================ 知识点树 / 教材（题库管理） ================ */
 
 /** 年级 → 学科 → 教材版本 级联矩阵 */
@@ -554,7 +604,28 @@ export interface PaperSection {
   materialHint?: string
 }
 
+/**
+ * 试卷随附的参考资料。
+ *
+ * 组卷工作台的资源页签（图片 / 视频 / 小程序）可以把媒体加进组卷车，车里的资源**不参与卷面**
+ * （不加分、不归大题、不打印），而是跟着试卷一起存下来，供出好卷之后配套使用 ——
+ * 故走 `OrgPaper.attachments` 而不是塞进 `PaperSection.questions`（那里的 id 空间是题库题目）。
+ *
+ * `name` / `sizeMb` 是冗余存的：媒体库里的资源被删除或改名后，试卷上仍要能说清当初附了什么。
+ */
+export interface PaperAttachment {
+  /** 媒体库资源 id（`OrgMedia.id`） */
+  mediaId: number
+  kind: MediaKind
+  name: string
+  sizeMb: number
+}
+
 export type PaperStatus = 'draft' | 'aiReview' | 'pending' | 'approved' | 'rejected'
+
+/** 试卷来源的候选取值（新建试卷按入口自动标记；试卷库「来源」筛选用同一份） */
+export const PAPER_SOURCE_OPTIONS = ['手动组卷', '协同组卷', 'AI 组卷', '真题导入', '文档识别'] as const
+export type PaperSource = (typeof PAPER_SOURCE_OPTIONS)[number]
 
 export interface OrgPaper {
   id: number
@@ -566,8 +637,35 @@ export interface OrgPaper {
   sections: PaperSection[]
   owner: string
   updatedAt: string
+  /* ===== 筛选维度（口径同 OrgQuestion：难度 / 考试类型 / 杯赛 / 地区取字典表值） ===== */
+  difficulty?: string
+  examType?: string
+  /** 杯赛名称（字典表 competition），非竞赛卷为空 */
+  competition?: string
+  region?: string
+  source?: PaperSource
+  /**
+   * 试卷年份（4 位，如 `'2026'`）与月份（`'1'`-`'12'`，个位不补零）。
+   *
+   * 题目没有这两个维度，故只有试卷侧有筛选；取值不是字典而是**卷池里实际出现过的值**
+   * （组卷工作台的分年份 / 月份候选项直接由卷池推导，见 PapersTab 的 yearOptions），
+   * 因此不存在「选了必然为空」的选项。种子卷由 `seedPaperMeta` 填，新卷在 `savePaper` 里按保存时间填。
+   */
+  year?: string
+  month?: string
+  /* ===== 我的文件联动：个人创建的试卷必须落在一个文件夹里（见 savePaper / linkPaperFile） ===== */
+  /** 存储位置（我的文件文件夹 id；0 = 根目录） */
+  folderId?: number
+  /** 关联的文件 id（「我的文件」里那份试卷文件的 id） */
+  fileId?: number
+  /** 浏览次数（试卷库「预览」累加；演示口径会话内有效，刷新还原） */
+  viewCount?: number
+  /** 下载次数（试卷库「导出 Word / PDF」累加） */
+  downloadCount?: number
   parallelOf?: number
   parallelLabel?: string
+  /** 随卷保存的参考资料（组卷车里的图片 / 视频 / 小程序），见 PaperAttachment */
+  attachments?: PaperAttachment[]
   sharedSquare: boolean
   aiChecks?: AiCheckResult[]
   aiSuspects?: string[]
@@ -859,6 +957,8 @@ export interface OrgFile {
   updatedAt: string
   /** 置顶：排在同级其他文件之前 */
   pinned?: boolean
+  /** 关联的试卷 id：建卷落文件时写入，「我的文件」据此提供「打开试卷」入口 */
+  paperId?: number
 }
 
 /* ================ 讲义课件（FR-JC-005 ~ 012） ================ */

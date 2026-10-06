@@ -9,12 +9,45 @@
  * 排版流程：blocks（卷头 + 大题 + 题目）→ 隐藏测量层量高 → paginateBlocks 装箱到「版」
  *          → 按一面版数拼版成纸面 → 逐页渲染。
  * 测量层与纸面页面共用 PaperBlock 组件与同一份 --pp-* 变量，因此量到多少、画出来就是多少。
+ *
+ * **两种用法**（`reading` 开关，默认关）：
+ * - 排版预览（今天的行为，试卷库 / 试卷编辑页 / 协同任务详情 / 组卷车草稿预览）：纸张、版数、
+ *   方向、内容与左栏的排版样式、卷面信息都在 —— 这些地方正是在调版式、看草稿；
+ * - 阅读预览（组卷工作台「试卷」页签）：那里浏览的是**已经排好版的现成卷**，改不了也不该改
+ *   版式，于是整条排版工具栏（纸张 / 版数 / 方向 / 内容 / 缩放 / 教师版）与顶栏的导出版本
+ *   选择都不出现，左栏换成试题统计 / 内容切换 / 缩放（100% 起，5% 步进或直接输入）/
+ *   平行组卷 / 分析试卷 / 推荐试卷，顶部可分享。
+ *   同一份卷在工作台与试卷库因此会看到两种预览 —— 这是刻意的范围决定，不是漏改。
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { AppIcon, showToast } from '@aiteach/shared'
-import type { OrgPaper, OrgQuestion } from '@aiteach/shared'
+import {
+  computed,
+  defineAsyncComponent,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+  type CSSProperties,
+} from 'vue'
+import { AppIcon, AppModal, enterOverlay, exitOverlay, isTopOverlay, paperQuestionCount, showToast } from '@aiteach/shared'
+import type { MediaKind, OrgPaper, OrgQuestion, QuestionCorrection } from '@aiteach/shared'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import PaperBlock from './PaperBlock.vue'
+/* 异步挂载：试卷分析里那三张图（`ComboChart` / `BarChart` → echarts，约 500 KB）不该跟着
+   预览一起下载 —— 静态 import 会让每次打开预览都多拖半兆，而「分析试卷」是预览里偶尔才点
+   一次的动作。`v-if` 一开才去拉那一块，代价是点按钮到弹出之间有一小段空白。 */
+const PaperAnalysisModal = defineAsyncComponent(() => import('./PaperAnalysisModal.vue'))
+import PaperShareDialog from './PaperShareDialog.vue'
+import ParallelPaperDialog from './ParallelPaperDialog.vue'
+import QuestionActionBar from './QuestionActionBar.vue'
+import QuestionPreviewDrawer from '@/components/question/QuestionPreviewDrawer.vue'
+import QuestionCorrectionDialog from '@/components/question/QuestionCorrectionDialog.vue'
+import SimilarQuestionsModal from '@/components/compose/SimilarQuestionsModal.vue'
+import { useComposeBasket } from '@/composables/useComposeBasket'
+import { useQuestionFavorites } from '@/composables/useQuestionFavorites'
+import { fetchQuestionCorrections } from '@/api/org'
+import { difficultyClass } from '@/utils/question-card'
+import { distributionOf } from './paper-stats'
 import {
   ANSWER_LINES,
   MM,
@@ -46,8 +79,50 @@ const props = defineProps<{
   initialMode?: PaperMode
   initialOrientation?: PaperOrientation
   initialPanels?: number
+  /**
+   * 阅读模式：这份卷已经排好版了，用户是来看卷子本身、不是来调版式的。
+   * 默认 **false** —— 四个老调用方（试卷库 / 编辑页 / 协同任务 / 组卷车草稿）什么都不用传，
+   * 保持今天的排版预览。
+   */
+  reading?: boolean
+  /**
+   * 阅读模式的「推荐试卷」列表（同年级同学科的其他卷，由父页面筛好传入）。
+   * 本组件不持有卷池：组卷车草稿预览传进来的是一份 id 为 0 的合成卷，在那样的数据上
+   * 「推荐」没有意义 —— 由父页面决定推不推，这里只负责画。
+   */
+  recommended?: OrgPaper[]
+  /**
+   * 遮罩层级，默认 130（与 appConfirm 同级：预览之上再开确认框时后者仍压得住）。
+   * 子弹窗（分享 / 平行组卷 / 分析 / 题目预览 / 纠错 / 相似题）与悬停操作条都按它 +10 / +1 推。
+   *
+   * ⚠️ 抬到 300 以上会越过全局搜索(200)与下拉菜单(300)；调用方若自己也在很高的层级上
+   * （如组卷工作台的生成试卷弹窗 340），必须把层级一并传进来，否则预览会被它压住。
+   */
+  zIndex?: number
 }>()
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{
+  close: []
+  /** 阅读模式点了某份推荐卷：换的是父页面持有份那份卷（本组件是被 v-if 挂载的） */
+  pick: [paper: OrgPaper]
+}>()
+
+/* 层级由 `zIndex` 推出来，不各写一处：调用方把整层预览抬到别的高度时（如组卷工作台的
+   生成试卷弹窗），子弹窗与悬停操作条必须跟着抬，否则会落到遮罩下面去。 */
+const maskZ = computed(() => props.zIndex ?? 130)
+/** 子弹窗（导出 / 分享 / 平行组卷 / 分析 / 题目预览 / 纠错 / 相似题） */
+const childZ = computed(() => maskZ.value + 10)
+/** 悬停操作条：夹在遮罩与子弹窗之间 */
+const barZ = computed(() => maskZ.value + 1)
+
+/**
+ * 随卷参考资料（组卷车里的图片 / 视频 / 小程序）。
+ *
+ * **只列在侧栏，不进纸面**：参考资料不是卷面内容，不占分值也不该打印 —— 塞进 `paperBlocks`
+ * 会被自动分版当成一块内容，在打印件上多出一页，还得跟着处理「这块能不能跨页」。
+ * 旧卷没有 `attachments`，这个列表为空也就整节不出现。
+ */
+const ATTACHMENT_KIND_TEXT: Record<MediaKind, string> = { image: '图片', animation: '小程序', video: '视频' }
+const attachments = computed(() => props.paper.attachments ?? [])
 
 /* ===== 排版设置 ===== */
 
@@ -63,7 +138,8 @@ const mode = ref<PaperMode>(props.initialMode ?? 'paper')
 /** 教师版：题目后附答案与解析、答题卡标出正确选项（打印前记得关掉） */
 const teacher = ref(false)
 const zoom = ref(1)
-const autoFit = ref(true)
+/** 适应宽度：排版预览进来就铺满画布（默认开）；阅读预览按 100% 起（默认关，见 `reading`） */
+const autoFit = ref(!props.reading)
 
 const preset = computed(() => presetOf(layoutKey.value))
 const size = computed(() => PAPER_SIZES.find((row) => row.key === sizeKey.value) ?? PAPER_SIZES[0])
@@ -133,6 +209,28 @@ const sectionViews = computed<SectionView[]>(() => {
     }
   })
 })
+
+/* ===== 阅读模式：左栏的试题统计 =====
+ * 只统计**能查到题目的**小题：卷里引用了、题库中已无数据的历史题（如题目被删除）在
+ * 「题目数据缺失」一行里单列，不静默丢掉 —— 与「试卷分析」页脚同一口径。
+ * 题型分布与试卷分析弹窗共用 `distributionOf`，同一份卷两处必须给出同一组数。 */
+const knownItems = computed(() =>
+  sectionViews.value.flatMap((sv) => sv.questions.flatMap((q) => (q.item ? [q.item] : []))),
+)
+const typeRows = computed(() => distributionOf(knownItems.value, (question) => question.type))
+const missingCount = computed(() => totalCount.value - knownItems.value.length)
+
+/** 阅读模式的「内容」切换：从顶部工具栏搬进侧栏（它不是排版参数，只是决定看哪一段） */
+const CONTENT_MODES: Array<{ key: PaperMode; label: string }> = [
+  { key: 'paper', label: '试卷' },
+  { key: 'card', label: '答题卡' },
+  { key: 'both', label: '两者' },
+]
+
+/* 从预览里打开的子弹窗：三个布尔足矣，弹窗本体都在共享组件里 */
+const shareOpen = ref(false)
+const parallelOpen = ref(false)
+const analysisOpen = ref(false)
 
 /* ===== 试卷块：卷头 + 各大题标题 + 各题 ===== */
 
@@ -316,7 +414,8 @@ const cardSheetCount = computed(() => sheets.value.filter((sheet) => sheet.group
 /** 纸面上方的页码提示（不进纸面、不参与打印） */
 function sheetTag(sheet: SheetView): string {
   const head = mode.value === 'both' ? `${sheet.group} · ` : ''
-  const flow = geo.value.panels > 1 ? ` · 一面 ${geo.value.panels} 版（先左版后右版）` : ''
+  /* 「一面 N 版」是排版参数，阅读模式下不展示（页码要留：那是「这份卷有几页」） */
+  const flow = !props.reading && geo.value.panels > 1 ? ` · 一面 ${geo.value.panels} 版（先左版后右版）` : ''
   return `${head}第 ${sheet.index} 页 / 共 ${sheet.total} 页${flow}`
 }
 
@@ -337,24 +436,272 @@ watch(
   () => nextTick(scheduleMeasure),
 )
 
-/* ===== 缩放（默认适应宽度） ===== */
+/* ===== 缩放（排版预览默认适应宽度；阅读预览从 100% 起，左栏可 5% 步进或直接输入） ===== */
 
 const canvas = ref<HTMLElement | null>(null)
 const canvasW = ref(900)
+
+/** 缩放上下限（30% ~ 160%）：手动输入与加减档位共用同一套钳制 */
+const ZOOM_MIN = 0.3
+const ZOOM_MAX = 1.6
+/** 阅读模式左栏的步进：用户指定 5%（顶部工具栏的排版预览仍是 10%） */
+const ZOOM_STEP = 0.05
 
 function fitZoom() {
   const usable = Math.max(240, canvasW.value - 56)
   return Math.min(1.25, Math.max(0.25, usable / geo.value.sheetW))
 }
 
-function nudgeZoom(delta: number) {
+/** 手动调过缩放就退出「适应宽度」，否则下一次窗口尺寸变化会把用户设的比例冲掉 */
+function applyZoom(next: number) {
   autoFit.value = false
-  zoom.value = Math.min(1.6, Math.max(0.3, Number((zoom.value + delta).toFixed(2))))
+  zoom.value = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Number(next.toFixed(2))))
+}
+
+function nudgeZoom(delta: number) {
+  applyZoom(zoom.value + delta)
+}
+
+/**
+ * 手动输入缩放（阅读模式左栏）：`110` / `110%` 都认。
+ *
+ * 用 `change` 而不是 `input`：边打字边生效会在输入「1」的瞬间被钳成 30% 并回写输入框，
+ * 光标下的数字自己跳，根本没法把「120」打完。`change` 在失焦 / 回车时结算一次。
+ */
+function onZoomInput(event: Event) {
+  const input = event.target as HTMLInputElement
+  const value = Number(input.value.replace('%', '').trim())
+  if (Number.isFinite(value) && value > 0) applyZoom(value / 100)
+  /* 回填实际生效的值：输入 500 会被钳到 160，输入乱字符退回当前值 */
+  input.value = String(Math.round(zoom.value * 100))
 }
 
 watch([geo, canvasW, autoFit], () => {
   if (autoFit.value) zoom.value = fitZoom()
 })
+
+/* ===== 阅读模式：换一份推荐卷 ===== */
+
+function pickPaper(next: OrgPaper) {
+  /* 点当前这份卷不必换：emit 出去父页面会写回同一个值，白跑一次重建 */
+  if (next.id === props.paper.id) return
+  emit('pick', next)
+}
+
+/**
+ * 卷换了（父页面把 `paper` 换成另一份）时收尾：
+ * - 三个子弹窗说的都是上一份卷的事，留着会答非所问；
+ * - 画布滚回顶部，否则新卷停在上一份卷滚到的位置（可能在第二页、甚至答题卡中段）。
+ *
+ * 分版与测量不用管：`paperBlocks` 变了，上面那条 watch 自己会重量重排。
+ */
+watch(
+  () => props.paper.id,
+  () => {
+    shareOpen.value = false
+    parallelOpen.value = false
+    analysisOpen.value = false
+    exportOpen.value = false
+    previewTarget.value = null
+    correctTarget.value = null
+    similarTarget.value = null
+    hideBar()
+    canvas.value?.scrollTo({ top: 0 })
+  },
+)
+
+/* ===== 阅读模式：每题的悬停操作条 =====
+ *
+ * **为什么操作条不在纸面里**：纸面 `.pp-sheet` 既 `overflow: hidden` 又 `transform: scale()`，
+ * 块高还决定分版（隐藏测量层量高 → paginateBlocks），而「打印版式」打的就是这份 DOM。
+ * 把操作条放进纸面会三处同时出问题：每页最后一题被裁掉、插入节点改变分版、打印件上多出按钮。
+ * 所以纸面里只做**区块描边**（`.pp-slot.is-live`，纯 outline，不参与布局），操作条本身 Teleport 到
+ * body 上做 fixed 定位 —— 顺便也绕开了 `.pp-mask` 的 backdrop-filter（它会让 fixed 后代
+ * 以遮罩为包含块，那样坐标就全错了）。
+ *
+ * 位置每次都是从题块元素的 `getBoundingClientRect()` 现算的：rect 已含 scale，
+ * 所以缩放到 50% 时按钮仍是原尺寸；画布滚动时用 rAF 重算，跟着题目走。
+ * 横向**右对齐题块右沿**（见 `placeBar`），不是左对齐 —— 鼠标在题目上时按钮就在右手边。
+ */
+
+const basket = useComposeBasket()
+const favorites = useQuestionFavorites()
+
+/** 从操作条打开的子弹窗：非空即打开（与试题页签同一套开关方式） */
+const previewTarget = ref<OrgQuestion | null>(null)
+const correctTarget = ref<OrgQuestion | null>(null)
+const similarTarget = ref<OrgQuestion | null>(null)
+
+/**
+ * 纠错记录：拉一份全量、按题分组。
+ * 既是「已提交纠错」按钮态的依据（口径同 `QuestionsTab`：谁提的都算，说明这题有问题），
+ * 也顺手喂给题目预览抽屉的 `corrections`。拉不到就退化成「按钮一律显示纠错」，不白屏。
+ */
+const corrections = ref<QuestionCorrection[]>([])
+const correctedSet = computed(() => new Set(corrections.value.map((row) => row.questionId)))
+function correctionsOf(questionId: number): QuestionCorrection[] {
+  return corrections.value.filter((row) => row.questionId === questionId)
+}
+function onCorrectionSubmitted(questionId: number) {
+  if (correctedSet.value.has(questionId)) return
+  /* 只补一个 id：列表里其它字段（类型 / 描述）是预览抽屉才要的，提交后没必要重拉全量 */
+  corrections.value = [
+    ...corrections.value,
+    { id: 0, questionId, types: [], description: '', reporter: '', createdAt: '' },
+  ]
+}
+
+const barItem = ref<OrgQuestion | null>(null)
+/** 解析浮层朝上开（操作条被翻到题目上方时，或贴着视口下沿时） */
+const barPopUp = ref(false)
+/** 解析浮层改右对齐（操作条贴视口右边、浮层比操作条宽、从左展开会顶出屏幕时） */
+const barFlipX = ref(false)
+/** 首帧还没量到尺寸时先藏起来，免得在旧位置闪一下 */
+const barReady = ref(false)
+const barPos = ref({ left: 0, top: 0 })
+const barEl = ref<HTMLElement | null>(null)
+/** 悬停的题块元素：不放进 ref —— DOM 节点被响应式代理包一层没有好处 */
+let barAnchor: HTMLElement | null = null
+let barCloseTimer = 0
+let barFollowFrame = 0
+
+/** 操作条与题块之间的间隙 */
+const BAR_GAP = 8
+/** 从题目挪到操作条上的宽限时间（两者是不同的 DOM 子树，离开题目会先触发一次 mouseleave） */
+const BAR_CLOSE_DELAY = 140
+/** 解析浮层的估算高度：只用来判断它该朝上还是朝下开，估小了顶多偶尔贴到屏幕边 */
+const POPOVER_MIN_H = 150
+/** 解析浮层的宽度（与 `QuestionActionBar` 里 `.qab-analysis` 的 width 一致），判断左右翻边用 */
+const POPOVER_W = 420
+
+/* 显式标注 CSSProperties：`visibility` 的三态字面量否则会被推断成宽泛的 string */
+const barStyle = computed<CSSProperties>(() => ({
+  left: `${barPos.value.left}px`,
+  top: `${barPos.value.top}px`,
+  zIndex: barZ.value,
+  visibility: barReady.value ? 'visible' : 'hidden',
+}))
+
+function placeBar() {
+  const anchor = barAnchor
+  /* 重新分版会把纸面整个换掉：老锚点脱离文档，操作条没有可依附的题，收掉 */
+  if (!anchor || !anchor.isConnected) {
+    hideBar()
+    return
+  }
+  const rect = anchor.getBoundingClientRect()
+  const width = barEl.value?.offsetWidth ?? 0
+  const height = barEl.value?.offsetHeight ?? 0
+  /* 操作条**右**对齐题块（`rect.right - width`），不是左对齐：鼠标停在题目上时按钮就在手边，
+     不必先横穿整道题去找左边那条。两端仍要夹进视口；题块比操作条还窄时右对齐会越过左沿，
+     夹完自然退化成左对齐 —— 好过顶出屏幕 */
+  const left = Math.min(Math.max(rect.right - width, 8), Math.max(8, window.innerWidth - width - 8))
+  /* 默认贴题块下沿；下方放不下且上方有空位就翻到题块上面 */
+  const below = rect.bottom + BAR_GAP
+  const above = below + height > window.innerHeight - 8 && rect.top - BAR_GAP - height > 8
+  const top = above ? rect.top - BAR_GAP - height : below
+  /* 解析浮层默认也朝下开；下面既要放得下操作条、也要放得下浮层（约 150px），否则改朝上 */
+  barPopUp.value = above || top + height + BAR_GAP + POPOVER_MIN_H > window.innerHeight - 8
+  /* 浮层比操作条宽，操作条贴右边时从左展开会顶出屏幕：改用它自己的右边对齐操作条右边 */
+  barFlipX.value = left + POPOVER_W > window.innerWidth - 8
+  barPos.value = { left, top }
+  barReady.value = true
+}
+
+/** 画布滚动 / 内容变化时操作条要跟着题目走：一帧最多重算一次 */
+function scheduleBarPlace() {
+  if (barFollowFrame) return
+  barFollowFrame = requestAnimationFrame(() => {
+    barFollowFrame = 0
+    if (barItem.value) placeBar()
+  })
+}
+
+function cancelBarClose() {
+  window.clearTimeout(barCloseTimer)
+}
+
+function startBarClose() {
+  cancelBarClose()
+  barCloseTimer = window.setTimeout(hideBar, BAR_CLOSE_DELAY)
+}
+
+function hideBar() {
+  cancelBarClose()
+  barItem.value = null
+  barAnchor = null
+  barReady.value = false
+}
+
+/**
+ * 鼠标进入某个题块。
+ *
+ * 事件挂在 `PaperBlock` 上由它落到根元素（`@mouseenter` / `:class` 的透传），因此
+ * `currentTarget` 就是那道题的根元素 —— 纸面里没有多包一层 div，分版量到多少画出来还是多少。
+ */
+async function onBlockEnter(event: Event, block: PaperBlockModel) {
+  if (!props.reading || block.kind !== 'question') return
+  cancelBarClose()
+  /* 题源缺失的块不给操作条：六个动作里除收藏外都要真实题目，只留一个收藏按钮没有意义 */
+  const item = props.questions.find((row) => row.id === block.questionId)
+  if (!item) {
+    hideBar()
+    return
+  }
+  /* 同一道题（双栏里指针从一栏挪到另一栏）只续命，不重新定位 —— 免得在题内移动时闪 */
+  if (barItem.value?.id === item.id) return
+  barItem.value = item
+  barAnchor = event.currentTarget as HTMLElement
+  barReady.value = false
+  await nextTick()
+  placeBar()
+}
+
+/** 阅读模式下的题块描边类（打印无 hover，纸上不会落痕；排版预览里也不出现） */
+function slotClass(block: PaperBlockModel): string {
+  return props.reading && block.kind === 'question' ? 'is-live' : ''
+}
+
+/* 缩放 / 切内容 / 重新分版 / 开子弹窗：全都直接收掉操作条。
+   前三种会让锚点位置失效（甚至脱离文档），后者是「弹窗盖在预览上时不该还有一条悬停条」。 */
+watch([zoom, mode, heights, previewTarget, correctTarget, similarTarget], hideBar)
+
+/* ===== 操作条上的六个动作 ===== */
+
+function onPreviewBar() {
+  if (barItem.value) previewTarget.value = barItem.value
+}
+function onCorrectBar() {
+  if (barItem.value) correctTarget.value = barItem.value
+}
+function onSimilarBar() {
+  if (barItem.value) similarTarget.value = barItem.value
+}
+function onFavoriteBar() {
+  if (barItem.value) favorites.toggle(barItem.value.id)
+}
+
+/** 与「试题」页签同一条入库校验：未入库的题不能进车（FR-PP-003），拦下并说清原因 */
+function onBasketBar() {
+  const item = barItem.value
+  if (!item) return
+  if (basket.has(item.id)) {
+    basket.remove(item.id)
+    return
+  }
+  if (item.status !== 'approved') {
+    showToast('该题还未入库（待审 / 驳回），不能加入组卷车', 'error')
+    return
+  }
+  /* 来源记 `paper`：这题是从整卷预览里取的，组卷车按来源分组时要说得清 */
+  basket.add(item, 'paper')
+}
+
+/** 预览里没有筛选面板可切：说清去哪儿切，好过按钮点了没反应 */
+function onSimilarFilter() {
+  showToast('按知识点筛选在「试题」页签可用')
+  similarTarget.value = null
+}
 
 /* ===== 几何相关的内联样式 ===== */
 
@@ -385,8 +732,18 @@ const bodyStyle = computed(() => ({ height: `${geo.value.contentH}px` }))
 
 /* ===== 生命周期 ===== */
 
+/**
+ * 进全局浮层栈（与 AppModal / AppConfirm / AppDrawer 同一套）。
+ *
+ * 本弹窗是最后一个没登记的浮层：`onKeydown` 对 Esc 无条件响应，于是在它里面开出来的
+ * 浮层（阅读模式的分享 / 平行组卷 / 分析试卷，以及任何 appConfirm）按一次 Esc 会把
+ * **子弹窗和预览一起关掉**。登记之后只有栈顶响应 —— 子弹窗后挂载即栈顶，Esc 只关它。
+ */
+const overlayId = enterOverlay()
+
 function onKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape') emit('close')
+  if (event.key !== 'Escape' || !isTopOverlay(overlayId)) return
+  emit('close')
 }
 
 let resizeObserver: ResizeObserver | null = null
@@ -402,30 +759,40 @@ function onPrint() {
  * 预览里的「打印」打的是**当前这个按真实纸面分好版的 DOM**，适合所见即所得地印出来；
  * 而「导出」是从试卷数据重新生成一份干净的打印文档，适合拿去二次编辑或发给别人。
  * 两者不是一回事，所以按钮并列而不是互相替代。
+ *
+ * 导出合并成一个按钮 + 一个弹窗，与试卷库列表的「导出」完全一致（版本、答题卡、两种格式
+ * 都在弹窗里选）—— 原先工具栏上并排「导出 Word / 导出 PDF」再加一个内联版本下拉，
+ * 等于把三个选项摊在一条已经很挤的条上，而且和试卷库那套的两步式操作对不上。
  */
 
+const exportOpen = ref(false)
 const exportVersion = ref<ExportVersion>('student')
+/** 附带答题卡参考答案：打开弹窗时按当前预览的内容给默认值，之后以勾选为准 */
+const exportWithCard = ref(true)
 
-/** 「教师版」开关与导出版本联动：开着就默认导出教师版。用户手动改过之后以手动为准，
- *  故用 watch 而不是让两者共用一个 state —— 共用的话关掉开关会把纯答案版一起切走。 */
-watch(teacher, (value) => {
-  exportVersion.value = value ? 'teacher' : 'student'
-})
+function openExport() {
+  if (totalCount.value === 0) {
+    showToast('该试卷还没有题目，无法导出', 'error')
+    return
+  }
+  /* 「教师版」开关开着就默认导出教师版：这是用户当下正在看的东西，默认值该跟着它走。
+     在打开时算一次而不是 watch(teacher)，是因为它只决定**弹窗打开那一刻**的初始值；
+     挂 watch 的话用户手动选了「纯答案」再碰一下预览开关，选择就被无声改掉了。 */
+  exportVersion.value = teacher.value ? 'teacher' : 'student'
+  /* 预览里选了「含答题卡」就默认一起导出，避免预览有、导出没有 */
+  exportWithCard.value = mode.value !== 'paper'
+  exportOpen.value = true
+}
 
 function buildExportOptions(): ExportOptions {
   return {
     version: exportVersion.value,
     withInfo: true,
-    /* 预览里选了「含答题卡」就一起导出，避免预览有、导出没有 */
-    withAnswerCard: mode.value !== 'paper',
+    withAnswerCard: exportWithCard.value,
   }
 }
 
 function onExport(kind: 'doc' | 'pdf') {
-  if (totalCount.value === 0) {
-    showToast('该试卷还没有题目，无法导出', 'error')
-    return
-  }
   try {
     if (kind === 'doc') {
       const fileName = exportPaperDoc(props.paper, props.questions, buildExportOptions())
@@ -434,6 +801,7 @@ function onExport(kind: 'doc' | 'pdf') {
       exportPaperPdf(props.paper, props.questions, buildExportOptions())
       showToast('已在新窗口打开，选择「另存为 PDF」即可')
     }
+    exportOpen.value = false
   } catch (error) {
     showToast(error instanceof Error ? error.message : '导出失败', 'error')
   }
@@ -456,7 +824,19 @@ onMounted(async () => {
     })
     canvasObserver.observe(canvas.value)
   }
-  zoom.value = fitZoom()
+  /* 只有「适应宽度」才自动定比例：阅读预览要求从 100% 起，不能被这里悄悄改成 60% */
+  if (autoFit.value) zoom.value = fitZoom()
+  /* 操作条跟着纸面滚动走（阅读模式） */
+  canvas.value?.addEventListener('scroll', scheduleBarPlace, { passive: true })
+  window.addEventListener('resize', hideBar)
+  if (props.reading) {
+    /* 纠错记录拉不到就退化成「按钮一律显示纠错」，不该因此白屏，故吞掉异常 */
+    fetchQuestionCorrections()
+      .then((records) => {
+        corrections.value = records
+      })
+      .catch(() => {})
+  }
   measureNow()
   /* 图片 / 公式 / 字体加载完成后高度会变，RO 兜底重排 */
   resizeObserver = new ResizeObserver(scheduleMeasure)
@@ -465,52 +845,72 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  exitOverlay(overlayId)
   document.removeEventListener('keydown', onKeydown)
   document.body.style.overflow = bodyOverflow
   document.body.classList.remove('pp-preview-open')
   resizeObserver?.disconnect()
   canvasObserver?.disconnect()
+  canvas.value?.removeEventListener('scroll', scheduleBarPlace)
+  window.removeEventListener('resize', hideBar)
+  cancelBarClose()
+  if (barFollowFrame) cancelAnimationFrame(barFollowFrame)
   if (frame) cancelAnimationFrame(frame)
 })
 </script>
 
 <template>
   <Teleport to="body">
-    <div class="pp-mask" @click.self="emit('close')">
+    <div class="pp-mask" :style="{ zIndex: maskZ }" @click.self="emit('close')">
       <div class="pp-dialog">
         <!-- 头部 -->
         <header class="pp-head">
           <div class="pp-head-main">
             <h3 class="pp-title">{{ paper.name }}</h3>
-            <p class="pp-sub">
+            <!-- 阅读模式：元信息改用标签（同上架试卷库卡片的口径），空的维度不出现空标签。
+                 题量 / 满分 / 时长那一串在左栏「试题统计」里，这里不再重复 -->
+            <div v-if="reading" class="pp-tags">
+              <span class="tag tag-blue">{{ paper.grade }} / {{ paper.subject }}</span>
+              <span v-if="paper.difficulty" class="tag" :class="difficultyClass(paper.difficulty)">
+                {{ paper.difficulty }}
+              </span>
+              <span v-if="paper.examType" class="tag tag-gray">{{ paper.examType }}</span>
+              <span v-if="paper.region || paper.competition" class="tag tag-gray">
+                {{ [paper.region, paper.competition].filter(Boolean).join(' / ') }}
+              </span>
+              <span v-if="paper.source" class="tag tag-gray">{{ paper.source }}</span>
+            </div>
+            <p v-else class="pp-sub">
               {{ paper.subject }} · {{ paper.grade }} · {{ totalCount }} 题 · 满分 {{ totalScore }} 分 ·
               {{ paper.duration }} 分钟 · 出卷人 {{ paper.owner }}
             </p>
           </div>
           <div class="pp-head-ops">
+            <!-- 阅读模式只报页数：纸张与版数正是那一屏要去掉的信息 -->
             <span class="pp-chip">
-              <AppIcon name="file" :size="14" /> {{ size.name }} · 一面 {{ geo.panels }} 版 · 共 {{ sheets.length }} 页
+              <AppIcon name="file" :size="14" />
+              <template v-if="reading">共 {{ sheets.length }} 页</template>
+              <template v-else>{{ size.name }} · 一面 {{ geo.panels }} 版 · 共 {{ sheets.length }} 页</template>
             </span>
-            <select v-model="exportVersion" class="pp-exp" title="导出的卷面版本">
-              <option value="student">学生版</option>
-              <option value="teacher">教师版</option>
-              <option value="answer">纯答案</option>
-            </select>
-            <button class="btn btn-ghost btn-sm" type="button" @click="onExport('doc')">
-              <AppIcon name="download" :size="14" /> 导出 Word
+            <button v-if="reading" class="btn btn-ghost btn-sm" type="button" @click="shareOpen = true">
+              <AppIcon name="share" :size="14" /> 分享
             </button>
-            <button class="btn btn-primary btn-sm" type="button" @click="onExport('pdf')">
-              <AppIcon name="print" :size="14" /> 导出 PDF
+            <!-- 版式 / 答题卡 / 格式都在弹窗里选，与试卷库列表的「导出」同一个交互 -->
+            <button class="btn btn-ghost btn-sm" type="button" @click="openExport">
+              <AppIcon name="download" :size="14" /> 导出
             </button>
             <button class="btn btn-ghost btn-sm" type="button" title="按当前分好的版式直接打印" @click="onPrint">
-              <AppIcon name="print" :size="14" /> 打印版式
+              <AppIcon name="print" :size="14" /> 打印
             </button>
             <button class="pp-x" type="button" @click="emit('close')"><AppIcon name="close" :size="16" /></button>
           </div>
         </header>
 
-        <!-- 工具栏 -->
-        <div class="pp-bar">
+        <!-- 工具栏（纸张 / 版数 / 方向 / 内容 / 缩放 / 教师版）：排版预览专有。
+             阅读预览里这一整条都不出现 —— 「怎么排」改不了也不该改，而「怎么看」的
+             内容切换与缩放按用户要求都搬进了左栏，教师版开关则整个去掉，
+             于是这条上什么也不剩，索性整条收起（空的一条工具栏只会占掉一截画布高度） -->
+        <div v-if="!reading" class="pp-bar">
           <div class="pp-bar-group">
             <span class="pp-bar-label">纸张</span>
             <select v-model="sizeKey" class="f-select" style="width: 178px">
@@ -556,47 +956,144 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="pp-main">
-          <!-- 排版样式（直接选项） -->
+          <!-- 左栏：排版模式是「这份卷怎么排的」（样式 + 卷面参数）；
+               阅读模式是「这是什么卷、还能做什么」（试题统计 / 内容 / 两个入口 / 推荐卷）。
+               参考资料与裁切警告两种模式都留 —— 前者是卷的内容，后者说的是「你正看的这版有缺陷」 -->
           <aside class="pp-side">
-            <div class="pp-side-title">排版样式</div>
-            <div class="pp-side-list">
-              <button
-                v-for="row in PAPER_LAYOUTS"
-                :key="row.key"
-                class="pp-style"
-                :class="{ on: layoutKey === row.key }"
-                type="button"
-                @click="layoutKey = row.key"
-              >
-                <span class="pp-style-name">
-                  {{ row.name }}
-                  <AppIcon v-if="layoutKey === row.key" name="check" :size="13" />
-                </span>
-                <span class="pp-style-desc">{{ row.desc }}</span>
-                <span class="pp-style-tags">
-                  <i>{{ row.fontSize }}px</i>
-                  <i>{{ row.optionColumns === 2 ? '选项双列' : '选项单列' }}</i>
-                  <i v-if="row.twoColumn && geo.panels === 1">双栏</i>
-                  <i v-if="row.headStyle === 'seal'">密封线</i>
-                </span>
-              </button>
-            </div>
+            <template v-if="!reading">
+              <div class="pp-side-title">排版样式</div>
+              <div class="pp-side-list">
+                <button
+                  v-for="row in PAPER_LAYOUTS"
+                  :key="row.key"
+                  class="pp-style"
+                  :class="{ on: layoutKey === row.key }"
+                  type="button"
+                  @click="layoutKey = row.key"
+                >
+                  <span class="pp-style-name">
+                    {{ row.name }}
+                    <AppIcon v-if="layoutKey === row.key" name="check" :size="13" />
+                  </span>
+                  <span class="pp-style-desc">{{ row.desc }}</span>
+                  <span class="pp-style-tags">
+                    <i>{{ row.fontSize }}px</i>
+                    <i>{{ row.optionColumns === 2 ? '选项双列' : '选项单列' }}</i>
+                    <i v-if="row.twoColumn && geo.panels === 1">双栏</i>
+                    <i v-if="row.headStyle === 'seal'">密封线</i>
+                  </span>
+                </button>
+              </div>
 
-            <div class="pp-side-title" style="margin-top: 14px">卷面信息</div>
-            <ul class="pp-facts">
-              <li>
-                <span>纸张</span>{{ size.name }} {{ size.mm }} mm · {{ orientation === 'portrait' ? '纵向' : '横向' }}
-              </li>
-              <li><span>版面</span>一面 {{ geo.panels }} 版，每版 {{ mmOf(geo.panelW) }} mm 宽</li>
-              <li><span>版心</span>每版 {{ mmOf(geo.contentW / geo.panels) }} × {{ mmOf(geo.contentH) }} mm</li>
-              <li><span>页边距</span>上 {{ preset.margin.top }} / 右 {{ preset.margin.right }} / 下 {{ preset.margin.bottom }} / 左 {{ preset.margin.left }} mm</li>
-              <li>
-                <span>页数</span>
-                <template v-if="mode === 'both'">试卷 {{ paperSheetCount }} 页 · 答题卡 {{ cardSheetCount }} 页（自动分版）</template>
-                <template v-else>{{ sheets.length }} 页（自动分版）</template>
-              </li>
-            </ul>
-            <p v-if="preset.twoColumn && geo.panels > 1" class="pp-side-tip">
+              <div class="pp-side-title" style="margin-top: 14px">卷面信息</div>
+              <ul class="pp-facts">
+                <li>
+                  <span>纸张</span>{{ size.name }} {{ size.mm }} mm · {{ orientation === 'portrait' ? '纵向' : '横向' }}
+                </li>
+                <li><span>版面</span>一面 {{ geo.panels }} 版，每版 {{ mmOf(geo.panelW) }} mm 宽</li>
+                <li><span>版心</span>每版 {{ mmOf(geo.contentW / geo.panels) }} × {{ mmOf(geo.contentH) }} mm</li>
+                <li><span>页边距</span>上 {{ preset.margin.top }} / 右 {{ preset.margin.right }} / 下 {{ preset.margin.bottom }} / 左 {{ preset.margin.left }} mm</li>
+                <li>
+                  <span>页数</span>
+                  <template v-if="mode === 'both'">试卷 {{ paperSheetCount }} 页 · 答题卡 {{ cardSheetCount }} 页（自动分版）</template>
+                  <template v-else>{{ sheets.length }} 页（自动分版）</template>
+                </li>
+              </ul>
+            </template>
+
+            <!-- 阅读模式 -->
+            <template v-else>
+              <div class="pp-side-title">试题统计</div>
+              <p class="pp-total">
+                {{ totalCount }} 题 · 满分 {{ totalScore }} 分 · 考试时长 {{ paper.duration }} 分钟
+              </p>
+              <ul class="pp-stats">
+                <li v-for="row in typeRows" :key="row.label">
+                  <span class="pp-stats-label" :title="row.label">{{ row.label }}</span>
+                  <b>{{ row.count }} 题</b>
+                </li>
+                <!-- 卷里引用了但题库中已无数据的题：只计题量不进题型分布，单列说清有几道 -->
+                <li v-if="missingCount > 0" class="pp-stats-missing">
+                  <span class="pp-stats-label">题目数据缺失</span>
+                  <b>{{ missingCount }} 题</b>
+                </li>
+              </ul>
+              <p v-if="typeRows.length === 0" class="pp-side-tip">卷内没有可统计的题目</p>
+
+              <div class="pp-side-title" style="margin-top: 14px">内容</div>
+              <div class="pp-side-list">
+                <div class="pp-seg pp-seg-full">
+                  <button
+                    v-for="row in CONTENT_MODES"
+                    :key="row.key"
+                    type="button"
+                    :class="{ on: mode === row.key }"
+                    @click="mode = row.key"
+                  >
+                    {{ row.label }}
+                  </button>
+                </div>
+              </div>
+
+              <div class="pp-side-title" style="margin-top: 14px">缩放</div>
+              <div class="pp-side-zoom">
+                <button class="mini-btn" type="button" title="缩小 5%" @click="nudgeZoom(-ZOOM_STEP)">
+                  <AppIcon name="minus" :size="14" />
+                </button>
+                <label class="pp-zoom-box" title="直接输入缩放比例，回车或点别处生效">
+                  <input
+                    type="text"
+                    inputmode="numeric"
+                    :value="Math.round(zoom * 100)"
+                    aria-label="缩放比例（%）"
+                    @change="onZoomInput"
+                  />
+                  <span>%</span>
+                </label>
+                <button class="mini-btn" type="button" title="放大 5%" @click="nudgeZoom(ZOOM_STEP)">
+                  <AppIcon name="plus" :size="14" />
+                </button>
+              </div>
+              <button
+                class="mini-btn pp-fit-btn"
+                :class="{ on: autoFit }"
+                type="button"
+                title="按画布宽度自动定比例"
+                @click="autoFit = true"
+              >
+                适应宽度
+              </button>
+
+              <div class="pp-side-ops">
+                <button class="mini-btn" type="button" @click="parallelOpen = true">平行组卷</button>
+                <button class="mini-btn" type="button" @click="analysisOpen = true">分析试卷</button>
+              </div>
+
+              <div class="pp-side-title" style="margin-top: 14px">推荐试卷</div>
+              <p v-if="!recommended?.length" class="pp-side-tip">暂无同年级同学科的其他试卷</p>
+              <ul v-else class="pp-recs">
+                <li v-for="row in recommended" :key="row.id">
+                  <button type="button" :title="row.name" @click="pickPaper(row)">
+                    <span class="pp-rec-name">{{ row.name }}</span>
+                    <span class="pp-rec-meta">{{ paperQuestionCount(row) }} 题 · {{ row.viewCount ?? 0 }} 浏览</span>
+                  </button>
+                </li>
+              </ul>
+            </template>
+
+            <template v-if="attachments.length">
+              <div class="pp-side-title" style="margin-top: 14px">参考资料</div>
+              <ul class="pp-facts">
+                <li v-for="row in attachments" :key="`${row.kind}-${row.mediaId}`">
+                  <span>{{ ATTACHMENT_KIND_TEXT[row.kind] }}</span>
+                  <em class="pp-att-name" :title="row.name">{{ row.name }}</em>
+                  <i class="pp-att-size">{{ row.sizeMb.toFixed(1) }} MB</i>
+                </li>
+              </ul>
+              <p class="pp-side-tip">随卷保存的配套素材，不参与卷面排版与打印。</p>
+            </template>
+
+            <p v-if="!reading && preset.twoColumn && geo.panels > 1" class="pp-side-tip">
               「{{ preset.name }}」的双栏只在单版纸张上生效；一面 {{ geo.panels }} 版时每版本就只有半张宽，版内不再分栏。
             </p>
             <p v-if="oversized.length" class="pp-side-warn">
@@ -605,7 +1102,7 @@ onBeforeUnmount(() => {
                 {{ oversized.length }} 处内容高于整版（如解答题题干 / 作答框过高），会被纸面裁切；建议改用更大的纸（8K / A3 / 6K）、增加一面版数或选「紧凑省纸」样式。
               </span>
             </p>
-            <p class="pp-side-tip">
+            <p v-if="!reading" class="pp-side-tip">
               按纸张真实尺寸自动分版：8K / A3 一面两版，阅读顺序先左版后右版。答题卡按题号自动分区（客观题填涂区 + 主观题作答区），与试卷题号一致。打印请选择「实际大小 /
               100%」并关闭页眉页脚。
             </p>
@@ -629,20 +1126,45 @@ onBeforeUnmount(() => {
                     <div class="pp-panels" :class="{ 'is-multi': geo.panels > 1 }">
                       <div v-for="(panel, pi) in sheet.pages" :key="pi" class="pp-panel">
                         <template v-for="(row, ri) in panel.rows" :key="ri">
+                          <!-- 块外壳：阅读模式给每道题一个可识别的区块（`.is-live` 是 hover 才显形的
+                               outline）与悬停入口。**必须是一层真实的 DOM**：PaperBlock 的根是片段
+                               （模板首行注释让它成了多根），class / 事件透传根本落不到纸面上。
+                               壳本身是普通块级 div、不带任何样式 —— `.pp-row` / `.pp-col > *`
+                               的块间距从 PaperBlock 挪到壳上，量到多少画出来还是多少，分版不受影响 -->
                           <div v-if="row.kind === 'full'" class="pp-row">
-                            <PaperBlock :block="row.block" :paper="paper" :questions="questions" :preset="preset" :teacher="teacher" />
-                          </div>
-                          <div v-else class="pp-row pp-cols">
-                            <div v-for="(col, ci) in [row.left, row.right]" :key="ci" class="pp-col">
+                            <div
+                              class="pp-slot"
+                              :class="slotClass(row.block)"
+                              @mouseenter="onBlockEnter($event, row.block)"
+                              @mouseleave="startBarClose"
+                            >
                               <PaperBlock
-                                v-for="block in col"
-                                :key="block.key"
-                                :block="block"
+                                :block="row.block"
                                 :paper="paper"
                                 :questions="questions"
                                 :preset="preset"
                                 :teacher="teacher"
                               />
+                            </div>
+                          </div>
+                          <div v-else class="pp-row pp-cols">
+                            <div v-for="(col, ci) in [row.left, row.right]" :key="ci" class="pp-col">
+                              <div
+                                v-for="block in col"
+                                :key="block.key"
+                                class="pp-slot"
+                                :class="slotClass(block)"
+                                @mouseenter="onBlockEnter($event, block)"
+                                @mouseleave="startBarClose"
+                              >
+                                <PaperBlock
+                                  :block="block"
+                                  :paper="paper"
+                                  :questions="questions"
+                                  :preset="preset"
+                                  :teacher="teacher"
+                                />
+                              </div>
                             </div>
                           </div>
                         </template>
@@ -669,7 +1191,106 @@ onBeforeUnmount(() => {
             <PaperBlock :block="block" :paper="paper" :questions="questions" :preset="preset" :teacher="teacher" />
           </div>
         </div>
+
+        <!-- 导出弹窗：两种版式都有这个按钮，故不按 `reading` 收窄。
+             与试卷库列表的「导出」同一套选项（版本 / 答题卡 / Word 还是 PDF），
+             两处的话术与顺序保持一致，免得同一个动作在两页要重新学一遍。 -->
+        <AppModal v-if="exportOpen" title="导出试卷" :z-index="childZ" @close="exportOpen = false">
+          <p style="font-size: 13.5px; color: var(--ink-2); margin-bottom: 12px">
+            《{{ paper.name }}》· {{ totalCount }} 题 · {{ totalScore }} 分
+          </p>
+          <div class="f-field">
+            <label class="f-label">卷面版本</label>
+            <select v-model="exportVersion" class="f-select">
+              <option value="student">学生版（只有题目，解答留作答空白）</option>
+              <option value="teacher">教师版（附答案与解析）</option>
+              <option value="answer">纯答案页</option>
+            </select>
+          </div>
+          <label class="pp-check">
+            <input v-model="exportWithCard" type="checkbox" />
+            附带答题卡参考答案
+          </label>
+          <template #footer>
+            <button class="btn btn-ghost" @click="exportOpen = false">取消</button>
+            <button class="btn btn-ghost" @click="onExport('doc')">
+              <AppIcon name="download" :size="14" /> 导出 Word
+            </button>
+            <button class="btn btn-primary" @click="onExport('pdf')">
+              <AppIcon name="print" :size="14" /> 导出 PDF
+            </button>
+          </template>
+        </AppModal>
+
+        <!-- 阅读模式下从预览里打开的子弹窗。
+             它们自己 Teleport 到 body，靠 `childZ`（遮罩 +10）压住预览 ——
+             详见 AppModal 的 zIndex 说明。打印时被 body.pp-preview-open 的规则一并隐藏。 -->
+        <PaperShareDialog v-if="reading && shareOpen" :paper="paper" :z-index="childZ" @close="shareOpen = false" />
+        <ParallelPaperDialog
+          v-if="reading && parallelOpen"
+          :paper="paper"
+          :z-index="childZ"
+          @close="parallelOpen = false"
+        />
+        <PaperAnalysisModal
+          v-if="reading && analysisOpen"
+          :paper="paper"
+          :questions="questions"
+          :z-index="childZ"
+          @close="analysisOpen = false"
+        />
+
+        <!-- 悬停操作条打开的三个浮层：同样用 `childZ` 压住预览，打印时被 body 级规则一并隐藏 -->
+        <QuestionPreviewDrawer
+          v-if="reading && previewTarget"
+          :question="previewTarget"
+          :corrections="correctionsOf(previewTarget.id)"
+          :z-index="childZ"
+          @close="previewTarget = null"
+        />
+        <QuestionCorrectionDialog
+          v-if="reading && correctTarget"
+          :question="correctTarget"
+          :z-index="childZ"
+          @close="correctTarget = null"
+          @submitted="onCorrectionSubmitted"
+        />
+        <SimilarQuestionsModal
+          v-if="reading && similarTarget"
+          :row="similarTarget"
+          :z-index="childZ"
+          @close="similarTarget = null"
+          @find-similar="onSimilarFilter"
+        />
       </div>
+    </div>
+  </Teleport>
+
+  <!-- 每题操作条：单独一个 Teleport 直接挂到 body（不能放进 .pp-mask —— 它的 backdrop-filter
+       会成为 fixed 后代的包含块，坐标会整体偏掉）。层级是 barZ（遮罩 +1，夹在遮罩与子弹窗之间）。
+       打印时它作为 body 的直接子元素被 `body.pp-preview-open > *:not(.pp-mask)` 隐藏。 -->
+  <Teleport to="body">
+    <div
+      v-if="barItem"
+      ref="barEl"
+      class="pp-qbar"
+      :class="{ 'is-flip-x': barFlipX }"
+      :style="barStyle"
+      @mouseenter="cancelBarClose"
+      @mouseleave="startBarClose"
+    >
+      <QuestionActionBar
+        :item="barItem"
+        :popover-up="barPopUp"
+        :favorited="favorites.has(barItem.id)"
+        :in-basket="basket.has(barItem.id)"
+        :corrected="correctedSet.has(barItem.id)"
+        @preview="onPreviewBar"
+        @favorite="onFavoriteBar"
+        @correct="onCorrectBar"
+        @similar="onSimilarBar"
+        @basket="onBasketBar"
+      />
     </div>
   </Teleport>
 </template>
@@ -678,6 +1299,7 @@ onBeforeUnmount(() => {
 .pp-mask {
   position: fixed;
   inset: 0;
+  /* 实际层级由内联样式给（见 `maskZ`，默认 130）；这里留一个兜底值，避免内联样式失效时无层级 */
   z-index: 130;
   background: rgba(20, 26, 40, 0.48);
   backdrop-filter: blur(2px);
@@ -710,6 +1332,8 @@ onBeforeUnmount(() => {
 .pp-head-main { flex: 1; min-width: 0; }
 .pp-title { font-size: 16.5px; font-weight: 700; }
 .pp-sub { font-size: 12.5px; color: var(--sub); margin-top: 4px; }
+/* 阅读模式的元信息标签行：标签之间只留 6px，换行时行距靠 gap 撑开 */
+.pp-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
 .pp-head-ops { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .pp-chip {
   display: inline-flex;
@@ -721,17 +1345,17 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   padding: 4px 11px;
 }
-/* 导出版本选择：比按钮矮一号，避免顶栏按钮多到换行 */
-.pp-exp {
-  height: 30px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: #fff;
-  font-size: 12.5px;
+/* 导出弹窗里的答题卡勾选项（试卷库列表的导出弹窗有同款，两处样式各自 scoped） */
+.pp-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
   color: var(--ink-2);
-  padding: 0 6px;
+  cursor: pointer;
+  user-select: none;
 }
-.pp-exp:focus { border-color: var(--brand); outline: none; }
+.pp-check input { accent-color: var(--brand); }
 .pp-x {
   width: 30px;
   height: 30px;
@@ -812,11 +1436,124 @@ onBeforeUnmount(() => {
   border-radius: 5px;
   padding: 0 5px;
 }
+/* ===== 阅读模式的左栏：试题统计 / 内容切换 / 缩放 / 两个入口 / 推荐试卷 ===== */
+
+/* 总览一行（题量 · 总分）：数字比标签重要，用主色描出来 */
+.pp-total { font-size: 12px; color: var(--sub); margin-bottom: 9px; }
+.pp-stats { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
+.pp-stats li { display: flex; align-items: baseline; gap: 8px; }
+/* 题型名可能长（「阅读理解（选择）」）：占满剩余宽度并省略，计数贴右不抖动 */
+.pp-stats-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-stats li b { flex-shrink: 0; color: var(--ink); font-size: 13px; }
+.pp-stats-missing { color: var(--warn); }
+.pp-stats-missing b { color: var(--warn); }
+
+/* 侧栏里的「内容」切换：撑满整栏（顶部的分段控件是贴内容的，这里要占满 244px） */
+.pp-seg-full { display: flex; width: 100%; }
+.pp-seg-full button { flex: 1; }
+
+/* 侧栏里的缩放：`− [100]% +` 一行 + 下面整宽的「适应宽度」。
+   中间的数字框自己画边框（原生 input 的上下箭头在这个尺寸下很挤），百分比跟在框里 */
+.pp-side-zoom { display: flex; align-items: center; gap: 6px; }
+.pp-side-zoom .mini-btn {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  justify-content: center;
+  border: 1.5px solid var(--border);
+  border-radius: 9px;
+}
+.pp-zoom-box {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 30px;
+  border: 1.5px solid var(--border);
+  border-radius: 9px;
+  background: #fff;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.pp-zoom-box:focus-within { border-color: var(--brand); }
+.pp-zoom-box input {
+  width: 34px;
+  border: none;
+  outline: none;
+  background: transparent;
+  text-align: right;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.pp-fit-btn {
+  width: 100%;
+  justify-content: center;
+  margin-top: 8px;
+  height: 30px;
+  border: 1.5px solid var(--border);
+  border-radius: 9px;
+}
+.pp-fit-btn.on { border-color: var(--brand); }
+
+/* 两个动作入口：等宽、描边（与上面的排版样式卡同一视觉语言），点击区足够大 */
+.pp-side-ops { display: flex; gap: 8px; margin-top: 12px; }
+.pp-side-ops .mini-btn {
+  flex: 1;
+  justify-content: center;
+  border: 1.5px solid var(--border);
+  border-radius: 9px;
+  padding: 7px 8px;
+}
+.pp-side-ops .mini-btn:hover { border-color: var(--brand); }
+
+/* 推荐试卷：整块可点，卷名 + 「题量 · 浏览数」两行 */
+.pp-recs { display: flex; flex-direction: column; gap: 6px; }
+.pp-recs button {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: #fff;
+  padding: 7px 9px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.pp-recs button:hover { border-color: var(--brand); background: var(--brand-soft); }
+/* 卷名往往长到一行放不下（「2026 届高三第一次模拟联考数学卷」），单行省略号会把「哪份卷」
+   这唯一的关键信息切掉一半：放开换行、最多 3 行，行高固定所以几张卡的高度仍然一致。
+   完整卷名仍挂在按钮的 title 上 */
+.pp-rec-name {
+  font-size: 12.5px;
+  color: var(--ink);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pp-rec-meta { font-size: 11.5px; color: var(--sub); }
+
 .pp-facts { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--ink-2); }
 /* 标签 + 值：值在 244px 侧栏里会折到两行，用 baseline 让标签与值首行同基线
    （center 会在多行值时把标签拽到中间，反而错位） */
 .pp-facts li { display: flex; align-items: baseline; gap: 8px; line-height: 1.5; }
 .pp-facts span { color: var(--sub); flex-shrink: 0; width: 42px; }
+/* 参考资料行：名称占满剩余宽度并截断（侧栏只有 244px），大小贴右不留白 */
+.pp-att-name {
+  flex: 1;
+  min-width: 0;
+  font-style: normal;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pp-att-size { flex-shrink: 0; font-style: normal; font-size: 11px; color: var(--sub); }
 .pp-side-warn {
   display: flex;
   align-items: flex-start;
@@ -881,6 +1618,20 @@ onBeforeUnmount(() => {
 .pp-cols { display: flex; align-items: flex-start; gap: var(--pp-col-gap); }
 .pp-col { flex: 1 1 0; min-width: 0; }
 .pp-col > * { margin-bottom: var(--pp-gap); }
+
+/* 阅读模式的每题区块：hover 才描边（outline 不占布局、也不会回流 —— 用 border / padding 会改块高，
+   量到的高度与实际画出来的就对不上，分版会开始溢出）。打印时无 hover，纸上不留痕。
+   壳本身不给任何样式：它只是 PaperBlock 的容器（分版靠量 PaperBlock，不量壳） */
+.pp-slot.is-live:hover { outline: 2px solid var(--brand); outline-offset: 4px; border-radius: 2px; }
+
+/* 悬停操作条：fixed 在视口坐标上（位置由脚本算，右对齐题块右沿），层级夹在预览遮罩与子弹窗之间 */
+.pp-qbar {
+  position: fixed;
+  animation: fade-in 0.12s ease;
+}
+/* 操作条贴视口右边时，解析浮层（420px，比操作条宽）改成右对齐，否则会顶出屏幕。
+   浮层在子组件的作用域里，故用 :deep() 穿透 */
+.pp-qbar.is-flip-x :deep(.qab-analysis) { left: auto; right: 0; }
 
 .pp-seal {
   position: absolute;
@@ -964,6 +1715,7 @@ onBeforeUnmount(() => {
   .pp-bar,
   .pp-side,
   .pp-page-tag,
+  .pp-qbar,
   .pp-measure { display: none !important; }
 
   .pp-main { display: block !important; }

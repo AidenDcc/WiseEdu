@@ -32,6 +32,19 @@ export interface ComposeFilter {
   onlyFavorites: boolean
   /** 排除已在组卷车中的题目：避免同一道题被加两次（加车时会拦，但列表里先藏掉更省事） */
   excludePicked: boolean
+  /* 以下四个维度与题库管理（BankView）同一套：多选 chip，空数组 = 不限 */
+  examTypes: string[]
+  competitions: string[]
+  regions: string[]
+  terms: string[]
+  /**
+   * 试卷年份（`'2026'`，另有哨兵 `EARLIER_YEAR` 表示「更早以前」）/ 月份（`'3'`，固定 1-12）：
+   * 题目没有这两个字段，只有试卷页签用。
+   * 抽出来单独放，是因为 `matchesQuestionFilter` 不判它们 —— 混在「与题库同口径」那组里会让人
+   * 以为题目侧也有年份筛选。
+   */
+  years: string[]
+  months: string[]
 }
 
 /**
@@ -87,6 +100,12 @@ export function defaultComposeFilter(): ComposeFilter {
     source: '',
     onlyFavorites: false,
     excludePicked: false,
+    examTypes: [],
+    competitions: [],
+    regions: [],
+    terms: [],
+    years: [],
+    months: [],
   }
 }
 
@@ -126,6 +145,11 @@ export function matchesQuestionFilter(
   if (filter.types.length && !filter.types.includes(row.type)) return false
   if (filter.knowledge.length && !row.knowledge.some((tag) => filter.knowledge.includes(tag))) return false
   if (filter.source && row.source !== filter.source) return false
+  /* 与题库管理同口径的四个维度：可缺省字段给空串，等价于「没有该属性」 */
+  if (filter.examTypes.length && !filter.examTypes.includes(row.examType ?? '')) return false
+  if (filter.competitions.length && !filter.competitions.includes(row.competition ?? '')) return false
+  if (filter.regions.length && !filter.regions.includes(row.region ?? '')) return false
+  if (filter.terms.length && !filter.terms.includes(row.term ?? '')) return false
   /* 上下文缺失时（如某些只读场景）这两条直接放行，而不是把题全滤掉 */
   if (filter.onlyFavorites && ctx?.favorites && !ctx.favorites.has(row.id)) return false
   if (filter.excludePicked && ctx?.picked?.has(row.id)) return false
@@ -138,7 +162,46 @@ export function matchesQuestionFilter(
  * 只有 2 条，用户会以为资源丢了。这也是它们放在本模块而不是各自页签里的原因。
  */
 
-/** 试卷命中：关键词可命中卷名 / 出卷人 / 卷内任一题的题干与知识点（「我记得那道题在哪份卷里」） */
+/**
+ * 年份筛选里「更早以前」的哨兵值。
+ *
+ * 它不是年份，只是 `filter.years` 里的一个取值：年份行是**多选** chip，
+ * 「2026 年」和「更早以前」可以同时选中（= 2026 年的卷，或比近三届更早的卷）。
+ * 故意取一个不可能与真实年份相撞的字符串，判定见 `isEarlierYear`。
+ */
+export const EARLIER_YEAR = 'earlier'
+
+/** 年份行里单列的最新几届：更早的年份都并进「更早以前」，这一行才不会年年越铺越长 */
+export const RECENT_YEAR_COUNT = 3
+
+/**
+ * 年份是否落在「更早以前」这一档（比最近三届更早）。
+ *
+ * 阈值取自**当前年份**而不是卷池：谓词逐行判定，拿不到「这一屏里有哪些年份」；
+ * 若按卷池推导，同一份卷会在卷池变化时改变归属，「更早以前」就不再是一个稳定档位。
+ * 空年份（没有年份的卷）不算 —— 与其它可缺省维度同一口径：缺省值不命中任何档。
+ */
+export function isEarlierYear(year: string | undefined): boolean {
+  if (!year) return false
+  return Number(year) < new Date().getFullYear() - RECENT_YEAR_COUNT + 1
+}
+
+/**
+ * 试卷命中：关键词可命中卷名 / 出卷人 / **杯赛名** / 卷内任一题的题干与知识点
+ * （「我记得那道题在哪份卷里」）。
+ *
+ * 杯赛名放进关键词是因为它常被当卷名搜：教师找竞赛卷时输入的是「希望杯」，
+ * 而卷名未必带这三个字（如「全国初中数学联赛初赛」挂在「希望杯」这个杯赛下）。
+ * 地区 / 考试类型这些**同样打标签的维度刻意不入关键词**：它们取值少且几乎每份卷都有，
+ * 一并参与匹配会让「高一」「中等」这类词把所有卷都搜出来，等于没有搜索。
+ *
+ * 各维度与 `matchesQuestionFilter` 同口径（可缺省字段给空串，等价于「没有该属性」）——
+ * 试卷库的筛选面板与试题页签筛的是两类数据，但「难度」「来源」这些词在两边的含义必须一致，
+ * 否则跨页签保留的同一份 `filter` 会在这边筛得动、那边筛不动。
+ *
+ * `filter.types` / `knowledge` / `onlyFavorites` 等题目专属维度不在此判定：试卷没有题型，
+ * 试卷库的筛选面板也不提供这些项。反过来，`years` / `months` 是试卷独有的，只有这里判。
+ */
 export function matchesPaperFilter(
   row: OrgPaper,
   filter: ComposeFilter,
@@ -146,13 +209,31 @@ export function matchesPaperFilter(
 ): boolean {
   if (filter.grade && row.grade !== filter.grade) return false
   if (filter.subject && row.subject !== filter.subject) return false
+  if (filter.difficulty && row.difficulty !== filter.difficulty) return false
+  if (filter.source && row.source !== filter.source) return false
+  /* 考试类型：工作台左树的选中值就写在这里（点分类 = 写入该分类下全部考试类型名） */
+  if (filter.examTypes.length && !filter.examTypes.includes(row.examType ?? '')) return false
+  if (filter.competitions.length && !filter.competitions.includes(row.competition ?? '')) return false
+  if (filter.regions.length && !filter.regions.includes(row.region ?? '')) return false
+  /* 年份 / 月份：试卷专属维度（题目没有这两个字段）。缺省给空串 = 「这份卷没有年份」，
+     于是它在任何年份筛选下都不命中 —— 与其它可缺省维度同一口径。
+     年份多一个「更早以前」档：它不比对具体年份，而是看这份卷是否老于最近三届 */
+  const year = row.year ?? ''
+  if (
+    filter.years.length &&
+    !filter.years.includes(year) &&
+    !(filter.years.includes(EARLIER_YEAR) && isEarlierYear(year))
+  ) {
+    return false
+  }
+  if (filter.months.length && !filter.months.includes(row.month ?? '')) return false
   const inner = row.sections.flatMap((section) =>
     section.questions.flatMap((item) => {
       const question = questionOf(item.questionId)
       return question ? [toPlainText(question.stem), ...question.knowledge] : []
     }),
   )
-  return hitKeyword(filter.keyword, row.name, row.owner, inner)
+  return hitKeyword(filter.keyword, row.name, row.owner, row.competition, inner)
 }
 
 /** 教辅命中：关键词可命中教辅名 / 上传人 / 知识点 / 各章节课时名与知识点 */

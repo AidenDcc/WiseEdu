@@ -28,10 +28,14 @@ export interface PreviewQuestion {
 
 <script setup lang="ts">
 import { RichTextViewer } from '@aiteach/shared'
+import type { QuestionCorrection } from '@aiteach/shared'
 import QuestionOptions from '@/components/question/QuestionOptions.vue'
 import { isJudgeNoOptions, judgeAnswerText, optionColumnsOf } from '@/utils/question-card'
 
-defineProps<{ question: PreviewQuestion }>()
+/** `corrections` 只有题库管理（和将来的纠错处理页）会传；审核中心 / 录题页不传即不显示这一段 */
+withDefaults(defineProps<{ question: PreviewQuestion; corrections?: QuestionCorrection[] }>(), {
+  corrections: () => [],
+})
 
 const LIBRARY_TEXT: Record<string, string> = { personal: '个人题库', org: '机构公共', wrong: '错题库' }
 </script>
@@ -55,12 +59,8 @@ const LIBRARY_TEXT: Record<string, string> = { personal: '个人题库', org: '�
 
   <template v-if="question.options.length > 0">
     <h4 class="section-title">选项</h4>
-    <QuestionOptions
-      variant="soft"
-      :options="question.options"
-      :answer="question.answer"
-      :columns="optionColumnsOf(question)"
-    />
+    <!-- 不传 answer：选项里不标正确项，答案统一看下方「答案」一节 -->
+    <QuestionOptions variant="soft" :options="question.options" :columns="optionColumnsOf(question)" />
   </template>
 
   <h4 class="section-title">答案</h4>
@@ -72,6 +72,24 @@ const LIBRARY_TEXT: Record<string, string> = { personal: '个人题库', org: '�
 
   <h4 class="section-title">解析</h4>
   <RichTextViewer class="q-text" :content="question.analysis" empty="—" />
+
+  <!-- 纠错记录：老师提交的反馈（类型多条 + 富文本描述），按提交时间倒序。
+       与「审核意见」是两条线 —— 这是同事提的问题，不是审核结论 -->
+  <template v-if="corrections.length > 0">
+    <h4 class="section-title">
+      纠错记录
+      <span class="correction-count">{{ corrections.length }} 条</span>
+    </h4>
+    <div class="correction-list">
+      <article v-for="item in corrections" :key="item.id" class="correction">
+        <div class="correction-head">
+          <span v-for="type in item.types" :key="type" class="tag tag-orange">{{ type }}</span>
+          <span class="correction-meta">{{ item.reporter }} · {{ item.createdAt.slice(5, 16) }}</span>
+        </div>
+        <RichTextViewer class="correction-text" :content="item.description" empty="—" />
+      </article>
+    </div>
+  </template>
 
   <template v-if="question.variantOf != null">
     <h4 class="section-title">变式关联</h4>
@@ -97,4 +115,20 @@ const LIBRARY_TEXT: Record<string, string> = { personal: '个人题库', org: '�
 }
 .q-text.answer { color: var(--success); font-weight: 600; }
 .q-text.reject { color: var(--danger); }
+
+/* ===== 纠错记录 ===== */
+.correction-count { margin-left: 4px; font-size: 12px; font-weight: 600; color: var(--danger); }
+.correction-list { display: flex; flex-direction: column; gap: 10px; }
+/* 左侧红条与「审核意见」的样式同源，一眼能认出是「有问题」的信息而非题目正文 */
+.correction {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--danger);
+  border-radius: 0 10px 10px 0;
+  padding: 10px 14px;
+  background: #fffafa;
+}
+.correction-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+/* 提交人 / 时间推到行尾；类型多时自动换行，不会被挤扁 */
+.correction-meta { margin-left: auto; font-size: 12px; color: var(--sub); }
+.correction-text { font-size: 13.5px; color: var(--ink-2); line-height: 1.8; }
 </style>

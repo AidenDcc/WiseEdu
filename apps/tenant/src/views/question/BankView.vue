@@ -2,20 +2,22 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AppIcon, AppFilterPanel, AppListToolbar, AppSegmented, QUESTION_SOURCE_OPTIONS, RichTextViewer, showToast, ApiError, toPlainText, truncateRich, AppModal } from '@aiteach/shared'
-import type { FilterRowDef, OrgQuestion } from '@aiteach/shared'
+import type { FilterRowDef, OrgQuestion, QuestionCorrection } from '@aiteach/shared'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import KnowledgeFilter from '@/components/ui/KnowledgeFilter.vue'
 import QuestionOptions from '@/components/question/QuestionOptions.vue'
 import QuestionPreviewDrawer from '@/components/question/QuestionPreviewDrawer.vue'
 import {
+  fetchQuestionCorrections,
   fetchQuestions,
   fetchTenantDict,
   toggleQuestionOffline,
   variantOf,
 } from '@/api/org'
 import type { TenantDictItem } from '@/api/org'
-import { scopedQuestionTypes } from '@/composables/useBaseData'
+import { examTypesFor, scopedQuestionTypes } from '@/composables/useBaseData'
 import { useScope } from '@/composables/useScope'
+import { useViewMode } from '@/composables/useViewMode'
 import {
   difficultyClass,
   isJudgeNoOptions,
@@ -37,6 +39,12 @@ const VISIBLE_STATUS = Object.keys(STATUS_LABEL)
 
 /* ===== 数据 ===== */
 const list = ref<OrgQuestion[]>([])
+/**
+ * 纠错记录（全量，按提交时间倒序）。
+ * 列表上的标识、预览抽屉里的「纠错记录」分节、右上「纠错题目」筛选条件，三处共用这一份，
+ * 本地按 questionId 分组即可 —— 记录量级是「一题几条」，不值得再开一个「哪些题有纠错」的接口。
+ */
+const corrections = ref<QuestionCorrection[]>([])
 const loading = ref(false)
 
 async function load() {
@@ -48,10 +56,33 @@ async function load() {
     if (!scope.value.grade && scopeGrade.value) {
       scope.value = { grade: scopeGrade.value, subject: scopeSubject.value }
     }
-    list.value = await fetchQuestions()
+    const [rows, records] = await Promise.all([fetchQuestions(), fetchQuestionCorrections()])
+    list.value = rows
+    corrections.value = records
   } finally {
     loading.value = false
   }
+}
+
+const correctionsByQuestion = computed(() => {
+  const grouped = new Map<number, QuestionCorrection[]>()
+  for (const record of corrections.value) {
+    const rows = grouped.get(record.questionId)
+    if (rows) rows.push(record)
+    else grouped.set(record.questionId, [record])
+  }
+  return grouped
+})
+
+/** 某道题的纠错记录；没有则空数组，模板里直接用 length 判「有没有标识」 */
+function correctionsOf(id: number): QuestionCorrection[] {
+  return correctionsByQuestion.value.get(id) ?? []
+}
+
+/** 标识的悬浮说明：摊平类型，省得为了知道是哪类问题还得点开预览 */
+function correctionTitle(id: number): string {
+  const records = correctionsOf(id)
+  return `${records.length} 条纠错：${[...new Set(records.flatMap((item) => item.types))].join('、')}`
 }
 
 /* ===== 左侧教材知识点过滤（KnowledgeFilter 组件，选中节点返回子树叶子 tag） ===== */
@@ -84,7 +115,7 @@ function onScopeChange(next: { grade: string; subject: string }) {
  * 运行时再展开成共享组件要的 `FilterRowDef`（见 filterRows / moreFilterRows）。
  */
 interface BankFilterRow {
-  key: 'type' | 'difficulty' | 'examType' | 'competition' | 'status' | 'useCount' | 'region' | 'source' | 'term'
+  key: 'type' | 'difficulty' | 'examType' | 'competition' | 'status' | 'correction' | 'useCount' | 'region' | 'source' | 'term'
   label: string
   dict?: string
   options?: string[]
@@ -109,6 +140,8 @@ const FILTER_ROWS: BankFilterRow[] = [
 /** 次要条件：收在「更多查询」里，选中后靠折叠开关上的角标露出 */
 const MORE_ROWS: BankFilterRow[] = [
   { key: 'status', label: '状态', options: Object.values(STATUS_LABEL) },
+  /* 「纠错题目」= 有没有老师提交过纠错反馈；要处理这些题时选「已提交纠错」把它们捞出来 */
+  { key: 'correction', label: '纠错题目', options: ['已提交纠错', '未提交纠错'] },
   { key: 'useCount', label: '使用次数', options: USE_COUNT_BUCKETS.map((row) => row.label) },
   { key: 'region', label: '地区', dict: 'region' },
   { key: 'source', label: '来源', options: QUESTION_SOURCE_OPTIONS },
@@ -124,6 +157,7 @@ const filterSel = reactive<Record<BankFilterRow['key'], string[]>>({
   examType: [],
   competition: [],
   status: [],
+  correction: [],
   useCount: [],
   region: [],
   source: [],
@@ -149,13 +183,17 @@ function onFiltersChange(next: Record<string, string[]>) {
 
 function rowOptions(row: BankFilterRow): string[] {
   if (row.options) return row.options
-  /* 题型是唯一按学科收窄的字典：通用题型 + 当前学科的专属题型（英语的完形填空 / 七选五 / 短文改错） */
+  /* 题型按学科收窄：通用题型 + 当前学科的专属题型（英语的完形填空 / 七选五 / 短文改错） */
   if (row.dict === 'questionType') return scopedQuestionTypes(typeItems.value, scope.value.subject)
+  /* 考试类型按学段 / 学科收窄：字典项带「适配学段 / 学科」后，高一·数学下不该出现「小升初真题」
+     这类点进去必然为空的取值。候选项走 useBaseData（本页顶部栏作用域已经 ensure 过字典） */
+  if (row.dict === 'examType') return examTypesFor(scope.value.grade, scope.value.subject)
   return filterOptions[row.dict ?? ''] ?? []
 }
 
 async function loadDicts() {
-  const dictTypes = [...new Set(ALL_ROWS.map((row) => row.dict).filter((d): d is string => !!d))]
+  /* examType 不在这里拉：候选项要按学段 / 学科实时收窄，统一走 useBaseData（见 rowOptions） */
+  const dictTypes = [...new Set(ALL_ROWS.map((row) => row.dict).filter((d): d is string => !!d && d !== 'examType'))]
   await Promise.all(
     dictTypes.map(async (type) => {
       const items = await fetchTenantDict(type)
@@ -175,8 +213,8 @@ watch(
     if (typeof value === 'string') keyword.value = value
   },
 )
-const viewMode = ref<'table' | 'detail'>('table')
-/** 表格 / 详细两种展示（互斥，始终有选中项）→ 共享 AppSegmented */
+/** 表格 / 详细两种展示（互斥，始终有选中项）→ 共享 AppSegmented；选择记在本地，下次进来沿用 */
+const viewMode = useViewMode('question-bank', ['table', 'detail'] as const, 'table')
 const VIEW_MODES = [
   { value: 'table', label: '表格', icon: 'grid' },
   { value: 'detail', label: '详细', icon: 'file' },
@@ -192,6 +230,7 @@ const page = ref(1)
  * 每个筛选 key 从题目上取哪个值。
  * 杯赛 / 地区是可选字段，缺省给空串 —— 空串永远不落在任何候选项里，等价于「这题没有这个属性」。
  * 状态用中文标签（面板里显示的也是标签），使用次数用桶名（精确值做不了筛选项）。
+ * 纠错取自纠错记录（不是题目自身的字段）：有记录 = 已提交纠错。
  */
 const FIELD_OF: Record<BankFilterRow['key'], (row: OrgQuestion) => string> = {
   type: (row) => row.type,
@@ -199,6 +238,7 @@ const FIELD_OF: Record<BankFilterRow['key'], (row: OrgQuestion) => string> = {
   examType: (row) => row.examType ?? '',
   competition: (row) => row.competition ?? '',
   status: (row) => STATUS_LABEL[row.status] ?? '',
+  correction: (row) => (correctionsByQuestion.value.has(row.id) ? '已提交纠错' : '未提交纠错'),
   useCount: (row) => USE_COUNT_BUCKETS.find((bucket) => bucket.match(row.useCount))?.label ?? '',
   region: (row) => row.region ?? '',
   source: (row) => row.source,
@@ -234,7 +274,7 @@ watch([activeTags, scope, () => JSON.stringify(filterSel), keyword, viewMode], (
 })
 
 /* needsFigure / difficultyClass 与 AI 生成结果列表同源，已收敛到 @/utils/question-card，
-   避免两处各改一份；「选项字母 + 正确项高亮」则由 QuestionOptions 组件统一渲染 */
+   避免两处各改一份；选项字母与排布则由 QuestionOptions 组件统一渲染 */
 
 /* ===== 详细列表：解析展开 ===== */
 const analysisOpen = ref<number[]>([])
@@ -245,11 +285,11 @@ function toggleAnalysis(id: number) {
   else analysisOpen.value.push(id)
 }
 
-/* ===== 操作：预览 / 纠错 / 变式 / 上下架 / 删除 ===== */
+/* ===== 操作：预览 / 编辑 / 变式 / 上下架 ===== */
 const preview = ref<OrgQuestion | null>(null)
 const variantOpen = ref<OrgQuestion | null>(null)
 
-/** 带题目 id 进录题中心（落手动态；新建入口在侧边菜单，列表里只做纠错改题） */
+/** 带题目 id 进录题中心（落手动态；新建入口在侧边菜单，列表里只做编辑改题） */
 function goEdit(id: number) {
   router.push({ path: '/question/create', query: { id: String(id) } })
 }
@@ -320,7 +360,7 @@ onMounted(() => {
             <thead>
               <tr>
                 <th style="width: 46px">序号</th>
-                <th style="width: 84px">题目编号</th>
+                <th style="width: 96px">题目编号</th>
                 <!-- 题干列是唯一的「不定宽」列：table-layout: fixed 下它吃掉剩余空间，
                      于是窗口越宽题干越舒展、窄了就换行（见 .bank-table 的说明） -->
                 <th>题干</th>
@@ -342,7 +382,19 @@ onMounted(() => {
               <template v-else>
                 <tr v-for="(row, i) in paged" :key="row.id">
                   <td>{{ (page - 1) * pageSize + i + 1 }}</td>
-                  <td class="cell-strong">#{{ row.id }}</td>
+                  <td class="cell-strong">
+                    <!-- 编号下挂「纠错 N」标识：这一列本来就窄，横排会把题干挤走，故竖着放 -->
+                    <div class="no-cell">
+                      <span>#{{ row.id }}</span>
+                      <span
+                        v-if="correctionsOf(row.id).length"
+                        class="tag tag-red no-badge"
+                        :title="correctionTitle(row.id)"
+                      >
+                        纠错 {{ correctionsOf(row.id).length }}
+                      </span>
+                    </div>
+                  </td>
                   <td class="stem-cell" @click="preview = row"><RichTextViewer :content="row.stem" tag="span" /></td>
                   <td>{{ row.type }}</td>
                   <td>{{ row.difficulty }}</td>
@@ -352,7 +404,7 @@ onMounted(() => {
                   <td>
                     <div class="op-group">
                       <button class="mini-btn" type="button" @click="preview = row">预览</button>
-                      <button class="mini-btn" type="button" @click="goEdit(row.id)">纠错</button>
+                      <button class="mini-btn" type="button" @click="goEdit(row.id)">编辑</button>
                       <button class="mini-btn" type="button" @click="variantOpen = row">变式</button>
                       <button class="mini-btn" type="button" @click="onToggleOffline(row)">
                         {{ row.status === 'offline' ? '上架' : '下架' }}
@@ -371,6 +423,14 @@ onMounted(() => {
           <article v-for="row in paged" :key="row.id" class="q-card">
             <div class="qc-meta">
               <span class="qc-id">#{{ row.id }}</span>
+              <!-- 有人提交过纠错：点「预览」看具体是哪些问题 -->
+              <span
+                v-if="correctionsOf(row.id).length"
+                class="tag tag-red"
+                :title="correctionTitle(row.id)"
+              >
+                纠错 {{ correctionsOf(row.id).length }}
+              </span>
               <span class="tag tag-blue">{{ row.type }}</span>
               <span class="tag" :class="difficultyClass(row.difficulty)">{{ row.difficulty }}</span>
               <span class="qc-kp">{{ row.knowledge.join('、') }}</span>
@@ -382,12 +442,8 @@ onMounted(() => {
               <AppIcon name="image" :size="26" />
               <span>题目配图（演示占位）</span>
             </div>
-            <QuestionOptions
-              class="qc-options"
-              :options="row.options"
-              :answer="row.answer"
-              :columns="optionColumnsOf(row)"
-            />
+            <!-- 不传 answer：详细列表是选题态，选项里不透露正确项（答案在下方「解析」里展开） -->
+            <QuestionOptions class="qc-options" :options="row.options" :columns="optionColumnsOf(row)" />
             <div v-if="analysisOpen.includes(row.id)" class="qc-answer">
               <p>
                 <b>答案：</b>
@@ -405,7 +461,7 @@ onMounted(() => {
               <button class="mini-btn" type="button" @click="toggleAnalysis(row.id)">
                 {{ analysisOpen.includes(row.id) ? '收起解析' : '解析' }}
               </button>
-              <button class="mini-btn" type="button" @click="goEdit(row.id)">纠错</button>
+              <button class="mini-btn" type="button" @click="goEdit(row.id)">编辑</button>
               <button class="mini-btn" type="button" @click="variantOpen = row">变式</button>
               <button class="mini-btn" type="button" @click="onToggleOffline(row)">
                 {{ row.status === 'offline' ? '上架' : '下架' }}
@@ -418,8 +474,14 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- 题目预览（与录题中心共用同一个抽屉组件，两页不再各写一份） -->
-    <QuestionPreviewDrawer v-if="preview" :question="preview" @close="preview = null" />
+    <!-- 题目预览（与录题中心共用同一个抽屉组件，两页不再各写一份）；
+         纠错记录按题现取：处理纠错的入口就是「预览」 -->
+    <QuestionPreviewDrawer
+      v-if="preview"
+      :question="preview"
+      :corrections="correctionsOf(preview.id)"
+      @close="preview = null"
+    />
 
     <!-- 变式入口 -->
     <AppModal v-if="variantOpen" :title="`变式 · 题目 #${variantOpen.id}`" @close="variantOpen = null">
@@ -472,8 +534,12 @@ onMounted(() => {
 
 /* 列宽：题干列不给宽度，在 table-layout: fixed 下自动吃掉剩余空间 —— 于是题干是「按列宽
    换行」而不是被截断（换行本身由 RichTextViewer 的 word-break 负责）。
-   固定列合计 858px（见各 <th> 的内联宽度），min-width 让窗口再窄就横向滚动，题干列始终有地儿放字 */
-.bank-table { table-layout: fixed; min-width: 1080px; }
+   固定列合计 870px（见各 <th> 的内联宽度），min-width 让窗口再窄就横向滚动，题干列始终有地儿放字。
+   编号列因「纠错」标识加宽了 12px，min-width 同步 +20，题干列的最小宽度不比从前窄 */
+.bank-table { table-layout: fixed; min-width: 1100px; }
+/* 编号列：编号 + 纠错标识竖排（横排要 100px 以上，会把题干挤窄） */
+.no-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+.no-badge { padding: 0 8px; font-size: 11px; line-height: 18px; }
 .stem-cell {
   line-height: 1.6;
   font-size: 13px;
@@ -515,7 +581,7 @@ onMounted(() => {
   color: var(--sub);
   font-size: 12.5px;
 }
-/* 选项的外观（描边块 / 正确项高亮 / 一行 N 个）都在 QuestionOptions 里，这里只负责与上方题干的距离 */
+/* 选项的外观（描边块 / 一行 N 个）都在 QuestionOptions 里，这里只负责与上方题干的距离 */
 .qc-options { margin-top: 10px; }
 .qc-answer {
   margin-top: 10px;

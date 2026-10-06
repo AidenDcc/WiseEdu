@@ -52,6 +52,36 @@ function questionTypesFor(subject: string): string[] {
   return scopedQuestionTypes(dict.value.questionType, subject)
 }
 
+/** 原始考试类型字典项：试卷类型树要按 paperCategory / stage / subjects 分组与过滤，光有名字不够 */
+const examTypeItems = computed(() => dict.value.examType)
+
+/**
+ * 年级 → 学段，取自**年级字典项的 `stage`**（字典是权威映射，也能吸收「七年级」与「初一」
+ * 这类命名不一致）。查不到该年级时返回 null = 不限学段，此时所有考试类型都算命中。
+ */
+function stageOf(grade: string): string | null {
+  if (!grade) return null
+  return dict.value.grade.find((item) => item.name === grade)?.stage ?? null
+}
+
+/**
+ * 考试类型按适配学段 / 学科收窄，与 `scopedQuestionTypes` 同范式（纯函数，便于单测与复用）：
+ * 留空的维度视为「通用」，一律放行；`stage` / `subject` 为空串 = 当前作用域不限，也给全部。
+ */
+export function scopedExamTypes(items: TenantDictItem[], stage: string, subject: string): TenantDictItem[] {
+  return items
+    .filter((item) => !item.stage || !stage || item.stage === stage)
+    .filter((item) => !subject || !item.subjects?.length || item.subjects.includes(subject))
+}
+
+/**
+ * 单例版：入参是界面上的「年级」，内部换算学段（调用方手上通常只有年级）。
+ * 与 `scopedQuestionTypes` 一样独立导出，供「自己查字典」的筛选面板直接用。
+ */
+export function examTypesFor(grade: string, subject: string): string[] {
+  return scopedExamTypes(dict.value.examType, stageOf(grade) ?? '', subject).map((item) => item.name)
+}
+
 /** 教材级联（学科随年级动态、版本随学科动态），唯一权威来源是机构端教材矩阵 */
 function subjectsForGrade(grade: string): string[] {
   return matrix.value.find((row) => row.grade === grade)?.subjects.map((row) => row.name) ?? []
@@ -126,6 +156,9 @@ export function useBaseData() {
     questionTypesFor,
     difficulties,
     examTypes,
+    examTypeItems,
+    examTypesFor,
+    stageOf,
     subjectsForGrade,
     optionsForGrade,
     versionsFor,

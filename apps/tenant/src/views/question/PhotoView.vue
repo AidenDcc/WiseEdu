@@ -1019,14 +1019,14 @@ onBeforeUnmount(() => {
                   <span v-else-if="drafts.has(card.row.id)" class="tag tag-blue">已修改</span>
                 </div>
 
-                <!-- 与 AI 出题的结果列表同一套读法（题干 / 配图位 / 选项高亮 / 答案解析）。
+                <!-- 与 AI 出题的结果列表同一套读法（题干 / 配图位 / 答案解析）。
                      内容是唯一权威源，编辑走「题目编辑」弹窗，卡片本身不再有第二套表单 -->
                 <RichTextViewer class="qc-stem" :content="card.draft.stem" />
                 <div v-if="needsFigure(card.draft)" class="qc-figure">
                   <AppIcon name="image" :size="26" />
                   <span>题目配图（演示占位）</span>
                 </div>
-                <QuestionOptions class="qc-options" :options="card.draft.options" :answer="answerTextOf(card.draft)" />
+                <QuestionOptions class="qc-options" :options="card.draft.options" />
                 <div class="qc-answer">
                   <p>
                     <b>答案：</b>
@@ -1335,7 +1335,7 @@ onBeforeUnmount(() => {
   display: flex; align-items: center; justify-content: center; gap: 8px;
   color: var(--sub); font-size: 12.5px;
 }
-/* 选项外观（描边块 / 正确项高亮）由 QuestionOptions 负责，这里只管与题干、与答案区的间距 */
+/* 选项外观（描边块）由 QuestionOptions 负责，这里只管与题干、与答案区的间距 */
 .qc-options { margin-top: 10px; }
 .qc-answer {
   margin-top: 10px;

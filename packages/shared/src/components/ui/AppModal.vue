@@ -10,8 +10,17 @@ const props = withDefaults(
     width?: number
     /** 点击遮罩是否允许关闭 */
     closeOnMask?: boolean
+    /**
+     * 遮罩层级，默认 120；**只有一种情况需要改它**：本弹窗要从一个比它更高的浮层里打开。
+     * 试卷预览弹窗是手绘的浮层、层级 130（高过 AppModal 是为了压在「组卷车 → 生成试卷」
+     * 这类弹窗之上），从预览里打开的子弹窗就得抬到 130 以上（传 140）。
+     *
+     * ⚠️ 抬到 130 以上后，`appConfirm`（层级固定 130）会落到本弹窗**下面** ——
+     * 只有确定不会再开确认框的弹窗才这么传。
+     */
+    zIndex?: number
   }>(),
-  { width: 460, closeOnMask: true },
+  { width: 460, closeOnMask: true, zIndex: 120 },
 )
 
 const emit = defineEmits<{ close: [] }>()
@@ -47,7 +56,7 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport to="body">
-    <div class="modal-mask" @click.self="onMask">
+    <div class="modal-mask" :style="{ zIndex }" @click.self="onMask">
       <div class="modal" :style="{ width: `${width}px` }">
         <header class="modal-head">
           <h3 class="modal-title">{{ title }}</h3>

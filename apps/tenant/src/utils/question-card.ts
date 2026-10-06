@@ -11,11 +11,6 @@
  */
 import { hasImage, toPlainText } from '@aiteach/shared'
 
-/** 客观题答案字母（选择题高亮正确项）；无选项的主观题返回空数组 */
-export function answerLetters(item: { options: readonly unknown[]; answer: string }): string[] {
-  return item.options.length > 0 ? [...new Set(item.answer.toUpperCase().replace(/[^A-F]/g, '').split(''))] : []
-}
-
 /**
  * 「无选项判断题」：判断题不带「正确 / 错误」选项，学生直接在题干前的「（　　）」里写对错。
  *
@@ -49,6 +44,30 @@ export function optionColumnsOf(
 export function difficultyClass(difficulty: string): string {
   if (difficulty === '困难' || difficulty === '较难') return 'tag-red'
   return difficulty === '中等' ? 'tag-orange' : 'tag-green'
+}
+
+/**
+ * 大型考试：只有这些考试类型的题目才在题号后标注考试名。
+ * 随堂练习 / 单元测试 / 期中期末属于日常校考，逐题挂标签反而没有信息量。
+ */
+const MAJOR_EXAMS = new Set(['模拟考试', '学业水平考试', '高考真题', '中考真题'])
+
+/**
+ * 题号后随的来源标注：「名校 / 竞赛 / 大型考试」三类题目标出具体名称，供教师选题时判断题目分量。
+ *
+ * 优先级 杯赛 > 名校考试 > 大型考试 —— 一道题既是杯赛题又摘自名校卷时，杯赛名的信息量更大。
+ * 只有 `source` 是「名校考试」时才看 `sourceRemark`：它记的就是「摘自哪份卷」，正是名校题要标的那句。
+ */
+export function questionSourceBadge(item: {
+  source: string
+  competition?: string
+  examType?: string
+  sourceRemark?: string
+}): string {
+  if (item.competition) return item.competition
+  if (item.source === '名校考试') return item.sourceRemark || '名校考试'
+  if (item.examType && MAJOR_EXAMS.has(item.examType)) return item.examType
+  return ''
 }
 
 /** 图形占位框：题干提到配图、且题内确实没有嵌入图片时才显示 */

@@ -40,7 +40,7 @@ export const DICT_TYPES: Array<{ key: DictTypeKey; title: string; hint: string }
   { key: 'term', title: '学期', hint: '起止日期不可交叉重叠' },
   { key: 'questionType', title: '题型', hint: '已被题目使用的题型不可修改作答类型；可限定适用学科' },
   { key: 'difficulty', title: '难度等级', hint: '系数 0.1-1.0，保留 1 位小数且不可重复' },
-  { key: 'examType', title: '考试类型', hint: '题目筛选与组卷场景使用的考试类型' },
+  { key: 'examType', title: '考试类型', hint: '题目筛选与组卷场景使用；可配置试卷分类与适配学段 / 学科' },
   { key: 'competition', title: '杯赛', hint: '题目筛选维度，非杯赛题留空' },
   { key: 'region', title: '地区', hint: '题目来源地区，用于筛名校真题' },
   { key: 'copyright', title: '版权信息', hint: '机构端首页页脚文案，一行一条，按排序展示' },
@@ -125,17 +125,26 @@ export const dictStore: Record<DictTypeKey, DictItem[]> = {
     { id: 44, name: '较难', coefficient: 0.85, sort: 4, enabled: true, refCount: 6 },
     { id: 45, name: '困难', coefficient: 1.0, sort: 5, enabled: true, refCount: 3 },
   ],
+  /* 试卷分类（paperCategory）= 组卷工作台试卷页签左树的一级分组；见 models.PAPER_CATEGORIES。
+     存量这 10 条**刻意不设 stage / subjects**：它们的名字（期中考试、学业水平考试…）本身就跨学段，
+     锁死在一个学段上反而会让「高一用不了期中考试」这种假限制出现。留空 = 全学段全学科通用。 */
   examType: [
-    { id: 51, name: '随堂练习', sort: 1, enabled: true, refCount: 8 },
-    { id: 52, name: '单元测试', sort: 2, enabled: true, refCount: 8 },
-    { id: 53, name: '期中考试', sort: 3, enabled: true, refCount: 9 },
-    { id: 54, name: '期末考试', sort: 4, enabled: true, refCount: 9 },
-    { id: 55, name: '模拟考试', sort: 5, enabled: true, refCount: 5 },
-    { id: 56, name: '月考', sort: 6, enabled: true, refCount: 5 },
-    { id: 57, name: '开学考', sort: 7, enabled: true, refCount: 3 },
-    { id: 58, name: '学业水平考试', sort: 8, enabled: true, refCount: 2 },
-    { id: 59, name: '高考真题', sort: 9, enabled: true, refCount: 4 },
-    { id: 60, name: '专题训练', sort: 10, enabled: true, refCount: 3 },
+    { id: 51, name: '随堂练习', sort: 1, enabled: true, refCount: 8, paperCategory: '同步教学' },
+    { id: 52, name: '单元测试', sort: 2, enabled: true, refCount: 8, paperCategory: '同步教学' },
+    { id: 53, name: '期中考试', sort: 3, enabled: true, refCount: 9, paperCategory: '阶段测试' },
+    { id: 54, name: '期末考试', sort: 4, enabled: true, refCount: 9, paperCategory: '阶段测试' },
+    { id: 55, name: '模拟考试', sort: 5, enabled: true, refCount: 5, paperCategory: '阶段测试' },
+    { id: 56, name: '月考', sort: 6, enabled: true, refCount: 5, paperCategory: '阶段测试' },
+    { id: 57, name: '开学考', sort: 7, enabled: true, refCount: 3, paperCategory: '阶段测试' },
+    { id: 58, name: '学业水平考试', sort: 8, enabled: true, refCount: 2, paperCategory: '阶段测试' },
+    { id: 59, name: '高考真题', sort: 9, enabled: true, refCount: 4, paperCategory: '阶段测试' },
+    { id: 60, name: '专题训练', sort: 10, enabled: true, refCount: 3, paperCategory: '同步教学' },
+    /* 小升初 / 竞赛两类的样本：没有它们，树上的这两个分组就永远是空的。
+       学段 / 学科限定正是这两个分组的意义所在 —— 小学的「小升初真题」不该出现在高一树里。 */
+    { id: 61, name: '小升初真题', sort: 11, enabled: true, refCount: 2, paperCategory: '小升初', stage: '小学' },
+    { id: 62, name: '分班考试', sort: 12, enabled: true, refCount: 2, paperCategory: '小升初', stage: '小学' },
+    { id: 63, name: '数学竞赛', sort: 13, enabled: true, refCount: 3, paperCategory: '竞赛', subjects: ['数学'] },
+    { id: 64, name: '物理竞赛', sort: 14, enabled: true, refCount: 2, paperCategory: '竞赛', subjects: ['物理'] },
   ],
   /* 题库筛选维度。refCount 沿用本文件其余字典的「静态演示值」口径（>0 时仅可停用、不可删除），
      故用递减值填出「每一项都被题引用过」的样子 */
@@ -171,12 +180,12 @@ export function saveDictItem(type: DictTypeKey, input: Partial<DictItem>): DictI
   if (input.id) {
     const item = items.find((row) => row.id === input.id)
     if (!item) throw new Error('字典项不存在')
-    /* 同级重名校验 */
+    /* 同级重名校验。分组键取 `input.stage` 本身而不是 `?? item.stage`：
+       调用方把 stage 显式传成 undefined 表示「改成不限学段」，回退到旧值会让这次修改
+       按旧分组查重（漏判重名），写完却已落到「不限」组里。 */
     if (
       input.name !== undefined &&
-      items.some(
-        (row) => row.id !== item.id && row.name === input.name && row.stage === (input.stage ?? item.stage),
-      )
+      items.some((row) => row.id !== item.id && row.name === input.name && row.stage === input.stage)
     ) {
       throw new Error('同级下已存在同名项')
     }
@@ -229,6 +238,7 @@ export function saveDictItem(type: DictTypeKey, input: Partial<DictItem>): DictI
     answerType: input.answerType,
     coefficient: input.coefficient,
     subjects: input.subjects?.length ? [...input.subjects] : undefined,
+    paperCategory: input.paperCategory,
   }
   items.push(item)
   return item

@@ -55,6 +55,8 @@ import type {
   PrepMember,
   PrepTask,
   PrepVersion,
+  QuestionCorrection,
+  QuestionCorrectionType,
   QuestionLibrary,
   QuestionStatus,
   RecycleItem,
@@ -338,7 +340,9 @@ export const questions: OrgQuestion[] = [
     grade: '高一',
     status: 'approved',
     term: '下学期',
-    examType: '单元测试',
+    /* 竞赛类考试类型要有题目样本：组卷工作台的「试卷」页签点「竞赛」会把该分类的考试类型
+       写进共享筛选，切到「试题」页签时若无命中就是一片空白（字典取值→样本的对应见 admin-store） */
+    examType: '数学竞赛',
     library: 'org',
     categoryId: 11,
     owner: '沈丽华',
@@ -373,7 +377,7 @@ export const questions: OrgQuestion[] = [
     knowledge: ['函数单调性', '二次函数'],
     library: 'personal',
     categoryId: 2,
-    examType: '单元测试',
+    examType: '数学竞赛',
     owner: '陈明远',
     ownerId: 101,
   }),
@@ -1035,7 +1039,7 @@ export const questions: OrgQuestion[] = [
     knowledge: ['静电场'],
     library: 'org',
     categoryId: 15,
-    examType: '期中考试',
+    examType: '物理竞赛',
     source: '手动录入',
     owner: '沈丽华',
     ownerId: 102,
@@ -1099,7 +1103,7 @@ export const questions: OrgQuestion[] = [
     knowledge: ['匀变速直线运动'],
     library: 'org',
     categoryId: 15,
-    examType: '单元测试',
+    examType: '物理竞赛',
     source: '手动录入',
     owner: '李文博',
     ownerId: 103,
@@ -3113,6 +3117,83 @@ export function toggleQuestionOffline(id: number): OrgQuestion {
   return item
 }
 
+/* ================= 题目纠错（组卷工作台 / 题库管理反馈） ================= */
+
+/** 会话级记录：刷新即还原，与题库其余可变状态同一口径 */
+export const questionCorrections: QuestionCorrection[] = []
+let correctionSeq = 0
+
+/**
+ * 演示数据：预置几条纠错记录。
+ *
+ * 纠错记录是「有人用了才有」的数据，所以空库本身没什么问题 —— 问题是库里空着时，
+ * 题库管理的「纠错题目」筛选、列表上的标识、预览里的「纠错记录」分节全是空的，功能看不出效果。
+ * 因此挑两道已入库的高一数学题预置：9008 两条（覆盖「一题多条」）、9340 一条，
+ * 描述带富文本与公式节点，用来验证预览侧的渲染。
+ */
+questionCorrections.push(
+  {
+    id: ++correctionSeq,
+    questionId: 9008,
+    types: ['解析错误', '补充解析'],
+    description:
+      '<p>解析跳步了：直接写「逆用两角差的正弦公式」，但题干给的是 ' +
+      '<span data-type="inline-math" data-latex="\\sin(\\alpha+\\beta)\\cos\\beta-\\cos(\\alpha+\\beta)\\sin\\beta"></span>，' +
+      '学生看不出这一步是怎么来的。建议补一句「原式即 ' +
+      '<span data-type="inline-math" data-latex="\\sin[(\\alpha+\\beta)-\\beta]"></span>，故结果为 ' +
+      '<span data-type="inline-math" data-latex="\\sin\\alpha"></span>」。</p>',
+    reporter: '沈丽华',
+    createdAt: nowStr(-26),
+  },
+  {
+    id: ++correctionSeq,
+    questionId: 9008,
+    types: ['知识体系不符'],
+    description:
+      '<p>知识点只挂了「三角恒等变换」，但本题实际用到的是两角差的正弦公式。' +
+      '建议补挂到二级知识点，否则按知识点检索会漏掉这道题。</p>',
+    reporter: '李文博',
+    createdAt: nowStr(-9),
+  },
+  {
+    id: ++correctionSeq,
+    questionId: 9340,
+    types: ['公式乱码'],
+    description:
+      '<p>手机端打开时 <span data-type="inline-math" data-latex="\\sin\\alpha\\cos\\alpha"></span> 显示成方框，' +
+      '疑似公式渲染异常，麻烦复现一下。</p>',
+    reporter: '陈明远',
+    createdAt: nowStr(-3),
+  },
+)
+
+/**
+ * 提交一条题目纠错。
+ *
+ * 只校验「题还在、类型选了、描述非空」—— 描述是富文本（可含公式 / 图片），
+ * 用纯文本判空，避免 <p></p> 这种空壳被当成有内容放过去。
+ */
+export function submitQuestionCorrection(input: {
+  questionId: number
+  types: QuestionCorrectionType[]
+  description: string
+}): QuestionCorrection {
+  const item = questions.find((row) => row.id === input.questionId)
+  if (!item) throw new Error('题目不存在，可能已被删除')
+  if (input.types.length === 0) throw new Error('请至少选择一个纠错类型')
+  if (!toPlainText(input.description).trim()) throw new Error('请填写问题描述')
+  const record: QuestionCorrection = {
+    id: ++correctionSeq,
+    questionId: input.questionId,
+    types: [...input.types],
+    description: input.description,
+    reporter: getCacheUser()?.name ?? '当前用户',
+    createdAt: nowStr(),
+  }
+  questionCorrections.unshift(record)
+  return record
+}
+
 export function reviewQuestion(id: number, pass: boolean, opinion: string): OrgQuestion {
   const item = questions.find((row) => row.id === id)
   if (!item) throw new Error('题目不存在')
@@ -3382,48 +3463,173 @@ function paperChecks(suspects: string[] = []): AiCheckResult[] {
   ]
 }
 
-function seedPaper(input: Partial<OrgPaper> & { id: number; name: string }): OrgPaper {
+/* 试卷种子的筛选维度默认值，按卷名 / 卷号推导 —— 演示数据要保证筛选面板每档都有样本。
+   地区 / 杯赛与题目种子同一口径（seedQuestionMeta），两边各写一份必然对不上。 */
+const PAPER_DIFFICULTIES = ['容易', '较易', '中等', '较难', '困难']
+/** 卷名关键词 → 考试类型（取值限于字典表 examType）；从上往下先命中先用 */
+const PAPER_EXAM_TYPE_RULES: Array<[RegExp, string]> = [
+  [/期中/, '期中考试'],
+  [/期末/, '期末考试'],
+  [/月考/, '月考'],
+  [/中考/, '学业水平考试'],
+  /* 「分班」在前：卷名常同时含「小升初」与「分班」（如 310 号「小升初数学分班考试真题卷」），
+     先命中的更具体，落到「分班考试」而不是笼统的「小升初真题」 */
+  [/分班/, '分班考试'],
+  [/小升初/, '小升初真题'],
+  [/模拟|冲刺/, '模拟考试'],
+  [/单元|综合测试/, '单元测试'],
+  [/专项|专题/, '专题训练'],
+  [/同步|练习/, '随堂练习'],
+  [/真题|高考/, '高考真题'],
+]
+
+/**
+ * 竞赛卷的考试类型按学科区分（「数学竞赛」/「物理竞赛」是两条字典项），
+ * 只认卷名的正则表做不到这件事，故单独判一次。其它学科的竞赛卷不猜，交给默认值。
+ */
+function competitionExamType(subject: string, name: string): string | undefined {
+  return /竞赛|联赛/.test(name) && (subject === '数学' || subject === '物理') ? `${subject}竞赛` : undefined
+}
+
+/**
+ * 卷名里点名的杯赛：命中就用它，否则沿用 `seedQuestionMeta` 按卷号轮转出来的那个。
+ *
+ * 卷名是比卷号更可信的信号（「高中数学联赛一试模拟卷」显然属于全国高中数学联赛），
+ * 更实际的原因是 317 号是默认作用域（高一·数学）里唯一的竞赛卷 —— 不按卷名把杯赛挂上，
+ * 在工作台试卷页签里搜「高中数学联赛」会一份都搜不到，看着像搜索坏了。
+ * 杯赛名现在会作为标签显示在列表上、也参与关键词匹配（`matchesPaperFilter`），
+ * 所以「哪个杯赛」这件事开始有人看了，不能再只按卷号转。
+ */
+const PAPER_COMPETITION_RULES: Array<[RegExp, string]> = [
+  [/高中数学联赛/, '全国高中数学联赛'],
+  [/初中数学联赛/, '全国初中数学联赛'],
+  [/华罗庚|金杯/, '华罗庚金杯'],
+  [/希望杯/, '希望杯'],
+  [/英语能力竞赛/, '全国中学生英语能力竞赛'],
+]
+
+function seedPaperMeta(
+  id: number,
+  subject: string,
+  name: string,
+): Pick<OrgPaper, 'difficulty' | 'examType' | 'competition' | 'region' | 'source' | 'year' | 'month'> {
+  const { region, competition } = seedQuestionMeta(id, subject)
   return {
+    difficulty: PAPER_DIFFICULTIES[id % PAPER_DIFFICULTIES.length],
+    examType: competitionExamType(subject, name) ?? PAPER_EXAM_TYPE_RULES.find(([re]) => re.test(name))?.[1] ?? '单元测试',
+    region,
+    competition: PAPER_COMPETITION_RULES.find(([re]) => re.test(name))?.[1] ?? competition,
+    source: /真题|中考|高考|分班|竞赛|联赛/.test(name) ? '真题导入' : '手动组卷',
+    ...seedPaperYearMonth(id, name),
+  }
+}
+
+/* 年份 / 月份的候选档（见 PapersTab 的年份行）都要有样本，这批种子就得**跨开档位**：
+   年份要同时覆盖「最近三届」与「更早以前」两档（筛选里更早的年份并成一档，没有老卷可选的话
+   那个 chip 点下去必然为空），月份覆盖常见的考试月即可 —— 月份行固定给 1-12 全量，
+   允许有空档。卷名里的 4 位年份是真实信号（「2026 年高考模拟卷」「（2025·南京）」），
+   优先采用；其余按卷号轮转 —— 与 `PAPER_DIFFICULTIES` 同一套做法。 */
+const PAPER_YEARS = ['2026', '2025', '2024', '2023', '2022']
+const PAPER_MONTHS = ['3', '4', '5', '6', '9', '10', '11', '12']
+
+function seedPaperYearMonth(id: number, name: string): Pick<OrgPaper, 'year' | 'month'> {
+  return {
+    year: name.match(/20\d{2}/)?.[0] ?? PAPER_YEARS[id % PAPER_YEARS.length],
+    month: PAPER_MONTHS[id % PAPER_MONTHS.length],
+  }
+}
+
+/** 种子卷的演示热度：浏览 / 下载按卷号伪随机（确定性，刷新不变），下载量保持在浏览量的 1~4 成 */
+function seedPaperStats(id: number): Pick<OrgPaper, 'viewCount' | 'downloadCount'> {
+  const viewCount = 48 + (id * 137) % 1400
+  return { viewCount, downloadCount: Math.max(2, Math.round(viewCount * (0.1 + (id % 6) * 0.05))) }
+}
+
+function seedPaper(input: Partial<OrgPaper> & { id: number; name: string }): OrgPaper {
+  /* 默认值先合成一份（seedPaperMeta 要用 subject / name）；显式传入的字段永远优先 */
+  const merged = {
     subject: '数学',
     grade: '高一',
     duration: 120,
-    status: 'approved',
-    sections: [],
+    status: 'approved' as OrgPaper['status'],
+    sections: [] as PaperSection[],
     owner: '李文博',
     updatedAt: nowStr(-Math.floor(Math.random() * 300)),
     sharedSquare: false,
     ...input,
-  } as OrgPaper
+  }
+  return { ...seedPaperMeta(merged.id, merged.subject, merged.name), ...seedPaperStats(merged.id), ...merged } as OrgPaper
 }
 
-function defaultSections(): PaperSection[] {
-  return [
-    {
+/* ===== 种子卷的自动卷面 =====
+   种子卷里只有少数几份手写了完整卷面（313-315 的三套高考模拟卷、316-318 的专题卷），
+   其余二十来份原本是 `sections: []` 的空卷 —— 预览、题量统计、试卷分析点开全是 0，
+   「这份卷由什么构成」在演示里根本走不通。这里按「年级 + 学科」从题库种子里凑一份，
+   让每份种子卷都是一张读得出、统计得出的卷子。
+
+   **只作用于种子数组**（在 papers 的收尾循环里补），不做成 `seedPaper` 的默认行为 ——
+   `savePaper` 新建的卷要老老实实从空卷开始，不能凭空塞十道题进去。 */
+const AUTO_SECTION_TITLES: Record<string, string> = {
+  单选: '选择题',
+  多选: '多项选择题',
+  判断: '判断题',
+  填空: '填空题',
+  解答: '解答题',
+  计算: '计算题',
+  证明: '证明题',
+  连线: '连线题',
+  作文: '写作题',
+}
+/** 大题顺序：客观题在前、主观题在后（与真实卷面一致），不在表里的题型排在最后 */
+const AUTO_TYPE_ORDER = ['单选', '多选', '判断', '填空', '解答', '计算', '证明', '连线', '作文']
+/** 一份自动卷面取多少道题：够铺开五档难度与十来个知识点，又不至于让自动分版翻好几页 */
+const AUTO_QUESTION_COUNT = 10
+
+/** 题型默认分值（与前端 paper-sections.ts 的 defaultScore 同一口径，避免两边算出不同总分） */
+function autoScore(type: string): number {
+  return type === '解答' || type === '计算' || type === '证明' ? 12 : 5
+}
+
+function autoSections(id: number, grade: string, subject: string): PaperSection[] {
+  const sameSubject = questions.filter((row) => row.subject === subject)
+  /* 优先同年级：高一数学卷里混进九年级的题比混进别的学科还别扭；
+     同年级题不够时退回同学科 —— 小学 / 初中种子里一个年级往往只有两三道题。 */
+  const sameGrade = sameSubject.filter((row) => row.grade === grade)
+  const pool = sameGrade.length >= AUTO_QUESTION_COUNT ? sameGrade : sameSubject
+  if (!pool.length) return []
+
+  /* 按卷号错开起点：相邻卷号取到不同的题，二十来份卷不会全长一个样 */
+  const offset = (id * 7) % pool.length
+  const picked = [...pool.slice(offset), ...pool.slice(0, offset)].slice(0, AUTO_QUESTION_COUNT)
+
+  const groups: Array<{ type: string; questions: Array<{ questionId: number; score: number }> }> = []
+  picked.forEach((question) => {
+    let group = groups.find((row) => row.type === question.type)
+    if (!group) {
+      group = { type: question.type, questions: [] }
+      groups.push(group)
+    }
+    group.questions.push({ questionId: question.id, score: autoScore(question.type) })
+  })
+
+  return groups
+    .sort((a, b) => orderIndexOf(a.type) - orderIndexOf(b.type))
+    .map((group, index) => ({
       id: ++sectionSeq,
-      title: '一、选择题',
-      questions: [
-        { questionId: 9001, score: 5 },
-        { questionId: 9004, score: 5 },
-      ],
-    },
-    {
-      id: ++sectionSeq,
-      title: '二、填空',
-      questions: [{ questionId: 9008, score: 5 }],
-    },
-    {
-      id: ++sectionSeq,
-      title: '三、解答',
-      questions: [{ questionId: 9003, score: 12 }],
-    },
-  ]
+      title: `${'一二三四五六七八'[index] ?? index + 1}、${AUTO_SECTION_TITLES[group.type] ?? group.type}`,
+      questions: group.questions,
+    }))
+}
+
+function orderIndexOf(type: string): number {
+  const index = AUTO_TYPE_ORDER.indexOf(type)
+  return index < 0 ? AUTO_TYPE_ORDER.length : index
 }
 
 export const papers: OrgPaper[] = [
   seedPaper({
     id: 301,
     name: '2026 级高一数学期中测试卷',
-    sections: defaultSections(),
     sharedSquare: true,
     collaborators: [
       { name: '李文博', perms: ['选题', '改分值'], online: true },
@@ -3438,7 +3644,6 @@ export const papers: OrgPaper[] = [
     id: 302,
     name: '高三一轮复习 · 函数与导数专项卷',
     status: 'pending',
-    sections: defaultSections(),
     aiChecks: paperChecks(),
     aiSuspects: [],
     owner: '陈明远',
@@ -3447,14 +3652,12 @@ export const papers: OrgPaper[] = [
     id: 303,
     name: '高一月考模拟卷（二）',
     status: 'draft',
-    sections: defaultSections(),
     owner: '陈明远',
   }),
   seedPaper({
     id: 304,
     name: '2026 级高一数学期中测试卷 · B 卷',
     status: 'approved',
-    sections: defaultSections(),
     parallelOf: 301,
     parallelLabel: 'B 卷',
     owner: '沈丽华',
@@ -3520,6 +3723,68 @@ export const papers: OrgPaper[] = [
     owner: '吴刚',
     updatedAt: nowStr(-96),
   }),
+  /* 新增考试类型（小升初真题 / 数学竞赛 / 物理竞赛）的样本卷。字典里加出来的取值必须每项
+     都有命中，否则工作台左树点进去、题库筛选项点进去都是一片空白 —— 「分班考试」由上面的
+     310 号卷覆盖（卷名含「分班」命中正则），这里不再重复一份。
+     examType 显式传入：seedPaper 把 input 展开在最后，能盖过 seedPaperMeta 的卷名正则推导，
+     将来卷名改动也不会让这份卷悄悄漂到别的分类。id 从 316 起 —— 313-315 已被 EXAM_PAPERS 占用。 */
+  seedPaper({
+    id: 316,
+    name: '小升初数学真题精选卷（2025·南京）',
+    subject: '数学',
+    grade: '六年级',
+    examType: '小升初真题',
+    owner: '王芳',
+    sharedSquare: true,
+    updatedAt: nowStr(-120),
+    /* 挂上题库里唯一那道六年级数学题（9093）：空卷在演示里等于「整卷引用」按钮一直灰着，
+       看不出这个动作是干什么的。小学题样本本来就只有两道，不去为演示补一批假题。 */
+    sections: [{ id: ++sectionSeq, title: '一、选择题', questions: [{ questionId: 9093, score: 5 }] }],
+  }),
+  seedPaper({
+    id: 317,
+    name: '高中数学联赛一试模拟卷',
+    subject: '数学',
+    grade: '高一',
+    examType: '数学竞赛',
+    difficulty: '困难',
+    owner: '陈明远',
+    updatedAt: nowStr(-44),
+    sections: [
+      { id: ++sectionSeq, title: '一、选择题', questions: [{ questionId: 9008, score: 6 }] },
+      { id: ++sectionSeq, title: '二、解答题', questions: [{ questionId: 9010, score: 20 }] },
+    ],
+  }),
+  seedPaper({
+    id: 318,
+    name: '高中物理竞赛力学专题卷',
+    subject: '物理',
+    grade: '高一',
+    examType: '物理竞赛',
+    difficulty: '困难',
+    owner: '吴刚',
+    updatedAt: nowStr(-61),
+    sections: [
+      {
+        id: ++sectionSeq,
+        title: '一、计算题',
+        questions: [
+          { questionId: 9046, score: 15 },
+          { questionId: 9049, score: 15 },
+        ],
+      },
+    ],
+  }),
+  /* 年份筛选「更早以前」这一档的样本：工作台默认作用域是高一·数学（见 useScope 的默认教材），
+     这个作用域里原本一份老卷都没有，新加的尾档点下去就是空列表。卷名里的 2023 会被
+     seedPaperYearMonth 取走，不必显式传 year —— 与「每档筛选都有样本」同一条约定。 */
+  seedPaper({
+    id: 319,
+    name: '2023 学年高一数学期末考试真题卷（含详解）',
+    grade: '高一',
+    owner: '李文博',
+    updatedAt: nowStr(-410),
+  }),
   ...EXAM_PAPERS,
 ]
 
@@ -3528,12 +3793,57 @@ export const papers: OrgPaper[] = [
    列表里也会出现两条一样的数据。这里把起点顶到现有最大 id 之上。 */
 paperSeq = Math.max(paperSeq, ...papers.map((row) => row.id))
 
+/* EXAM_PAPERS 是手写字面量（不经 seedPaper），同样补上筛选维度与热度，保证试卷库每个筛选档都有样本 */
+papers.forEach((row) => {
+  if (row.difficulty == null) Object.assign(row, seedPaperMeta(row.id, row.subject, row.name))
+  if (row.viewCount == null) Object.assign(row, seedPaperStats(row.id))
+  /* 空卷面的种子卷自动凑一份（见 autoSections）：手写卷面的 313-318 已有 sections，这里跳过。
+     补在这一层而不是 seedPaper 里，是为了让 savePaper 新建的卷仍是空卷。 */
+  if (!row.sections.length) row.sections = autoSections(row.id, row.grade, row.subject)
+})
+
 export function paperTotalScore(paper: OrgPaper): number {
   return paper.sections.reduce((sum, section) => sum + section.questions.reduce((s, q) => s + q.score, 0), 0)
 }
 
 export function paperQuestionCount(paper: OrgPaper): number {
   return paper.sections.reduce((sum, section) => sum + section.questions.length, 0)
+}
+
+/** 来源 → 我的文件里的试卷文件类型（与种子文件同一语义：AI 组卷 / 组卷工作台 / 普通试卷） */
+const PAPER_FILE_KIND: Record<string, OrgFile['kind']> = {
+  'AI 组卷': 'aiPaper',
+  '手动组卷': 'composePaper',
+  '协同组卷': 'paper',
+  '真题导入': 'paper',
+  '文档识别': 'paper',
+}
+
+/**
+ * 建卷落文件：个人创建的试卷存「我的文件」—— 在 paper.folderId 目录建一份关联文件，
+ * 互相记录 fileId / paperId。同目录重名自动续号：卷名允许重复，不能因文件重名而建卷失败。
+ */
+function linkPaperFile(paper: OrgPaper): void {
+  const folderId = paper.folderId ?? 0
+  if (!folders.some((row) => row.id === folderId)) throw new Error('存储文件夹不存在')
+  const taken = new Set(orgFiles.filter((row) => row.folderId === folderId).map((row) => row.name))
+  let name = paper.name
+  for (let n = 2; taken.has(name); n += 1) name = `${paper.name}（${n}）`
+  const at = nowStr()
+  const file: OrgFile = {
+    id: ++fileSeq,
+    name,
+    kind: PAPER_FILE_KIND[paper.source ?? ''] ?? 'paper',
+    folderId,
+    sizeMb: 0,
+    recognize: 'none',
+    owner: CURRENT.name,
+    uploadedAt: at,
+    updatedAt: at,
+    paperId: paper.id,
+  }
+  orgFiles.unshift(file)
+  paper.fileId = file.id
 }
 
 export function savePaper(input: Partial<OrgPaper> & { name: string; submit?: boolean; totalScore?: number }): OrgPaper {
@@ -3548,11 +3858,34 @@ export function savePaper(input: Partial<OrgPaper> & { name: string; submit?: bo
     grade: input.grade ?? target.grade,
     duration: input.duration ?? target.duration,
     sections: input.sections ?? target.sections,
+    /* 随卷参考资料：显式传 `[]` 表示清空，不传则保留原值（白名单式 Object.assign 会丢掉没列出的字段） */
+    attachments: input.attachments ?? target.attachments,
     updatedAt: nowStr(),
   })
   if (!isEdit) {
+    /* 新建试卷必须先选「我的文件」存储位置，建卷同时在所选目录落一份关联文件 */
+    if (input.folderId == null) throw new Error('请先选择试卷在「我的文件」中的存储位置')
+    target.folderId = input.folderId
+    target.source = input.source ?? target.source
     target.status = 'draft'
+    /* 年份 / 月份是一个筛选维度：按编码池给的默认值会让新卷落到「2024 年 6 月」这种与它无关的档上，
+       按保存时间填才说得通。不填的话，用户在年份里选中任一项都看不到刚建的卷。 */
+    const created = new Date()
+    target.year = String(created.getFullYear())
+    target.month = String(created.getMonth() + 1)
     papers.push(target)
+    linkPaperFile(target)
+  } else {
+    /* 改名联动「我的文件」里的文件名；目录内已有同名文件时不强改（保留原名），也不阻断保存 */
+    const file = target.fileId != null ? orgFiles.find((row) => row.id === target.fileId) : undefined
+    if (
+      file &&
+      file.name !== target.name &&
+      !orgFiles.some((row) => row.id !== file.id && row.folderId === file.folderId && row.name === target.name)
+    ) {
+      file.name = target.name
+      file.updatedAt = nowStr()
+    }
   }
   if (input.submit) {
     if (paperQuestionCount(target) === 0) throw new Error('试卷至少需要 1 道题目')
@@ -3578,7 +3911,24 @@ export function deletePaper(id: number): void {
   const item = papers.find((row) => row.id === id)
   if (!item) throw new Error('试卷不存在')
   toRecycle('试卷', item.name)
+  /* 关联文件一并进回收站，免得「我的文件」里留下打不开的死链接 */
+  const file = item.fileId != null ? orgFiles.find((row) => row.id === item.fileId) : undefined
+  if (file) {
+    toRecycle('文件', file.name)
+    orgFiles.splice(orgFiles.indexOf(file), 1)
+  }
   papers.splice(papers.indexOf(item), 1)
+}
+
+/* 浏览 / 下载计数：试卷库「预览 / 导出」时累加（会话级演示口径，刷新还原） */
+export function browsePaper(id: number): void {
+  const item = papers.find((row) => row.id === id)
+  if (item) item.viewCount = (item.viewCount ?? 0) + 1
+}
+
+export function downloadPaper(id: number): void {
+  const item = papers.find((row) => row.id === id)
+  if (item) item.downloadCount = (item.downloadCount ?? 0) + 1
 }
 
 export function reviewPaper(id: number, pass: boolean, opinion: string): OrgPaper {
@@ -3598,13 +3948,15 @@ export function reviewPaper(id: number, pass: boolean, opinion: string): OrgPape
   return item
 }
 
-/** AI 智能组卷（FR-PP-008/009）：按题型结构抽题 */
+/** AI 智能组卷（FR-PP-008/009）：按题型结构抽题；产出试卷存「我的文件」所选文件夹 */
 export function aiComposePaper(input: {
   name: string
   subject: string
   grade: string
   structure: Array<{ type: string; count: number; score: number }>
+  folderId?: number
 }): { paper: OrgPaper; aiPicked: number } {
+  if (input.folderId == null) throw new Error('请先选择试卷在「我的文件」中的存储位置')
   consumeQuota(1)
   let aiPicked = 0
   const sections: PaperSection[] = input.structure.map((row, i) => {
@@ -3632,8 +3984,11 @@ export function aiComposePaper(input: {
     status: 'draft',
     sections,
     owner: CURRENT.name,
+    source: 'AI 组卷',
+    folderId: input.folderId,
   })
   papers.unshift(paper)
+  linkPaperFile(paper)
   return { paper, aiPicked }
 }
 
@@ -3658,33 +4013,43 @@ export function swapPaperQuestion(paperId: number, questionId: number): { paper:
   return { paper, newId: candidate.id }
 }
 
-/** AI 平行卷（FR-PP-015） */
-export function generateParallels(motherId: number, count: number): OrgPaper[] {
+/**
+ * AI 平行卷（FR-PP-015）：AI 逐题替换生成 1 份 B 卷，落「我的文件」的指定文件夹。
+ *
+ * 份数固定为 1，不再由调用方传：界面上已经没有「生成份数」这个字段了。
+ * `folderId` 与另外三个建卷入口（savePaper / aiComposePaper / saveCollabTask）同一口径 ——
+ * 必须显式给，不再静默落到根目录，否则用户回头得到根目录里翻。
+ */
+export function generateParallels(motherId: number, folderId?: number): OrgPaper[] {
   const mother = papers.find((row) => row.id === motherId)
   if (!mother) throw new Error('母卷不存在')
-  consumeQuota(count)
-  const labels = ['B', 'C', 'D', 'E', 'F']
-  return Array.from({ length: count }, (_, i) => {
-    const paper = seedPaper({
-      id: ++paperSeq,
-      name: `${mother.name} · ${labels[i]} 卷`,
-      status: 'draft',
-      sections: JSON.parse(JSON.stringify(mother.sections)),
-      parallelOf: mother.id,
-      parallelLabel: `${labels[i]} 卷`,
-      owner: CURRENT.name,
-    })
-    paper.sections = paper.sections.map((section, si) => ({
-      ...section,
-      id: ++sectionSeq,
-      questions: section.questions.map((row, qi) => {
-        const alt = questions.filter((q) => q.type === '选择题' || q.status === 'approved')[(si + qi) % questions.length]
-        return { questionId: alt && alt.id !== row.questionId ? alt.id : row.questionId, score: row.score }
-      }),
-    }))
-    papers.unshift(paper)
-    return paper
+  if (folderId == null) throw new Error('请先选择试卷在「我的文件」中的存储位置')
+  consumeQuota(1)
+  const paper = seedPaper({
+    id: ++paperSeq,
+    name: `${mother.name} · B 卷`,
+    status: 'draft',
+    sections: JSON.parse(JSON.stringify(mother.sections)),
+    /* 平行卷与母卷共用参考资料：同样的配套素材，深拷贝一份避免两边互相改到 */
+    attachments: mother.attachments ? JSON.parse(JSON.stringify(mother.attachments)) : undefined,
+    parallelOf: mother.id,
+    parallelLabel: 'B 卷',
+    owner: CURRENT.name,
+    source: 'AI 组卷',
+    folderId,
   })
+  paper.sections = paper.sections.map((section, si) => ({
+    ...section,
+    id: ++sectionSeq,
+    questions: section.questions.map((row, qi) => {
+      const alt = questions.filter((q) => q.type === '选择题' || q.status === 'approved')[(si + qi) % questions.length]
+      return { questionId: alt && alt.id !== row.questionId ? alt.id : row.questionId, score: row.score }
+    }),
+  }))
+  papers.unshift(paper)
+  /* linkPaperFile 负责两件事：目录不存在时抛「存储文件夹不存在」、同目录同名自动续号 */
+  linkPaperFile(paper)
+  return [paper]
 }
 
 /* ================= 协同组卷（FR-PP-004 ~ 007 / 017 ~ 021） =================
@@ -3937,6 +4302,8 @@ export function saveCollabTask(input: {
   members: Array<Partial<CollabMember> & { name: string }>
   /** 卷面来源：把这份已有试卷的卷面复制过来当起始卷（「试卷编辑 → 协同组卷」时带过来） */
   sourcePaperId?: number
+  /** 新建任务的试卷存「我的文件」所选文件夹 */
+  folderId?: number
 }): { task: OrgCollabTask; paper: OrgPaper } {
   if (input.name.trim().length < 2 || input.name.trim().length > 50) throw new Error('试卷名称须为 2-50 字')
   if (!input.members.length) throw new Error('至少邀请 1 位任务处理人')
@@ -3951,6 +4318,7 @@ export function saveCollabTask(input: {
   const task = isEdit ? taskOf(input.id as number) : undefined
 
   if (!task) {
+    if (input.folderId == null) throw new Error('请先选择试卷在「我的文件」中的存储位置')
     /* 卷面有两个来源：
        - 带 sourcePaperId（试卷编辑页发起）→ 复制那份卷的卷面当起点。老师的心智是
          「把这张卷拆给大家分头补」，不是「另起一张空卷」，丢掉已选的题会让人以为出 bug。
@@ -3974,8 +4342,11 @@ export function saveCollabTask(input: {
             questions: [],
           })),
       owner: CURRENT.name,
+      source: '协同组卷',
+      folderId: input.folderId,
     })
     papers.unshift(paper)
+    linkPaperFile(paper)
     const created: OrgCollabTask = {
       id: ++collabSeq,
       paperId: paper.id,
@@ -5515,8 +5886,13 @@ export function recognizeFile(id: number): { file: OrgFile; questionCount: numbe
     status: 'draft',
     sections: [{ id: ++sectionSeq, title: '一、识别题目', questions: imported.map(() => ({ questionId: imported[0].id, score: 10 })) }],
     owner: CURRENT.name,
+    source: '文档识别',
   })
   papers.unshift(paper)
+  /* 识别出的草稿卷直接挂在被识别的文件上（不另建新文件） */
+  paper.folderId = item.folderId
+  paper.fileId = item.id
+  item.paperId = paper.id
   return { file: item, questionCount: count, paperId: paper.id }
 }
 
@@ -5611,8 +5987,13 @@ export function importRecognizedFile(
       status: 'draft',
       sections,
       owner: CURRENT.name,
+      source: '文档识别',
     })
     papers.unshift(paper)
+    /* 生成的草稿卷直接挂在被识别的文件上（不另建新文件） */
+    paper.folderId = item.folderId
+    paper.fileId = item.id
+    item.paperId = paper.id
     paperId = paper.id
   }
   item.recognize = 'done'

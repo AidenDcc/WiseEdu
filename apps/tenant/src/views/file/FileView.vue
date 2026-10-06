@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppIcon, AppSearchInput, AppSegmented, appConfirm, FILE_KIND_COLOR, FILE_KIND_GROUPS, FILE_KIND_ICON, FILE_KIND_TEXT, UPLOAD_KIND_TEXT, hasImage, showToast, toPlainText, AppModal } from '@aiteach/shared'
+import { AppIcon, AppSearchInput, AppSegmented, appConfirm, copyText, FILE_KIND_COLOR, FILE_KIND_GROUPS, FILE_KIND_ICON, FILE_KIND_TEXT, UPLOAD_KIND_TEXT, hasImage, showToast, toPlainText, AppModal } from '@aiteach/shared'
 import type { FileFolder, OrgFile } from '@aiteach/shared'
 import AppDropdownMenu from '@/components/ui/AppDropdownMenu.vue'
 import RichTextEditor from '@/components/ui/RichTextEditor.vue'
@@ -30,6 +30,7 @@ import {
 } from '@/api/ai-file'
 import type { FileRecognizeResult, RecognizedQuestion } from '@/api/ai-file'
 import { useBaseData } from '@/composables/useBaseData'
+import { useViewMode } from '@/composables/useViewMode'
 import { downloadFile, formatFileSize } from '@/utils/file'
 
 /**
@@ -291,14 +292,14 @@ function onSort(key: string) {
   sortBy(key as SortField)
 }
 
-/* ===== 视图切换 ===== */
-const viewMode = ref('list')
+/* ===== 视图切换（列表 / 大图，选择记在本地，下次进来沿用） ===== */
+const viewMode = useViewMode('file-list', ['list', 'grid'] as const, 'list')
 const VIEW_MODES = [
   { value: 'list', label: '列表', icon: 'list-ul' },
   { value: 'grid', label: '大图', icon: 'grid' },
 ]
 function setViewMode(value: string) {
-  viewMode.value = value
+  viewMode.value = value as 'list' | 'grid'
 }
 
 /* ===== 时间与容量展示 ===== */
@@ -554,9 +555,9 @@ const PREVIEW_HINT: Partial<Record<OrgFile['kind'], string>> = {
   doc: '在线文档，正文保存在平台内；编辑器将在后续版本接入。',
   word: 'Word 文档，下载后可用本地 Office 打开；在线预览与编辑将在后续版本接入。',
   ppt: 'PPT 演示文稿，下载后可用本地 Office 打开；在线预览将在后续版本接入。',
-  paper: '试卷由题库组卷产出，可在「题库中心 → 试卷库」中打开与编辑。',
-  aiPaper: 'AI 智能组卷产出的试卷，可在「题库中心 → 试卷库」中打开与编辑。',
-  composePaper: '组卷工作台产出的试卷，可在「题库中心 → 试卷库」中打开与编辑。',
+  paper: '个人创建的试卷存放在这里，点「打开试卷」可继续编辑；送审通过后进入试卷库（只读）。',
+  aiPaper: 'AI 智能组卷产出的试卷，点「打开试卷」可继续编辑；送审通过后进入试卷库（只读）。',
+  composePaper: '组卷产出的试卷，点「打开试卷」可继续编辑；送审通过后进入试卷库（只读）。',
   courseware: '课件由备课中心维护，可在「备课中心 → 课件」中打开。',
   lecture: '讲义由备课中心维护，可在「备课中心 → 讲义」中打开。',
   book: '电子教辅，可在「教辅管理 → 教辅资料」中打开。',
@@ -574,6 +575,7 @@ const previewHint = computed(() => {
 /**
  * 系统产出的文件（试卷 / 课件 / 讲义 / 教辅 / 多媒体）在「我的文件」里只是引用，真正的家在别处。
  * 预览弹窗给一个跳转，否则「点文件名打开预览」这类文件只能看到一句提示。
+ * 试卷类文件带 paperId（建卷落文件时写入）的直达试卷编辑页；种子数据没挂卷，退回试卷库列表。
  */
 const PREVIEW_HOME: Partial<Record<OrgFile['kind'], { text: string; path: string }>> = {
   paper: { text: '去试卷库打开', path: '/paper/list' },
@@ -587,7 +589,11 @@ const PREVIEW_HOME: Partial<Record<OrgFile['kind'], { text: string; path: string
 }
 const previewHome = computed(() => {
   const current = preview.value
-  return current ? PREVIEW_HOME[current.row.file.kind] : undefined
+  if (!current) return undefined
+  const home = PREVIEW_HOME[current.row.file.kind]
+  const paperId = current.row.file.paperId
+  if (paperId != null) return { text: '打开试卷', path: `/paper/edit?id=${paperId}` }
+  return home
 })
 function openPreviewHome() {
   const home = previewHome.value
@@ -636,6 +642,10 @@ function menuItems(row: Row): MenuAction[] {
     ]
   }
   const items: MenuAction[] = [
+    /* 建卷落文件的试卷：直接打开卷面编辑页（个人试卷的家就在「我的文件」） */
+    ...(row.type === 'file' && row.file.paperId != null
+      ? [{ key: 'open-paper', label: '打开试卷', icon: 'file' }]
+      : []),
     { key: 'preview', label: '预览', icon: 'eye' },
     { key: 'edit', label: '编辑', icon: 'edit' },
     { key: 'download', label: '下载', icon: 'download' },
@@ -659,26 +669,17 @@ function menuItems(row: Row): MenuAction[] {
 
 /* ---- 行内更多里的单项操作 ---- */
 
-/** 复制文本：非安全上下文（http 访问局域网 IP）没有 navigator.clipboard，退回 execCommand */
-function copyText(text: string): Promise<boolean> {
-  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text).then(() => true, () => false)
-  const area = document.createElement('textarea')
-  area.value = text
-  area.style.position = 'fixed'
-  area.style.opacity = '0'
-  document.body.appendChild(area)
-  area.select()
-  const ok = document.execCommand('copy')
-  document.body.removeChild(area)
-  return Promise.resolve(ok)
-}
-
 function onEdit(row: Row) {
   if (row.type !== 'file') return
+  /* 关联了试卷的文件，「编辑」就是打开卷面编辑页 */
+  if (row.file.paperId != null) {
+    router.push(`/paper/edit?id=${row.file.paperId}`)
+    return
+  }
   const where: Partial<Record<OrgFile['kind'], string>> = {
     courseware: '课件请在「备课中心 → 课件」中编辑',
     lecture: '讲义请在「备课中心 → 讲义」中编辑',
-    paper: '试卷请在「题库中心 → 试卷库」中编辑',
+    paper: '试卷库中的试卷为审核通过的只读资源，个人创建的试卷请从组卷入口生成',
   }
   showToast(where[row.file.kind] ?? '该类型支持整份预览，编辑请下载后在本地进行', 'info')
 }
@@ -744,6 +745,8 @@ function onLocate(row: Row) {
 
 function onRowAction(row: Row, key: string) {
   if (key === 'open') enterFolder(row.id)
+  else if (key === 'open-paper' && row.type === 'file' && row.file.paperId != null)
+    router.push(`/paper/edit?id=${row.file.paperId}`)
   else if (key === 'preview') openPreview(row)
   else if (key === 'edit') onEdit(row)
   else if (key === 'download') onDownload(row)
