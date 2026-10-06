@@ -1,7 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
-import { getToken } from '@aiteach/shared'
+import { watch } from 'vue'
+import { getToken, showToast } from '@aiteach/shared'
 import { useAuthStore } from '@/stores/auth'
+import { usePermission } from '@/composables/usePermission'
+import { firstAllowedPath, pathVisible } from '@/composables/useVisibleMenus'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -20,7 +23,9 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '题库组卷' },
   },
   /* 试卷编辑：同样要「无侧边栏全屏」，理由与题库组卷一致（见上）。
-     从「生成试卷」保存后进入，或由试卷库「编辑」进入，`?id=` 指定试卷。 */
+     `?id=` 指定试卷。各处入口一律以**新标签页**打开它（见 utils/paper-edit.ts）：
+     它是个工作台页，用户从列表点进来改完一份还要回去接着处理下一份，
+     在当前页签里跳走等于把来路弄丢。所以它虽然也在 `/` 之外，但不是从侧边栏进的。 */
   {
     path: '/paper/edit',
     name: 'paper-edit',
@@ -96,7 +101,7 @@ const routes: RouteRecordRaw[] = [
         path: 'paper/ai',
         name: 'paper-ai',
         component: () => import('@/views/paper/AiComposeView.vue'),
-        meta: { title: 'AI 智能组卷' },
+        meta: { title: '智能组卷' },
       },
       /* 协同组卷的任务工作台：`?id=` 指定任务。处理人在此选题入卷、看整卷、看进度与版本。 */
       {
@@ -357,6 +362,37 @@ const router = createRouter({
   routes,
 })
 
+/* 权限判据与「第一个可进的页」都取自 composables，与侧边栏共用同一套实现 ——
+   守卫自己写一份过滤逻辑，迟早会和侧边栏对不上（一边能进、一边没入口，或反之）。 */
+const { can, role } = usePermission()
+
+/**
+ * 回头校验当前页 —— 守卫放行之后、权限信息到齐时才跑得动的检查。
+ *
+ * 为什么必须补这一道：首次进入（含刷新深链）时 `beforeEach` 一定跑在权限接口返回之前，
+ * 那一刻 `can()` 按规则一律放行（见 usePermission 头注释），否则整个应用白屏。
+ * 于是「管理员把老师的试卷管理关掉，老师刷新页面照样进得去」这种漏网就全落在这里。
+ *
+ * 触发时机是 `role` 变化，它同时覆盖三件事：
+ * 1. 矩阵首次加载完成（null → 某条角色）；
+ * 2. 保存角色权限后 `refresh()`（角色对象被整体替换）；
+ * 3. **切换演示身份**（`permRoleId` 换了 → 指向另一条角色）。
+ * 监听 `loaded` 只能覆盖前两件，切换身份后当前页会停在无权页面不动。
+ */
+async function revalidateRoute(): Promise<void> {
+  const current = router.currentRoute.value
+  if (!current.name || current.path === '/login') return
+  if (pathVisible(can, current.path)) return
+
+  const fallback = firstAllowedPath()
+  /* 一个页面都不可见时不重定向：没有落点就原地留着，总好过跳到空页面上白屏 */
+  if (!fallback || fallback === current.path) return
+  await router.replace(fallback)
+  showToast('当前身份无权访问该页面，已返回可访问的第一个页面', 'error')
+}
+
+watch(role, () => void revalidateRoute(), { flush: 'post' })
+
 router.beforeEach((to) => {
   const auth = useAuthStore()
   if (to.path !== '/login' && !getToken()) {
@@ -368,6 +404,13 @@ router.beforeEach((to) => {
   // 刷新后恢复用户信息
   if (!auth.user) {
     auth.restore()
+  }
+  /* 模块权限：矩阵未加载完时 `pathVisible` 一律放行（放行规则 1），到齐后由上面的
+     `revalidateRoute` 回头补校验。落点用 `firstAllowedPath()` 而不是写死 /dashboard ——
+     写死的目标自己也可能没权限，那就是跳转死循环。 */
+  if (!pathVisible(can, to.path)) {
+    const fallback = firstAllowedPath()
+    if (fallback && fallback !== to.path) return { path: fallback, replace: true }
   }
   document.title = `${to.meta.title ?? ''} · 机构端 · AI教学云平台`
   return true

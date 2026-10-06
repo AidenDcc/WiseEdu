@@ -15,11 +15,11 @@
  *   关键词的命中范围见 `matchesPaperFilter`：卷名 / 出卷人 / **杯赛名** / 卷内题目，
  *   所以输入「希望杯」也能搜到杯赛卷（卷名里未必带这三个字）。
  *
- * 三个操作按钮各管一件事：预览 = 看卷面（复用试卷库的预览弹窗，但传 `reading` —— 换成阅读式：
- * 去掉排版参数，左栏给题型统计、平行组卷 / 分析试卷、推荐试卷，顶部可分享）、
+ * 三个操作按钮各管一件事：预览 = 看卷面（复用试卷库的预览弹窗，传 `browse` —— 顶栏出分享 /
+ * 平行卷 / 分析，左栏「试卷分析」带推荐试卷，与试卷库预览完全一致）、
  * 平行组卷 = 以它为母卷生成平行卷、试卷分析 = 看卷面构成。
  *
- * **逐题取用走预览**：阅读式预览里每道题悬停会出现一条操作条（预览 / 解析 / 收藏 / 纠错 /
+ * **逐题取用走预览**：预览里每道题悬停会出现一条操作条（预览 / 解析 / 收藏 / 纠错 /
  * 相似 / 加入组卷车），可以从一份现成卷里挑几道题进组卷车。这里三个按钮自己仍然不往车里加卷
  * ——「整卷引用」（`useComposeBasket.addFromPaper`，`source: 'paper'`）依旧没有调用方。
  *
@@ -30,6 +30,7 @@ import { AppFilterPanel, PAPER_CATEGORIES, PAPER_SOURCE_OPTIONS } from '@aiteach
 import type { FilterRowDef, OrgPaper } from '@aiteach/shared'
 import PaperListPanel from '@/components/paper/PaperListPanel.vue'
 import PaperPreviewModal from '@/components/paper/PaperPreviewModal.vue'
+import { recommendPapers } from '@/components/paper/paper-recommend'
 /* 异步挂载：分析弹窗里的三张图带 echarts（约 500 KB），不该进本页签的首屏包 ——
    与 `PaperPreviewModal` 里的同一处理，两处动态 import 同一个模块，构建后共用一个 chunk */
 const PaperAnalysisModal = defineAsyncComponent(() => import('@/components/paper/PaperAnalysisModal.vue'))
@@ -39,7 +40,8 @@ import { fetchTenantDict } from '@/api/org'
 import { scopedExamTypes, useBaseData } from '@/composables/useBaseData'
 import { useComposeData } from '@/composables/useComposeData'
 import { useComposeKeyword } from '@/composables/useComposeKeyword'
-import { EARLIER_YEAR, isEarlierYear, matchesPaperFilter, type ComposeFilter } from '../types'
+import { matchesPaperFilter, type ComposeFilter } from '../types'
+import { paperYearOptions, yearOptionLabels } from '@/utils/paper-years'
 
 const props = defineProps<{ filter: ComposeFilter }>()
 const emit = defineEmits<{ patch: [patch: Partial<ComposeFilter>] }>()
@@ -104,6 +106,8 @@ interface PaperRowDef {
   options?: string[]
   /** 单值维度（难度 / 来源）用单选 chip —— `ComposeFilter` 里它们就是单个字符串 */
   multiple?: boolean
+  /** 放不下的行收回一行 + 「展开 / 收起」，见 FilterRowDef.collapsible */
+  collapsible?: boolean
 }
 
 /** 月份固定给满 1-12 月：它是「第几个月」这种固定档位，不该随卷池多少而少几个 */
@@ -113,7 +117,8 @@ const FILTER_ROWS: PaperRowDef[] = [
   { key: 'year', label: '年份', live: 'year' },
   { key: 'month', label: '月份', options: MONTHS, unit: '月' },
   { key: 'difficulty', label: '难度', dict: 'difficulty', multiple: false },
-  { key: 'region', label: '地区', dict: 'region' },
+  /* 地区铺满 34 个省级行政区，一行放不下 —— 收起态只留一行，需要时再展开 */
+  { key: 'region', label: '地区', dict: 'region', collapsible: true },
   { key: 'source', label: '来源', options: [...PAPER_SOURCE_OPTIONS], multiple: false },
 ]
 
@@ -125,19 +130,8 @@ function distinctOf(pick: (row: OrgPaper) => string | undefined, list: OrgPaper[
   return [...new Set(list.map(pick).filter((value): value is string => !!value))]
 }
 
-/**
- * 年份候选项 = 已入库卷里出现过的近三届（倒序，新的在前）+ 末尾的「更早以前」。
- *
- * 具体年份按已入库的卷推导：照抄一串年份会造出点进去必然为空的档（年份没有对应字典，
- * 取值域只可能是数据里出现的）。更早的年份不再逐个列，统一并进 `EARLIER_YEAR` ——
- * 年份这一行才不会被一串陈年老卷越铺越长。
- * 「更早以前」固定给一条（即使当前一份老卷也没有）：它是兜底的尾档，时有时无会让人
- * 以为年份只能选那三届。种子卷里留了老卷，这一档在演示里点得动。
- */
-const yearOptions = computed(() => {
-  const recent = distinctOf((row) => row.year, approved.value).filter((year) => !isEarlierYear(year))
-  return [...recent.sort().reverse(), EARLIER_YEAR]
-})
+/** 年份候选项与文案都走 utils/paper-years：智能组卷的「优先年份」用同一份，两处的档位必须一致 */
+const yearOptions = computed(() => paperYearOptions(approved.value))
 
 /** 某一行的候选项：年份取卷池推导值，字典行取已加载的字典，其余取行定义里的静态 options */
 function optionsOf(row: PaperRowDef): string[] {
@@ -147,11 +141,7 @@ function optionsOf(row: PaperRowDef): string[] {
 
 /** 候选项文案：带单位（取值本身不变，仍是 `'2026'` / `'3'`）；年份那档把哨兵译成「更早以前」 */
 function labelsOf(row: PaperRowDef, options: string[]): Record<string, string> | undefined {
-  if (row.live === 'year') {
-    return Object.fromEntries(
-      options.map((value) => [value, value === EARLIER_YEAR ? '更早以前' : `${value} 年`]),
-    )
-  }
+  if (row.live === 'year') return yearOptionLabels(options)
   if (row.unit) return Object.fromEntries(options.map((value) => [value, `${value} ${row.unit}`]))
   return undefined
 }
@@ -165,6 +155,7 @@ function toRowDefs(defs: PaperRowDef[]): FilterRowDef[] {
       options,
       optionLabels: labelsOf(row, options),
       multiple: row.multiple,
+      collapsible: row.collapsible,
     }
   })
 }
@@ -229,25 +220,9 @@ const openPreview = ref<OrgPaper | null>(null)
 const parallelTarget = ref<OrgPaper | null>(null)
 const analysisTarget = ref<OrgPaper | null>(null)
 
-/** 预览左侧「推荐试卷」的份数 */
-const RECOMMEND_COUNT = 3
-
-/**
- * 推荐试卷：正在看的那份卷的同学科同年级卷，按浏览数取前几份。
- *
- * 取「同年级同学科」而不是按当前筛选条件：筛选是用户为**找卷**设的（比如限定「竞赛 + 2026 年」），
- * 拿它当推荐条件，切一次筛选推荐就换一批，反而像另一个搜索结果列表；
- * 年级学科是卷的固有属性，推荐的是「同一批人能用的卷」。
- * 排除当前卷本身，并保留原顺序稳定性（浏览数相同时按 id 排）。
- */
-const recommended = computed(() => {
-  const current = openPreview.value
-  if (!current) return []
-  return approved.value
-    .filter((row) => row.id !== current.id && row.grade === current.grade && row.subject === current.subject)
-    .sort((a, b) => (b.viewCount ?? 0) - (a.viewCount ?? 0) || a.id - b.id)
-    .slice(0, RECOMMEND_COUNT)
-})
+/* 预览左栏「推荐试卷」：筛选与排序的口径与试卷库同一份实现（见 paper-recommend.ts），
+   这里只负责把本页的卷池（已审核）与当前卷递给它 —— 两个入口推荐出的卷因此必然一致 */
+const recommended = computed(() => recommendPapers(approved.value, openPreview.value))
 </script>
 
 <template>
@@ -293,14 +268,14 @@ const recommended = computed(() => {
       </PaperListPanel>
     </div>
 
-    <!-- 三个弹窗都复用共享组件：预览与试卷库同一份（A4/8K 排版与答题卡），
+    <!-- 三个弹窗都复用共享组件：预览与试卷库同一份（A4/8K 排版、答题卡、左栏两个页签），
          平行组卷与试卷库同一份（同一个接口与提示），试卷分析是卷面构成分析。
-         预览传 `reading`：这里浏览的是已经排好版的现成卷，预览按阅读式来
-         （不展示排版参数，左栏给试题统计 / 平行组卷 / 分析试卷 / 推荐试卷，顶部可分享）——
-         试卷库 / 编辑页 / 协同任务 / 组卷车草稿那四处仍是不传的排版预览 -->
+         预览传 `browse`：这里浏览的是已经排好版的现成卷，顶栏出分享 / 平行卷 / 分析，
+         左栏「试卷分析」多一段推荐试卷，每题悬停可逐题取用 —— 与试卷库预览完全一致。
+         （编辑页 / 协同任务 / 组卷车草稿那三处不传，它们不是在浏览库里现成的卷） -->
     <PaperPreviewModal
       v-if="openPreview"
-      reading
+      browse
       :paper="openPreview"
       :questions="questions"
       :recommended="recommended"

@@ -4,6 +4,8 @@
  */
 import { request } from '@aiteach/shared'
 import type {
+  AiComposeParams,
+  AiComposeTemplate,
   AnswerStatus,
   ApprovalKind,
   ApprovalStatus,
@@ -213,15 +215,16 @@ export function deletePaper(id: number) {
 export function reviewPaper(id: number, pass: boolean, opinion: string) {
   return request<OrgPaper>('/tenant/papers/review', { method: 'POST', data: { id, pass, opinion } })
 }
-export function aiComposePaper(data: {
-  name: string
-  subject: string
-  grade: string
-  structure: Array<{ type: string; count: number; score: number }>
-  /** 试卷存「我的文件」所选文件夹 */
-  folderId?: number
-}) {
+/** 智能组卷：参数口径见 `AiComposeParams`（知识点是硬条件，其余四维是优先） */
+export function aiComposePaper(data: AiComposeParams) {
   return request<{ paper: OrgPaper; aiPicked: number }>('/tenant/papers/ai-compose', { method: 'POST', data })
+}
+/** 我的模板：只返回当前用户自己的（组卷成功后由 mock 自动记录） */
+export function fetchAiComposeTemplates() {
+  return request<AiComposeTemplate[]>('/tenant/papers/ai-templates')
+}
+export function deleteAiComposeTemplate(id: number) {
+  return request<null>('/tenant/papers/ai-templates/delete', { method: 'POST', data: { id } })
 }
 export function swapPaperQuestion(paperId: number, questionId: number) {
   return request<{ paper: OrgPaper; newId: number }>('/tenant/papers/swap-question', { method: 'POST', data: { paperId, questionId } })
@@ -297,6 +300,24 @@ export function collabSubmitMember(data: { taskId: number; memberName: string })
 }
 export function collabReopenMember(data: { taskId: number; memberName: string }) {
   return request<OrgCollabTask>('/tenant/collab/member/reopen', { method: 'POST', data })
+}
+
+/* 验收与送审：组长逐人验收（accept / reject），全员验收完才可送审（review/submit）。
+   驳回意见必填、口径与 reviewPaper 一致（≥5 字），由 mock 侧校验并给出中文提示。 */
+export function collabAcceptMember(data: { taskId: number; memberName: string }) {
+  return request<OrgCollabTask>('/tenant/collab/member/accept', { method: 'POST', data })
+}
+export function collabRejectMember(data: { taskId: number; memberName: string; opinion: string }) {
+  return request<OrgCollabTask>('/tenant/collab/member/reject', { method: 'POST', data })
+}
+export function collabSubmitReview(data: { taskId: number }) {
+  return request<{ task: OrgCollabTask; paper: OrgPaper }>('/tenant/collab/review/submit', { method: 'POST', data })
+}
+export function collabWithdrawReview(data: { taskId: number }) {
+  return request<{ task: OrgCollabTask; paper: OrgPaper }>('/tenant/collab/review/withdraw', { method: 'POST', data })
+}
+export function collabReopenAfterReject(data: { taskId: number }) {
+  return request<{ task: OrgCollabTask; paper: OrgPaper }>('/tenant/collab/review/reopen', { method: 'POST', data })
 }
 export function fetchPaperVersions(paperId: number) {
   return request<PaperVersion[]>(withQuery('/tenant/collab/versions', { paperId }))
@@ -790,13 +811,18 @@ export function gradeSubmission(id: number, score: number, comment: string) {
   return request<HomeworkSubmission>('/tenant/homeworks/submissions/grade', { method: 'POST', data: { id, score, comment } })
 }
 
-/* ===== 机构菜单权限 ===== */
+/* ===== 机构菜单权限 =====
+   这个结构在 shared（`mock/org-store.ts` 的 `OrgMenuNode`）里还有一份同构定义 —— 历史遗留，
+   两处都要改。加字段时漏改这边的后果是「界面读不到该字段」，表现为开关该禁用却可点。 */
 export interface OrgMenuNodeApi {
   key: string
   title: string
   enabled: boolean
+  /** 平台侧锁定（套餐决定） */
   platformLocked?: boolean
-  children?: Array<{ key: string; title: string; enabled: boolean; platformLocked?: boolean }>
+  /** 机构自己也锁（关掉就没人能再打开，如机构管理） */
+  locked?: boolean
+  children?: Array<{ key: string; title: string; enabled: boolean; platformLocked?: boolean; locked?: boolean }>
 }
 export function fetchOrgMenus() {
   return request<OrgMenuNodeApi[]>('/tenant/menus')

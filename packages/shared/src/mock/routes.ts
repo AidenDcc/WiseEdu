@@ -92,6 +92,9 @@ const orgRoutes: MockRoute[] = [
   { method: 'POST', path: '/tenant/papers/delete', handler: ({ body }) => guard(() => { org.deletePaper(Number(body.id)); return null }) },
   { method: 'POST', path: '/tenant/papers/review', handler: ({ body }) => guard(() => org.reviewPaper(Number(body.id), Boolean(body.pass), String(body.opinion ?? ''))) },
   { method: 'POST', path: '/tenant/papers/ai-compose', handler: ({ body }) => guard(() => org.aiComposePaper(body as never)) },
+  // 我的模板：只返回当前用户自己的（组卷成功时由 aiComposePaper 自动落一条）
+  { method: 'GET', path: '/tenant/papers/ai-templates', handler: () => guard(() => org.listAiComposeTemplates()) },
+  { method: 'POST', path: '/tenant/papers/ai-templates/delete', handler: ({ body }) => guard(() => { org.deleteAiComposeTemplate(Number(body.id)); return null }) },
   { method: 'POST', path: '/tenant/papers/swap-question', handler: ({ body }) => guard(() => org.swapPaperQuestion(Number(body.paperId), Number(body.questionId))) },
   // 平行卷固定 1 份；folderId 判空用 == null，写成真值判断会把根目录（0）当没选
   { method: 'POST', path: '/tenant/papers/parallels', handler: ({ body }) => guard(() => org.generateParallels(Number(body.motherId), body.folderId == null ? undefined : Number(body.folderId))) },
@@ -110,6 +113,13 @@ const orgRoutes: MockRoute[] = [
   { method: 'POST', path: '/tenant/collab/ai-compose', handler: ({ body }) => guard(() => org.collabAiCompose(body as never)) },
   { method: 'POST', path: '/tenant/collab/member/submit', handler: ({ body }) => guard(() => org.collabSubmitMember(body as never)) },
   { method: 'POST', path: '/tenant/collab/member/reopen', handler: ({ body }) => guard(() => org.collabReopenMember(body as never)) },
+  /* 验收与送审（三步收尾）：逐人验收 → 全部验收完才可送审 → 审核中心驳回后原路退回。
+     这四条都返回整条任务，前端拿回执直接覆盖本地对象，不必再拉一次详情。 */
+  { method: 'POST', path: '/tenant/collab/member/accept', handler: ({ body }) => guard(() => org.collabAcceptMember(body as never)) },
+  { method: 'POST', path: '/tenant/collab/member/reject', handler: ({ body }) => guard(() => org.collabRejectMember(body as never)) },
+  { method: 'POST', path: '/tenant/collab/review/submit', handler: ({ body }) => guard(() => org.collabSubmitReview(body as never)) },
+  { method: 'POST', path: '/tenant/collab/review/withdraw', handler: ({ body }) => guard(() => org.collabWithdrawReview(body as never)) },
+  { method: 'POST', path: '/tenant/collab/review/reopen', handler: ({ body }) => guard(() => org.collabReopenAfterReject(body as never)) },
   { method: 'GET', path: '/tenant/collab/versions', handler: ({ query }) => guard(() => org.listPaperVersions(Number(query.paperId))) },
   { method: 'POST', path: '/tenant/collab/versions/restore', handler: ({ body }) => guard(() => org.restorePaperVersion(body as never)) },
   { method: 'POST', path: '/tenant/collab/versions/replace', handler: ({ body }) => guard(() => org.replacePaperVersion(body as never)) },
@@ -282,7 +292,12 @@ const orgRoutes: MockRoute[] = [
   { method: 'POST', path: '/tenant/messages/read-all', handler: ({ body }) => guard(() => { org.markAllOrgMessagesRead(String(body.tab ?? 'all')); return null }) },
   { method: 'POST', path: '/tenant/messages/delete', handler: ({ body }) => guard(() => { org.deleteOrgMessage(Number(body.id)); return null }) },
   // 机构菜单权限
-  { method: 'GET', path: '/tenant/menus', handler: () => guard(() => org.orgMenuTree) },
+  /* 深拷贝返回，与别的列表接口不同 —— 这里必须给「草稿」语义。
+     `engine.detach` 对数组只做浅拷贝（换数组、留元素引用），于是 /org/menus 页上的开关一拨就
+     直接改到了 store 里的活对象：**还没点保存，侧边栏已经变了**，而「重置」按钮失效
+     （重新拉回来的是同一批对象，改动还在）。菜单开关是「改了要保存」的配置页，
+     不能像列表那样与 store 共享元素。 */
+  { method: 'GET', path: '/tenant/menus', handler: () => guard(() => structuredClone(org.orgMenuTree)) },
   { method: 'POST', path: '/tenant/menus/save', handler: ({ body }) => guard(() => { org.saveOrgMenus(body.items as never); return null }) },
 
   // 全局搜索（FR-GN-026）：一次检索返回各资源分类，图片搜索在真实模式下走前端视觉识别

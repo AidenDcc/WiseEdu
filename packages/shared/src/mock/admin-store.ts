@@ -49,9 +49,23 @@ export const DICT_TYPES: Array<{ key: DictTypeKey; title: string; hint: string }
 /**
  * 杯赛 / 地区的取值。字典项与题目种子共用这一份 —— 题目侧按题号轮转取值（见
  * seedQuestionMeta），若两处各写一份字符串，必然出现「筛选项在、却没题命中」。
+ *
+ * 地区铺满 34 个省级行政区，`'全国'` 只是「不分地区」的哨兵、排在最前。
+ * 题库的题量（一百多道）远多于地区数，轮转能保证每个取值都有题命中；试卷只有十几份，
+ * 铺不满 34 个地区，冷门省份点下去仍可能是空列表 —— 所以筛选面板把这一行做成了
+ * 「默认只显示一行 + 展开 / 收起」（见 FilterRowDef.collapsible）。
  */
 export const COMPETITIONS = ['华罗庚金杯', '希望杯', '全国高中数学联赛', '全国初中数学联赛', '全国中学生英语能力竞赛']
-export const REGIONS = ['全国', '北京', '上海', '江苏', '浙江', '广东', '山东', '湖北', '四川']
+export const REGIONS = [
+  '全国',
+  '北京', '天津', '河北', '山西', '内蒙古',
+  '辽宁', '吉林', '黑龙江',
+  '上海', '江苏', '浙江', '安徽', '福建', '江西', '山东',
+  '河南', '湖北', '湖南', '广东', '广西', '海南',
+  '重庆', '四川', '贵州', '云南', '西藏',
+  '陕西', '甘肃', '青海', '宁夏', '新疆',
+  '香港', '澳门', '台湾',
+]
 
 /** 杯赛只挂理科题：文科题挂着「华罗庚金杯」在演示里一眼假 */
 const COMPETITION_SUBJECTS = new Set(['数学', '物理', '化学'])
@@ -149,7 +163,9 @@ export const dictStore: Record<DictTypeKey, DictItem[]> = {
   /* 题库筛选维度。refCount 沿用本文件其余字典的「静态演示值」口径（>0 时仅可停用、不可删除），
      故用递减值填出「每一项都被题引用过」的样子 */
   competition: COMPETITIONS.map((name, i) => ({ id: 81 + i, name, sort: i + 1, enabled: true, refCount: 6 - i })),
-  region: REGIONS.map((name, i) => ({ id: 91 + i, name, sort: i + 1, enabled: true, refCount: 12 - i })),
+  /* refCount 取 `Math.max(1, …)` 而不是裸的递减式：地区有 35 项，越界会算出负数，
+     字典管理页会显示成负的引用数 */
+  region: REGIONS.map((name, i) => ({ id: 91 + i, name, sort: i + 1, enabled: true, refCount: Math.max(1, 12 - i) })),
   /* 页脚文案：refCount 为该文案覆盖的机构数（平台统一展示，停用后机构端页脚不再出现该条） */
   copyright: [
     { id: 71, name: '© 2024-2026 星辰教育科技（杭州）有限公司 版权所有', sort: 1, enabled: true, refCount: 12 },

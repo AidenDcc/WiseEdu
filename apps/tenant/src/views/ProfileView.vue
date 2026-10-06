@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { AppIcon, AppPageHeader, AppTabs, hueColor, showToast, appConfirm } from '@aiteach/shared'
 import type { TabDef } from '@aiteach/shared'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useDemoRole } from '@/composables/useDemoRole'
 import { fetchOrgLoginLogs } from '@/api/org'
 
 const router = useRouter()
 const auth = useAuthStore()
+const { identity } = useDemoRole()
 
 type TabKey = 'profile' | 'security' | 'notify' | 'logs'
 const TABS: TabDef[] = [
@@ -24,14 +26,25 @@ function switchTab(value: string) {
   tab.value = value as TabKey
 }
 
-/* ===== 个人资料（FR-GN-021） ===== */
+/* ===== 个人资料（FR-GN-021） =====
+   联系方式与简介跟着演示身份走：右上角切成王静，这里还写着「陈明远 · 139****0001」是自相矛盾的。
+   姓名取会话用户（同一个身份的两处投影），其余三项取身份表 —— 表在 useDemoRole 里，只此一份。 */
 const profile = reactive({
   name: auth.user?.name ?? '',
-  phone: '139****0001',
-  email: 'mingyuan@xingchen.edu.cn',
-  intro: '机构管理员，分管教研与题库建设。',
+  phone: identity.value.phone,
+  email: identity.value.email,
+  intro: identity.value.intro,
 })
 const editingProfile = ref(false)
+
+/* 切换演示身份后同步刷新。正在编辑时不覆盖 —— 那一刻输入框里的内容是人刚敲的，优先级更高 */
+watch(identity, (next) => {
+  profile.name = auth.user?.name ?? next.name
+  if (editingProfile.value) return
+  profile.phone = next.phone
+  profile.email = next.email
+  profile.intro = next.intro
+})
 
 function saveProfile() {
   if (profile.name.trim().length < 2) {

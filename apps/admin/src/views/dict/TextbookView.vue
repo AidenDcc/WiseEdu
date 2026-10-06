@@ -11,6 +11,13 @@ const loading = ref(false)
 
 const FILTERS = reactive<Record<string, string[]>>({ subject: [] })
 
+/* AppFilterPanel 回传整份筛选值（覆盖式回写），逐 key 写回这份 reactive 对象本身。
+   不能交给 `v-model`：它会替换掉整个对象，而替换引用不是一次响应式写入 —— 点了 chip
+   既不亮选中态也不重新筛选。机构端 CollabView 里有同款说明。 */
+function onFiltersChange(next: Record<string, string[]>) {
+  FILTERS.subject = next.subject ?? []
+}
+
 /* 学科候选项取自接口数据，故用 computed 而不是模块级常量 */
 const FILTER_ROWS = computed<FilterRowDef[]>(() => [
   { key: 'subject', label: '学科', options: subjects.value.filter((item) => item.enabled).map((item) => item.name), multiple: false },
@@ -110,7 +117,7 @@ onMounted(load)
     </AppPageHeader>
 
     <div class="panel">
-      <AppFilterPanel v-model="FILTERS" :rows="FILTER_ROWS" />
+      <AppFilterPanel :rows="FILTER_ROWS" :model-value="FILTERS" @update:model-value="onFiltersChange" />
 
       <div class="data-table-wrap">
         <table class="data-table">

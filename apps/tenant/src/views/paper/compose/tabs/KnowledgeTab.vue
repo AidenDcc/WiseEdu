@@ -160,7 +160,7 @@ function addAll() {
   border-bottom: 1px solid var(--border);
 }
 .kt-cascade .f-select { width: auto; min-width: 132px; height: 34px; font-size: 12.5px; }
-.kt-cascade .f-select:disabled { background: #f6f8fb; }
+.kt-cascade .f-select:disabled { background-color: #f6f8fb; }
 
 .kt-body {
   display: grid;

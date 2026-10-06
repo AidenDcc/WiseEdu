@@ -9,7 +9,8 @@ import MiniAppPreview from '@/components/home/MiniAppPreview.vue'
 import ResourceThumb from '@/components/home/ResourceThumb.vue'
 import SiteFooter from '@/components/home/SiteFooter.vue'
 import { collectCountOf, commentCountOf, dateOf, viewCountOf } from '@/utils/resourceMetrics'
-import { menus } from '@/menu'
+import { usePermission } from '@/composables/usePermission'
+import { pathVisible, useVisibleMenus } from '@/composables/useVisibleMenus'
 
 /**
  * 机构端工作台首页（资源发现型）：搜索 + 功能入口 → 运营位 → 真题试卷 → 同步备课 → 课程小程序 → 电子教辅 → 页脚版权。
@@ -52,6 +53,13 @@ function onSearch() {
   router.push(kw ? { path: '/question/bank', query: { keyword: kw } } : { path: '/question/bank' })
 }
 
+/* 首页的功能入口 / 「更多」同样要按权限裁剪。入口是写死的快捷方式（一个入口可能直指某个
+   子页），所以按 **路径** 判断而不是按模块粗粒度判断：`/material/media/video` 与
+   `/material/list` 同属教辅模块，但对没有教辅权限的身份都得消失。
+   内容区里剩下的其它入口（运营位、资源卡）不逐个裁，由路由守卫兜底。 */
+const { can } = usePermission()
+const { visibleMenus } = useVisibleMenus()
+
 /** 功能入口均指向机构端已上线页面；「更多」展开完整一级菜单 */
 const ENTRIES = [
   { label: '题库组卷', icon: 'edit', to: '/question/bank' },
@@ -62,10 +70,14 @@ const ENTRIES = [
   { label: '图片识题', icon: 'image', to: '/question/photo' },
 ] as const
 
+const entries = computed(() => ENTRIES.filter((row) => pathVisible(can, row.to.split('?')[0] ?? '')))
+
 const moreOpen = ref(false)
-const moreMenus = menus
-  .filter((item) => item.path !== '/dashboard')
-  .map((item) => ({ title: item.title, to: item.children?.[0]?.path ?? item.path }))
+const moreMenus = computed(() =>
+  visibleMenus.value
+    .filter((item) => item.path !== '/dashboard')
+    .map((item) => ({ title: item.title, to: item.children?.[0]?.path ?? item.path })),
+)
 
 /* ================= 模块2：运营位 ================= */
 const BANNERS = [
@@ -238,7 +250,7 @@ const handbooks = computed(() => materials.value.slice(0, 10))
       </div> -->
 
       <nav class="entries">
-        <RouterLink v-for="entry in ENTRIES" :key="entry.label" class="entry" :to="entry.to">
+        <RouterLink v-for="entry in entries" :key="entry.label" class="entry" :to="entry.to">
           <span class="entry-icon">
             <AppIcon :name="entry.icon" :size="26" />
             <i v-if="'hot' in entry && entry.hot" class="hot">HOT</i>

@@ -6,6 +6,7 @@ import type { OrgPaper, OrgSearchResult } from '@aiteach/shared'
 import { fetchGlobalSearch } from '@/api/org'
 import { searchImageEngine, searchKeywordFromImage } from '@/api/ai-search'
 import { formatFileSize } from '@/utils/file'
+import { openPaperEdit, paperEditHref } from '@/utils/paper-edit'
 
 /**
  * 全局搜索面板（FR-GN-026）：顶部搜索框为只读触发器，点击后弹出本面板。
@@ -190,6 +191,18 @@ function go(path: string) {
   router.push(path)
 }
 
+/**
+ * 搜索结果里的试卷：开**编辑页**而不是协同组卷列表。
+ *
+ * 这里原先是 `/paper/collab?id=`，而协同组卷列表读的是 `?paperId=` —— 参数名对不上，
+ * 点了等于什么都没发生（列表照旧、搜索面板已关，用户只能以为搜索坏了）。
+ * 改走 `paperEditHref` 与全站其它「编辑卷面」入口同口径；开不成新标签页时退回同页签跳转。
+ */
+function goPaperEdit(id: number) {
+  emit('close')
+  if (!openPaperEdit(id)) router.push(paperEditHref(id))
+}
+
 const durationText = (seconds?: number) =>
   seconds ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` : ''
 function scoreOf(paper: OrgPaper) {
@@ -301,7 +314,7 @@ function questionCountOf(paper: OrgPaper) {
 
             <!-- 试卷 -->
             <template v-else-if="activeTab === 'papers'">
-              <button v-for="row in papers" :key="row.id" class="row" type="button" @click="go(`/paper/collab?id=${row.id}`)">
+              <button v-for="row in papers" :key="row.id" class="row" type="button" @click="goPaperEdit(row.id)">
                 <span class="row-ico"><AppIcon name="file" :size="15" /></span>
                 <span class="row-main">
                   <span class="row-title">{{ row.name }}</span>

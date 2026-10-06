@@ -6,8 +6,11 @@
  * 「— — 名字」，选之前还看不见目录里已经有什么。真正的选择界面收在 FolderPickerDialog
  * （平行卷弹窗直接用它，不必再套一层），这里只负责「显示已选路径」和「打开它」。
  *
- * `v-model` 的契约（`number | null`，未选 = null）保持不变，所以三个使用方
- * （AI 组卷页 / 协同组卷页 / 组卷车生成试卷）的取值与校验都不用动。
+ * `v-model` 的契约（`number | null`，未选 = null）保持不变，两个使用方
+ * （AI 组卷页 / 协同组卷页）的取值与校验都不用动。
+ *
+ * 组卷车那条「生成试卷」链路不再用它：那条链路已退化成**只问存储位置**，
+ * 于是直接把 FolderPickerDialog 摆成弹窗本体，连这一层「显示已选路径 + 触发按钮」都省了。
  */
 import { computed, onMounted, ref } from 'vue'
 import { AppIcon } from '@aiteach/shared'

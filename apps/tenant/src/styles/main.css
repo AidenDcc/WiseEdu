@@ -257,6 +257,22 @@ div.empty-row { padding: 30px 0 !important; margin: 0; }
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
+/* 下拉框箭头自绘：原生 <select> 的箭头是 UA 画在右边缘的固定位置上的，**完全无视 padding-right**
+   （Chrome 大约只留 4px），所以左边有 12px 留白、右边箭头却贴着边框，两侧怎么调都对不齐。
+   关掉原生外观，用一个和内联图标同一形状（`chevron-down`，24 格 1.7 描边）的 SVG 当背景图，
+   位置与两侧留白就都归 CSS 管了：文字左留白 12px，箭头右留白约 12px，两边一致。
+   ⚠️ 图标只能写在 background-image 里（data URI 里用不了 var()，颜色 `#8a94a8` 就是 --sub），
+      而 :disabled 那边原本是 `background:` 简写 —— 简写会把 background-image 一起清零，
+      所以下面那条也改成了 background-color。 */
+.f-select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a94a8' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 16px auto;
+}
 .f-textarea {
   height: auto;
   min-height: 84px;
@@ -273,7 +289,8 @@ div.empty-row { padding: 30px 0 !important; margin: 0; }
 .f-input:disabled,
 .f-select:disabled,
 .f-textarea:disabled {
-  background: #f6f8fb;
+  /* 用 background-color 而不是简写：简写会把下拉框的箭头图标一起抹掉 */
+  background-color: #f6f8fb;
   color: var(--sub);
   cursor: not-allowed;
 }

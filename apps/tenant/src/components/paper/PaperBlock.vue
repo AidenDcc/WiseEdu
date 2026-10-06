@@ -10,6 +10,7 @@ import { computed } from 'vue'
 import { RichTextViewer } from '@aiteach/shared'
 import type { OrgPaper, OrgQuestion } from '@aiteach/shared'
 import { isJudgeNoOptions, judgeAnswerText, optionColumnsOf } from '@/utils/question-card'
+import { DEFAULT_PAPER_NOTICES } from './paper-layouts'
 import type { PaperBlock, PaperLayoutPreset } from './paper-layouts'
 
 const props = defineProps<{
@@ -45,6 +46,18 @@ const item = computed<OrgQuestion | undefined>(() => {
 function itemOf(questionId: number): OrgQuestion | undefined {
   return itemMap.value.get(questionId)
 }
+
+/**
+ * 卷首「注意事项」条目。
+ *
+ * `undefined` = 没配过 → 印内置默认稿；`[]` = 老师把这一块删了 → 一条都不印。
+ * 条目里可能有空行（老师按了回车但没打字），逐条滤掉再编号，免得出现「3．」后面是空的。
+ */
+const notices = computed(() => {
+  const rows = props.paper.notices
+  if (rows === undefined) return DEFAULT_PAPER_NOTICES
+  return rows.map((row) => row.trim()).filter(Boolean)
+})
 
 const totalScore = computed(() =>
   props.paper.sections.reduce((sum, s) => sum + s.questions.reduce((t, q) => t + (Number(q.score) || 0), 0), 0),
@@ -158,11 +171,35 @@ const optionColumns = computed(() => (item.value ? optionColumnsOf(item.value, p
       姓名、班级、考号须填写在左侧密封线内，考试结束后试卷与答题卡一并交回。
     </p>
 
-    <div class="pb-notice">
+    <!-- 注意事项：条目来自试卷配置（编辑页「全文设置 → 卷首」），没配过就用内置默认稿。
+         条目为空数组时整块不印 —— 那是老师主动删掉的，与「没配过」不是一回事。 -->
+    <div v-if="notices.length" class="pb-notice">
       <b>注意事项：</b>
-      <p>1．答题前请将姓名、班级、考号填写清楚，并核对试卷页数与题数。</p>
-      <p>2．选择题作答后请将答案填写在题后括号内，解答题须写出必要的文字说明与演算步骤。</p>
-      <p>3．考试结束后，将试卷与答题卡一并交回，不得带出考场。</p>
+      <p v-for="(row, i) in notices" :key="i">{{ i + 1 }}．{{ row }}</p>
+    </div>
+  </div>
+
+  <!-- 附加区块：表格 / 四线格 / 横线（无题号、不计分，只是给学生写字的格子） -->
+  <div v-else-if="block.kind === 'extra'" class="pb-extra">
+    <!-- 四线格：每组四条横线（四线三格），通栏。第 2、4 条是基准线，加重 -->
+    <div v-if="block.extra.kind === 'english'" class="pb-en">
+      <span v-for="n in block.extra.rows" :key="n" class="pb-en-row">
+        <i v-for="l in 4" :key="l" class="pb-en-line" :class="{ 'is-strong': l % 2 === 0 }" />
+      </span>
+    </div>
+
+    <!-- 横线：等距的作答横线，通栏 -->
+    <div v-else-if="block.extra.kind === 'lines'" class="pb-lines">
+      <i v-for="n in block.extra.rows" :key="n" class="pb-line" />
+    </div>
+
+    <!-- 表格：一个 CSS 网格，只画右边与底边，外边一圈由容器补上，避免双线 -->
+    <div
+      v-else
+      class="pb-cells"
+      :style="{ gridTemplateColumns: `repeat(${block.extra.cols}, minmax(0, 1fr))` }"
+    >
+      <i v-for="n in block.extra.rows * block.extra.cols" :key="n" class="pb-cell" />
     </div>
   </div>
 
@@ -354,6 +391,49 @@ const optionColumns = computed(() => (item.value ? optionColumnsOf(item.value, p
 }
 .pb-notice b { font-family: var(--pp-head-font); }
 .pb-notice p { margin: 2px 0 0; }
+
+/* 附加区块：表格 / 四线格 / 横线。格子线一律走 --pp-accent（与卷头表格同一支笔），
+   高度全部按 --pp-size 走 em 量级 —— 测量层与实际卷面拿到的是同一份变量，
+   格距随版式字号一起缩放，分版结果才不会与印出来的差一截。 */
+.pb-extra { color: var(--pp-accent); }
+
+/* 四线格：每组四条线，线距由 --pp-line（无单位行高）推出。
+   组内第 2、4 条是写字的基准线（小写字母贴第 3 条、高度到第 2 条），加重；
+   第 1、3 条只是辅助线，压淡。组与组之间留出一行正文的空当 ——
+   组距太挤时整块看着像一片密线，分不出「一组四线」。 */
+.pb-en { display: flex; flex-direction: column; }
+.pb-en-row {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: calc(var(--pp-size) * var(--pp-line) * 1.5);
+  margin-bottom: calc(var(--pp-size) * var(--pp-line) * 0.55);
+}
+.pb-en-row:last-child { margin-bottom: 0; }
+.pb-en-line { display: block; height: 1px; background: var(--pp-accent); opacity: 0.3; }
+.pb-en-line.is-strong { height: 2px; opacity: 1; }
+
+/* 横线：等距作答线，一行一条。线距取一行正文高，写出来的字正好落在格子里 */
+.pb-lines { display: flex; flex-direction: column; }
+.pb-line {
+  display: block;
+  height: calc(var(--pp-size) * var(--pp-line));
+  border-bottom: 1px solid var(--pp-accent);
+  opacity: 0.75;
+}
+
+/* 表格：一个 CSS 网格，只画右边与底边，外边一圈由容器补上，避免双线 */
+.pb-cells {
+  display: grid;
+  border-top: 1px solid var(--pp-accent);
+  border-left: 1px solid var(--pp-accent);
+  opacity: 0.9;
+}
+.pb-cell {
+  border-right: 1px solid var(--pp-accent);
+  border-bottom: 1px solid var(--pp-accent);
+  min-height: calc(var(--pp-size) * var(--pp-line) * 1.2);
+}
 
 .pb-section { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-family: var(--pp-head-font); }
 .pb-section-title { font-size: var(--pp-section-size); font-weight: 700; color: var(--pp-accent); }

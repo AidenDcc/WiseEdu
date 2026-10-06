@@ -3,6 +3,9 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { AppIcon, AppPageHeader, appConfirm, showToast } from '@aiteach/shared'
 import type { OrgRole } from '@aiteach/shared'
 import { deleteRole, fetchRoles, saveRole } from '@/api/org'
+import { usePermission } from '@/composables/usePermission'
+
+const { refresh: refreshPerms } = usePermission()
 
 const roles = ref<OrgRole[]>([])
 const modules = ref<Array<{ key: string; title: string; ops: string[] }>>([])
@@ -57,6 +60,9 @@ async function onSave() {
   try {
     await saveRole({ id: active.value.id, name: active.value.name, perms: JSON.parse(JSON.stringify(permDraft)) })
     await load()
+    /* 「实时生效」这句承诺在这里兑现：侧边栏/路由读的是 usePermission 里那份缓存，
+       不通知它重拉，改完矩阵回到业务页毫无变化，那句话就是假的。 */
+    await refreshPerms()
     showToast('权限已保存，实时生效', 'success')
   } catch (error) {
     showToast(error instanceof Error ? error.message : '保存失败', 'error')
@@ -87,6 +93,7 @@ async function submitCreate() {
     await load()
     activeId.value = created.id
     syncDraft()
+    await refreshPerms()
     showToast('角色已创建', 'success')
   } catch (error) {
     showToast(error instanceof Error ? error.message : '创建失败', 'error')
@@ -100,6 +107,7 @@ async function onDelete() {
     await deleteRole(active.value.id)
     activeId.value = 0
     await load()
+    await refreshPerms()
     showToast('已删除', 'success')
   } catch (error) {
     showToast(error instanceof Error ? error.message : '删除失败', 'error')

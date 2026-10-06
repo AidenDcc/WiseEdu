@@ -156,7 +156,11 @@ export type {
   PaperSource,
   PaperCategory,
   PaperAttachment,
+  PaperExtra,
+  PaperExtraKind,
   OrgPaper,
+  AiComposeParams,
+  AiComposeTemplate,
   CollabTaskStatus,
   CollabMemberStatus,
   CollabMember,
@@ -257,13 +261,21 @@ export {
   paperQuestionCount,
   /* 卷面总分：分值占比类统计的分母，同样只在 org-store 里有一份实现 */
   paperTotalScore,
+  /* 演示身份切换：机构端右上角换身份时改「当前操作人」，让 owner / actor / createdBy 跟着走
+     （见 apps/tenant/src/composables/useDemoRole.ts 的说明） */
+  setMockCurrent,
 } from './mock/org-store'
+export type { MockRole } from './mock/org-store'
 /* 这几个字典定义在 models 里（与类型同源），值需单独导出给前端 */
 export {
   QUESTION_CORRECTION_TYPES,
   QUESTION_SOURCE_OPTIONS,
   PAPER_SOURCE_OPTIONS,
   PAPER_CATEGORIES,
+  /* 年份筛选的档位口径：试卷筛选与智能组卷「优先年份」共用（mock 侧打分也要判哨兵） */
+  EARLIER_YEAR,
+  RECENT_YEAR_COUNT,
+  isEarlierYear,
   COLLAB_STATUS_TEXT,
   COLLAB_MEMBER_TEXT,
   TEACH_KIND_TEXT,

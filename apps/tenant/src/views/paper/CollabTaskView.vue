@@ -10,7 +10,15 @@
  * 3. **要看得见别人和过去**：右侧「进度」列出每位处理人的负责题型与完成度，
  *    「版本」给出可撤销 / 可替换的版本线。
  *
- * 当前身份：演示用下拉切换（真实场景由登录态决定），这样才能直观看到题型约束在不同人身上生效。
+ * **本页有两个「身份」，别混为一谈**（混了就是安全事故）：
+ * - 顶栏下拉「组卷身份」（`activeName`）：我这次以谁的名义收题，只决定**能编辑哪些题型**；
+ * - 右上角「演示身份」（`myName`，取自会话用户）：决定**权限与审批** —— 谁是发起人谁才能验收、
+ *   送审、退回。
+ * 所以审批按钮的 `v-if` 一律只认 `myName`，**绝不认 `activeName`**：否则任何一位老师把自己的
+ * 名字选进下拉，就能替组长验收自己的卷子。两者不做双向同步，各有各的用途。
+ *
+ * 生命周期：收题中 → （全员提交）待验收 → （逐人验收通过）待送审 → （发起人送审）已送审
+ * → 审核中心通过 = 已完成 / 驳回 = 已驳回（可退回修改，回到收题中）。
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -18,21 +26,30 @@ import { AppIcon, COLLAB_MEMBER_TEXT, COLLAB_STATUS_TEXT, RichTextViewer, showTo
 import type { CollabMember, OrgCollabTask, OrgPaper, OrgQuestion, PaperSection } from '@aiteach/shared'
 import PaperPreviewModal from '@/components/paper/PaperPreviewModal.vue'
 import {
+  collabAcceptMember,
   collabAddQuestions,
   collabAiCompose,
+  collabRejectMember,
   collabRemoveQuestion,
+  collabReopenAfterReject,
   collabReopenMember,
   collabSubmitMember,
+  collabSubmitReview,
+  collabWithdrawReview,
   fetchCollabTask,
   fetchQuestions,
   replacePaperVersion,
   restorePaperVersion,
 } from '@/api/org'
 import { useBaseData } from '@/composables/useBaseData'
+import { useAuthStore } from '@/stores/auth'
 import { typeOfSectionTitle } from './paper-sections'
+import { COLLAB_MEMBER_CLASS, COLLAB_STATUS_CLASS } from './collab-status'
+import { paperEditHref } from '@/utils/paper-edit'
 
 const route = useRoute()
 const router = useRouter()
+const auth = useAuthStore()
 const { difficulties, ensure } = useBaseData()
 
 const task = ref<OrgCollabTask | null>(null)
@@ -43,13 +60,50 @@ const busy = ref(false)
 
 const taskId = computed(() => Number(route.query.id ?? 0))
 
-/** 当前身份：默认取「我」（陈明远），不在名单里时退到第一位处理人 */
-const activeName = ref('陈明远')
+/** 演示身份（会话用户）的姓名 —— 审批与编辑权限只认这个，不认下面的 `activeName` */
+const myName = computed(() => auth.user?.name ?? '')
+/** 我是不是本任务的发起人：只有发起人能验收、送审、退回、改要求 */
+const isOwner = computed(() => !!task.value && task.value.owner === myName.value)
+
+/**
+ * 组卷身份（我这次以谁的名义收题）：初始取演示身份本人，他不是处理人时退到第一位处理人。
+ * 之后用户可以在下拉里自由切换 —— 演示需要「以某位老师的视角看看他能选什么题」，
+ * 这个视角切换与审批权限无关，故**不回写演示身份**。
+ */
+const activeName = ref('')
 const me = computed<CollabMember | null>(() => task.value?.members.find((row) => row.name === activeName.value) ?? null)
 /** 我负责的题型：入卷与抽题的硬约束 */
 const myTypes = computed(() => me.value?.questionTypes ?? [])
-const canPick = computed(() => !!me.value && !(me.value.perms.length === 1 && me.value.perms.includes('只读')))
+
+/**
+ * 任务是否还在收题阶段。进入验收（reviewing）之后卷面就该定下来：
+ * 加题、移除、用 AI 抽题、撤销/替换版本都只在这里放行 —— 与 mock 侧的 `assertPaperEditable`
+ * 同一口径。界面置灰只是提示，真正拦住的是服务端。
+ */
+const taskEditable = computed(() => task.value?.status === 'collecting' || task.value?.status === 'reviewing')
+
+const canPick = computed(
+  () => !!me.value && taskEditable.value && !(me.value.perms.length === 1 && me.value.perms.includes('只读')),
+)
 const canScore = computed(() => !!me.value && me.value.perms.includes('改分值'))
+
+/** 能提交「我的部分」：还没交出去（待接受 / 组卷中），且任务还在收题阶段 */
+const canSubmitMine = computed(
+  () => !!me.value && taskEditable.value && (me.value.status === 'invited' || me.value.status === 'working'),
+)
+/**
+ * 能撤销提交：只有「已提交」可撤回。
+ * **`accepted`（已验收）是终态，绝不能出现撤销按钮** —— 否则验收通过之后按钮重新冒出来，
+ * 一点就把自己打回「已提交」，组长刚做的验收被抹掉（mock 侧同样会拒绝，见 collabSubmitMember）。
+ */
+const canReopenMine = computed(() => !!me.value && me.value.status === 'submitted')
+
+/** 待验收的成员：已提交、组长还没过目的。收题中就有人先交了也算，不必等全员交齐 */
+const pendingAccept = computed(() => task.value?.members.filter((row) => row.status === 'submitted') ?? [])
+/** 验收动作对发起人是否可用：已提交的人都可验；到了待送审之后一律停掉，那是审核流程的事了 */
+const canAccept = computed(
+  () => isOwner.value && (task.value?.status === 'collecting' || task.value?.status === 'reviewing'),
+)
 
 const sections = computed(() => paper.value?.sections ?? [])
 const totalCount = computed(() => sections.value.reduce((sum, row) => sum + row.questions.length, 0))
@@ -140,6 +194,10 @@ async function addPicked() {
 
 async function addQuestions(rows: Array<{ questionId: number; score?: number }>) {
   if (!task.value || !me.value) return
+  if (!taskEditable.value) {
+    showToast(`任务已「${COLLAB_STATUS_TEXT[task.value.status]}」，卷面已定稿，如需调整请先让发起人退回修改`, 'error')
+    return
+  }
   if (!canPick.value) {
     showToast('你在本任务中只有只读权限', 'error')
     return
@@ -163,6 +221,10 @@ async function addQuestions(rows: Array<{ questionId: number; score?: number }>)
 
 async function removeQuestion(questionId: number) {
   if (!task.value || !me.value) return
+  if (!taskEditable.value) {
+    showToast(`任务已「${COLLAB_STATUS_TEXT[task.value.status]}」，如需调整请先让发起人退回修改`, 'error')
+    return
+  }
   busy.value = true
   try {
     paper.value = await collabRemoveQuestion({ taskId: task.value.id, memberName: me.value.name, questionId })
@@ -182,6 +244,10 @@ const aiForm = reactive({ type: '', count: 0, difficulty: '', allowGenerate: tru
 const aiRunning = ref(false)
 
 function openAi() {
+  if (!taskEditable.value) {
+    showToast('任务已进入验收 / 送审流程，如需调整请先让发起人退回修改', 'error')
+    return
+  }
   if (!myTypes.value.length) {
     showToast('你还没有被分配题型', 'error')
     return
@@ -241,6 +307,107 @@ async function reopenMine() {
     await collabReopenMember({ taskId: task.value.id, memberName: me.value.name })
     await reload()
     showToast('已撤销提交，可继续修订', 'success')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '撤销失败', 'error')
+  } finally {
+    busy.value = false
+  }
+}
+
+/* ================= 发起人：逐人验收 → 提交审核 ================= */
+
+/**
+ * 验收通过某位处理人的题型。全部验收通过后任务自动转「待送审」——
+ * 这一步**不**自动送审：送审是发起人对整卷负责的动作，得他自己按那一下。
+ */
+async function acceptMember(member: CollabMember) {
+  if (!task.value) return
+  busy.value = true
+  try {
+    task.value = await collabAcceptMember({ taskId: task.value.id, memberName: member.name })
+    showToast(`已验收 ${member.name} 负责的题型`, 'success')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '验收失败', 'error')
+  } finally {
+    busy.value = false
+  }
+}
+
+/* 退回整改：意见必填（mock 侧要求 ≥5 字，与试卷审核同一口径），所以在弹窗里填而不是
+   直接点一下就走 —— 退回不写清楚原因，对方只能猜哪里不合格，白跑一轮。 */
+const rejectTarget = ref<CollabMember | null>(null)
+const rejectOpinion = ref('')
+
+function openReject(member: CollabMember) {
+  rejectTarget.value = member
+  rejectOpinion.value = ''
+}
+
+async function submitReject() {
+  if (!task.value || !rejectTarget.value) return
+  if (rejectOpinion.value.trim().length < 5) {
+    showToast('请填写至少 5 个字的退回意见，说明哪里需要整改', 'error')
+    return
+  }
+  busy.value = true
+  try {
+    task.value = await collabRejectMember({
+      taskId: task.value.id,
+      memberName: rejectTarget.value.name,
+      opinion: rejectOpinion.value.trim(),
+    })
+    showToast(`已退回给 ${rejectTarget.value.name} 整改，任务回到收题中`, 'success')
+    rejectTarget.value = null
+    rejectOpinion.value = ''
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '退回失败', 'error')
+  } finally {
+    busy.value = false
+  }
+}
+
+/** 提交审核：需全员已验收（`ready`）。这一步把试卷交给审核中心，任务与审核中心从此是同一条线 */
+async function submitForReview() {
+  if (!task.value) return
+  busy.value = true
+  try {
+    const { task: next, paper: nextPaper } = await collabSubmitReview({ taskId: task.value.id })
+    task.value = next
+    paper.value = nextPaper
+    showToast('已提交审核，可在「试卷审核中心」跟进结果', 'success')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '提交审核失败', 'error')
+  } finally {
+    busy.value = false
+  }
+}
+
+async function withdrawReview() {
+  if (!task.value) return
+  busy.value = true
+  try {
+    const { task: next, paper: nextPaper } = await collabWithdrawReview({ taskId: task.value.id })
+    task.value = next
+    paper.value = nextPaper
+    showToast('已撤回送审，任务回到待送审', 'success')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '撤回失败', 'error')
+  } finally {
+    busy.value = false
+  }
+}
+
+/** 审核被驳回后重新开工：试卷回草稿、全员回到组卷中，按审核意见改完再走一遍验收 */
+async function reopenAfterReject() {
+  if (!task.value) return
+  busy.value = true
+  try {
+    const { task: next, paper: nextPaper } = await collabReopenAfterReject({ taskId: task.value.id })
+    task.value = next
+    paper.value = nextPaper
+    showToast('已退回修改，全员回到组卷中，改完请重新提交', 'success')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '退回修改失败', 'error')
   } finally {
     busy.value = false
   }
@@ -256,6 +423,10 @@ const replaceNote = ref('')
 
 async function onRestore(versionId: number) {
   if (!paper.value) return
+  if (!taskEditable.value) {
+    showToast('任务已进入验收 / 送审流程，不能撤销版本', 'error')
+    return
+  }
   try {
     const { paper: next, versions } = await restorePaperVersion({ paperId: paper.value.id, versionId })
     paper.value = next
@@ -268,6 +439,10 @@ async function onRestore(versionId: number) {
 
 async function onReplace() {
   if (!paper.value || replaceTarget.value == null) return
+  if (!taskEditable.value) {
+    showToast('任务已进入验收 / 送审流程，不能替换卷面', 'error')
+    return
+  }
   try {
     const { paper: next, versions } = await replacePaperVersion({
       paperId: paper.value.id,
@@ -298,8 +473,10 @@ async function reload() {
   task.value = next
   paper.value = current
   questions.value = questionRows
+  /* 组卷身份的默认值：优先站到「演示身份本人」的位置上（切到李文博，一进来就是他的视角），
+     他不是处理人时退到第一位 —— 与演示身份无关，只是给一个说得通的开场。 */
   if (!next.members.some((row) => row.name === activeName.value)) {
-    activeName.value = next.members[0]?.name ?? ''
+    activeName.value = next.members.find((row) => row.name === myName.value)?.name ?? next.members[0]?.name ?? ''
   }
 }
 
@@ -336,33 +513,76 @@ onMounted(async () => {
         </p>
       </div>
       <div class="ct-head-ops">
-        <span class="tag" :class="task.status === 'done' ? 'tag-green' : task.status === 'reviewing' ? 'tag-orange' : 'tag-blue'">
+        <span class="tag" :class="COLLAB_STATUS_CLASS[task.status]">
           {{ COLLAB_STATUS_TEXT[task.status] }}
         </span>
-        <span class="ct-identity">
-          <span class="f-hint">当前身份</span>
+        <!-- 「组卷身份」只决定能编辑哪些题型，与审批无关；审批认的是右上角演示身份 -->
+        <span class="ct-identity" title="以谁的名义收题：只影响你能筛选、加入哪些题型，不影响审批权限">
+          <span class="f-hint">组卷身份</span>
           <select v-model="activeName" class="f-select">
             <option v-for="member in task.members" :key="member.name" :value="member.name">
               {{ member.name }}
             </option>
           </select>
         </span>
-        <button class="btn btn-ghost btn-sm" @click="router.push(`/paper/edit?id=${paper.id}`)">
+        <!-- 新标签页打开：改完卷面格式还要回本页继续推进分工与版本（见 utils/paper-edit.ts） -->
+        <a class="btn btn-ghost btn-sm" :href="paperEditHref(paper.id)" target="_blank" rel="noopener">
           <AppIcon name="edit" :size="14" /> 编辑卷面格式
-        </button>
+        </a>
         <button class="btn btn-ghost btn-sm" @click="previewOpen = true">
           <AppIcon name="eye" :size="14" /> 预览试卷
         </button>
-        <button
-          v-if="me && me.status !== 'submitted'"
-          class="btn btn-primary btn-sm"
-          :disabled="busy"
-          @click="submitMine"
-        >
+
+        <!-- 处理人视角：提交 / 撤销各自的题型。accepted 是终态，两个按钮都不出现 -->
+        <button v-if="canSubmitMine" class="btn btn-primary btn-sm" :disabled="busy" @click="submitMine">
           <AppIcon name="check" :size="14" /> 提交我的部分
         </button>
-        <button v-else-if="me" class="btn btn-ghost btn-sm" :disabled="busy" @click="reopenMine">撤销提交</button>
+        <button v-else-if="canReopenMine" class="btn btn-ghost btn-sm" :disabled="busy" @click="reopenMine">
+          撤销提交
+        </button>
+
+        <!-- 发起人视角：逐人验收 → 全部验收完才出现「提交审核」。只认演示身份 -->
+        <button
+          v-if="isOwner && task.status === 'ready'"
+          class="btn btn-primary btn-sm"
+          :disabled="busy"
+          @click="submitForReview"
+        >
+          <AppIcon name="upload" :size="14" /> 提交审核
+        </button>
+        <button
+          v-else-if="isOwner && task.status === 'submitted'"
+          class="btn btn-ghost btn-sm"
+          :disabled="busy"
+          @click="withdrawReview"
+        >
+          撤回送审
+        </button>
+        <button
+          v-else-if="isOwner && task.status === 'rejected'"
+          class="btn btn-primary btn-sm"
+          :disabled="busy"
+          @click="reopenAfterReject"
+        >
+          <AppIcon name="edit" :size="14" /> 退回修改
+        </button>
       </div>
+    </div>
+
+    <!-- 审核驳回意见：整卷的问题，挂在页面顶部而不是某位成员名下 -->
+    <div v-if="task.status === 'rejected' && paper.reviewOpinion" class="ct-banner danger">
+      <AppIcon name="warning" :size="15" />
+      <span><b>审核未通过：</b>{{ paper.reviewOpinion }}</span>
+      <template v-if="isOwner">请点右上角「退回修改」，让各位老师按意见调整后重新走一遍验收。</template>
+      <template v-else>请等待发起人退回修改后再调整。</template>
+    </div>
+    <!-- 有成果等我验收时提示发起人：一条一条点过去，全绿了才出「提交审核」 -->
+    <div v-else-if="canAccept && pendingAccept.length" class="ct-banner info">
+      <AppIcon name="info" :size="15" />
+      <span>
+        有 {{ pendingAccept.length }} 位老师的成果待你验收：右侧「进度与状态」里点「验收通过」或「退回整改」。
+        全员验收通过后，右上角才会出现「提交审核」。
+      </span>
     </div>
 
     <!-- 试卷基本要求（所有人可见，AI 抽题也读这一份） -->
@@ -440,10 +660,17 @@ onMounted(async () => {
         </label>
 
         <div class="ct-pool-ops">
-          <button class="btn btn-primary btn-sm" style="flex: 1" :disabled="busy || !pickedIds.length" @click="addPicked">
+          <button
+            class="btn btn-primary btn-sm"
+            style="flex: 1"
+            :disabled="busy || !canPick || !pickedIds.length"
+            @click="addPicked"
+          >
             <AppIcon name="plus" :size="14" /> 加入所选（{{ pickedIds.length }}）
           </button>
-          <button class="btn btn-ghost btn-sm" @click="openAi"><AppIcon name="sparkles" :size="14" /> AI 抽题</button>
+          <button class="btn btn-ghost btn-sm" :disabled="!canPick" @click="openAi">
+            <AppIcon name="sparkles" :size="14" /> AI 抽题
+          </button>
         </div>
 
         <div class="ct-pool-list">
@@ -532,7 +759,7 @@ onMounted(async () => {
                 <button
                   v-if="me && isMineType(itemOf(entry.questionId)?.type ?? '')"
                   class="mini-btn danger"
-                  :disabled="busy"
+                  :disabled="busy || !taskEditable"
                   @click="removeQuestion(entry.questionId)"
                 >
                   移除
@@ -559,8 +786,8 @@ onMounted(async () => {
           <div v-for="member in task.members" :key="member.name" class="ct-member">
             <div class="ct-member-top">
               <b>{{ member.name }}</b>
-              <span v-if="member.name === activeName" class="tag tag-blue">当前身份</span>
-              <span class="tag" :class="member.status === 'submitted' ? 'tag-green' : member.status === 'working' ? 'tag-blue' : 'tag-gray'">
+              <span v-if="member.name === activeName" class="tag tag-blue">组卷中身份</span>
+              <span class="tag" :class="COLLAB_MEMBER_CLASS[member.status]">
                 {{ COLLAB_MEMBER_TEXT[member.status] }}
               </span>
               <i v-if="member.online" class="online-dot" title="在线" />
@@ -571,7 +798,20 @@ onMounted(async () => {
             </div>
             <p class="f-hint">负责题型：{{ member.questionTypes.join('、') || '未分配' }}</p>
             <p class="f-hint">权限：{{ member.perms.join('/') }} · 最近动作 {{ member.lastActiveAt }}</p>
+            <p v-if="member.reviewNote" class="f-hint warn-note">退回意见：{{ member.reviewNote }}</p>
+
+            <!-- 逐人验收：只有发起人在「待验收」阶段看得到。`isOwner` 取的是演示身份，
+                 不是上面的组卷身份下拉 —— 否则谁把自己选进下拉谁就能自我验收 -->
+            <div v-if="canAccept && member.status === 'submitted'" class="ct-accept">
+              <button class="mini-btn success" :disabled="busy" @click="acceptMember(member)">验收通过</button>
+              <button class="mini-btn danger" :disabled="busy" @click="openReject(member)">退回整改</button>
+            </div>
           </div>
+
+          <!-- 全员验收完：把「下一步」明说出来，否则用户不知道还要去点右上角 -->
+          <p v-if="isOwner && task.status === 'ready'" class="f-hint" style="margin-top: 10px">
+            全员已验收通过，检查无误后点右上角「提交审核」把整卷送给审核中心。
+          </p>
         </div>
 
         <div v-else class="ct-side-body">
@@ -583,9 +823,10 @@ onMounted(async () => {
             </div>
             <p class="f-hint">{{ row.summary }}</p>
             <p class="f-hint">{{ row.questionCount }} 题 · {{ row.totalScore }} 分<template v-if="row.note"> · 备注：{{ row.note }}</template></p>
+            <!-- 卷面进入验收 / 送审后就定稿了，版本操作一并停掉（口径同 mock 侧的状态守卫） -->
             <div class="op-group" style="margin-top: 4px">
-              <button class="mini-btn" @click="onRestore(row.id)">撤销到此版</button>
-              <button class="mini-btn" @click="replaceTarget = row.id">替换当前</button>
+              <button class="mini-btn" :disabled="!taskEditable" @click="onRestore(row.id)">撤销到此版</button>
+              <button class="mini-btn" :disabled="!taskEditable" @click="replaceTarget = row.id">替换当前</button>
             </div>
           </div>
         </div>
@@ -633,6 +874,32 @@ onMounted(async () => {
       </template>
     </AppModal>
 
+    <!-- 退回整改：意见必填，会写进成员卡片一直挂着，直到他重新提交 -->
+    <AppModal
+      v-if="rejectTarget"
+      :title="`退回 ${rejectTarget.name} 整改`"
+      :width="480"
+      @close="rejectTarget = null"
+    >
+      <p class="f-hint" style="margin-bottom: 12px">
+        {{ rejectTarget.name }} 负责「{{ rejectTarget.questionTypes.join('、') }}」。退回后他会回到「组卷中」，
+        任务回到「收题中」，已验收的其他人不受影响。
+      </p>
+      <div class="f-field">
+        <label class="f-label">退回意见<span class="req">*</span>（至少 5 字）</label>
+        <textarea
+          v-model="rejectOpinion"
+          class="f-textarea"
+          rows="4"
+          placeholder="如：第 3 题超出命题范围，第 5 题难度偏高，请替换后重新提交"
+        />
+      </div>
+      <template #footer>
+        <button class="btn btn-ghost" @click="rejectTarget = null">取消</button>
+        <button class="btn btn-primary" :disabled="busy" @click="submitReject">确认退回</button>
+      </template>
+    </AppModal>
+
     <!-- 替换版本 -->
     <AppModal v-if="replaceTarget != null" title="以所选版本替换当前卷面" :width="460" @close="replaceTarget = null">
       <p class="f-hint" style="margin-bottom: 12px">
@@ -677,6 +944,17 @@ onMounted(async () => {
 .ct-identity { display: inline-flex; align-items: center; gap: 6px; }
 /* 自写横向工具条里的下拉：全局 .f-select 是 width:100%，会把这一行撑满（见规范第 4 条） */
 .ct-identity .f-select { width: auto; min-width: 132px; height: var(--ctrl-h); flex-shrink: 0; }
+
+/* 顶部提示条：整卷级别的信息（被驳回 / 待我验收），不挂在某位成员名下 */
+.ct-banner {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 11px 14px; border-radius: 11px;
+  font-size: 12.5px; line-height: 1.7;
+}
+.ct-banner svg { flex-shrink: 0; margin-top: 2px; }
+.ct-banner.danger { background: var(--danger-soft); color: var(--danger); }
+.ct-banner.info { background: var(--brand-soft); color: var(--brand-deep); }
+.ct-banner b { font-weight: 700; }
 
 .ct-req { padding: 14px 16px; }
 .ct-req-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 12px; }
@@ -771,6 +1049,9 @@ onMounted(async () => {
 .ct-side-body { flex: 1; overflow-y: auto; padding: 12px 14px; }
 .ct-member { border-bottom: 1px dashed var(--border); padding-bottom: 12px; margin-bottom: 12px; }
 .ct-member-top { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+/* 退回意见要显眼：它是这位老师重新开工的唯一线索 */
+.warn-note { color: var(--danger); }
+.ct-accept { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 .online-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
 .ct-ver { border-left: 2px solid var(--border); padding: 0 0 12px 12px; }
 .ct-ver.replaced { opacity: 0.6; }

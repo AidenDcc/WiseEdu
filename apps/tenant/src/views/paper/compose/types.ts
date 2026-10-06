@@ -5,7 +5,10 @@
  * 这样「搜到的东西换个页签还在」是默认行为，而不是要用户在每个页签里重搜一遍。
  */
 import {
+  EARLIER_YEAR,
   QUESTION_SOURCE_OPTIONS,
+  RECENT_YEAR_COUNT,
+  isEarlierYear,
   toPlainText,
   type MediaKind,
   type OrgMaterial,
@@ -13,6 +16,10 @@ import {
   type OrgPaper,
   type OrgQuestion,
 } from '@aiteach/shared'
+
+/* 年份档位的三个常量住在 shared（mock 的智能组卷打分也要用），这里原样转发，
+   工作台内部各处（PapersTab、试题页签…）的 import 路径保持不变 */
+export { EARLIER_YEAR, RECENT_YEAR_COUNT, isEarlierYear }
 
 export interface ComposeFilter {
   /** 关键词：文本搜索输入、图片搜索识别结果、AI 解读的关键词都会落在这里 */
@@ -161,30 +168,6 @@ export function matchesQuestionFilter(
  * （决定页签上那个角标）。**必须共用同一份实现** —— 各写一份的话，角标写着 5 条、点进去
  * 只有 2 条，用户会以为资源丢了。这也是它们放在本模块而不是各自页签里的原因。
  */
-
-/**
- * 年份筛选里「更早以前」的哨兵值。
- *
- * 它不是年份，只是 `filter.years` 里的一个取值：年份行是**多选** chip，
- * 「2026 年」和「更早以前」可以同时选中（= 2026 年的卷，或比近三届更早的卷）。
- * 故意取一个不可能与真实年份相撞的字符串，判定见 `isEarlierYear`。
- */
-export const EARLIER_YEAR = 'earlier'
-
-/** 年份行里单列的最新几届：更早的年份都并进「更早以前」，这一行才不会年年越铺越长 */
-export const RECENT_YEAR_COUNT = 3
-
-/**
- * 年份是否落在「更早以前」这一档（比最近三届更早）。
- *
- * 阈值取自**当前年份**而不是卷池：谓词逐行判定，拿不到「这一屏里有哪些年份」；
- * 若按卷池推导，同一份卷会在卷池变化时改变归属，「更早以前」就不再是一个稳定档位。
- * 空年份（没有年份的卷）不算 —— 与其它可缺省维度同一口径：缺省值不命中任何档。
- */
-export function isEarlierYear(year: string | undefined): boolean {
-  if (!year) return false
-  return Number(year) < new Date().getFullYear() - RECENT_YEAR_COUNT + 1
-}
 
 /**
  * 试卷命中：关键词可命中卷名 / 出卷人 / **杯赛名** / 卷内任一题的题干与知识点

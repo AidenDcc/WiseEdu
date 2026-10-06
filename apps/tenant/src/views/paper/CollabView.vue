@@ -9,6 +9,10 @@
  * - 版本线记录每一次入卷与提交，可撤销或替换。
  *
  * 本页只做「建任务 / 看进度 / 进组卷」，具体组卷在 `CollabTaskView.vue`。
+ *
+ * **状态的颜色语言**（本页与任务页共用，改一处必须改另一处）：蓝=球在别人手里（处理人还在
+ * 组卷、试卷已交给审核中心）；橙=球在组长手里（待验收、待送审）；绿=走完了；红=被退回。
+ * 所以「收题中 / 已送审」同为蓝、「待验收 / 待送审」同为橙不是配色偷懒，是在说同一件事：该谁动。
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -18,10 +22,24 @@ import type { CollabMember, FilterRowDef, OrgCollabTask, OrgPaper, OrgQuestion, 
 import AppPagination from '@/components/ui/AppPagination.vue'
 import { deleteCollabTask, fetchCollabTasks, fetchPapers, fetchQuestions, fetchStaff, saveCollabTask } from '@/api/org'
 import { useBaseData } from '@/composables/useBaseData'
+import { usePermission } from '@/composables/usePermission'
+import { useAuthStore } from '@/stores/auth'
+import { paperEditHref } from '@/utils/paper-edit'
+import { COLLAB_MEMBER_CLASS, COLLAB_STATUS_CLASS } from './collab-status'
 
 const route = useRoute()
 const router = useRouter()
-const { subjects, grades, questionTypesFor, difficulties, ensure, pick, withCurrent } = useBaseData()
+const auth = useAuthStore()
+const { subjects, grades, questionTypesFor, difficulties, examTypes, ensure, pick, withCurrent } = useBaseData()
+const { can } = usePermission()
+
+/**
+ * 当前演示身份的姓名 —— 判断「这条任务归不归我管」的唯一依据。
+ *
+ * 取 auth 里的会话用户，而不是组卷任务详情页那个 `activeName` 下拉：那个下拉是「我这次以谁
+ * 的名义收题」，属于干活时的临时视角，跟权限无关。**审批 / 编辑 / 删除只认这里**。
+ */
+const myName = computed(() => auth.user?.name ?? '')
 
 const tasks = ref<OrgCollabTask[]>([])
 const papers = ref<OrgPaper[]>([])
@@ -29,28 +47,127 @@ const questions = ref<OrgQuestion[]>([])
 const staff = ref<StaffMember[]>([])
 const loading = ref(true)
 
-const FILTER_ROWS: FilterRowDef[] = [
-  { key: 'status', label: '状态', options: Object.values(COLLAB_STATUS_TEXT), multiple: false },
-]
-const filters = reactive<Record<string, string[]>>({ status: [] })
-const keyword = ref('')
-const page = ref(1)
-const filtered = computed(() =>
-  tasks.value.filter(
-    (row) =>
-      (filters.status.length === 0 || filters.status.includes(COLLAB_STATUS_TEXT[row.status])) &&
-      (!keyword.value || row.name.includes(keyword.value)),
-  ),
-)
-const rows = computed(() => filtered.value.slice((page.value - 1) * 8, page.value * 8))
+/* ===== 页签：状态这一维度整体交给页签 =====
+   原先「统计卡 + 状态筛选行」各管一半状态，同一维度两处能改、两处口径还不一样（卡片按状态计数、
+   筛选行按状态过滤）。现在合成一条：**点页签 = 按该状态过滤**，角标就是计数。 */
 
-const STATUS_CLASS: Record<string, string> = {
-  collecting: 'tag-blue',
-  reviewing: 'tag-orange',
-  done: 'tag-green',
+type TabKey = 'mine' | 'all' | 'collecting' | 'reviewing' | 'ready'
+
+const TABS: Array<{ key: TabKey; label: string }> = [
+  { key: 'mine', label: '待我处理' },
+  { key: 'all', label: '全部任务' },
+  { key: 'collecting', label: '收题中' },
+  { key: 'reviewing', label: '待验收' },
+  { key: 'ready', label: '待送审' },
+]
+
+/**
+ * 默认落在「全部任务」，不是排第一的「待我处理」：默认演示身份（机构管理员）是发起人、不是处理人，
+ * 落在「待我处理」会一进页面就是空列表。待办条数在页签角标上看得见（且会变亮），不会漏。
+ */
+const activeTab = ref<TabKey>('all')
+
+/* ===== 搜索条件 ===== */
+
+interface CollabFilterRow {
+  key: 'grade' | 'subject' | 'difficulty' | 'examType'
+  label: string
+  options: () => string[]
 }
 
-/* ===== 任务统计：按分工算完成度，而不是让用户自己去数题 ===== */
+/**
+ * 四个维度都是 chip 多选。**取值来自任务还是来自关联试卷，是分开取的**：
+ * - 年级 / 学科取自任务的 `requirement` —— 列表「适用」列展示的就是它们，筛选口径必须与
+ *   用户看得见的那一列一致，否则会出现「列里写着高一，筛高一却筛不出来」；
+ * - 难度 / 考试类型取自关联试卷 —— 任务的 `requirement.difficulty` 是各难度档的**占比要求**
+ *   （易 30% / 中 50% / 难 20%），不是单值，拿它做多选筛选没有意义；这两个维度的单值只有
+ *   试卷上有，也就与试卷库同口径（见 ListView 的 FIELD_OF）。
+ */
+const FILTER_ROWS: CollabFilterRow[] = [
+  { key: 'grade', label: '年级', options: () => grades.value },
+  { key: 'subject', label: '学科', options: () => subjects.value },
+  { key: 'difficulty', label: '难度', options: () => difficulties.value },
+  { key: 'examType', label: '考试类型', options: () => examTypes.value },
+]
+
+const FIELD_OF: Record<CollabFilterRow['key'], (task: OrgCollabTask) => string> = {
+  grade: (task) => task.requirement.grade,
+  subject: (task) => task.requirement.subject,
+  difficulty: (task) => paperOf(task)?.difficulty ?? '',
+  examType: (task) => paperOf(task)?.examType ?? '',
+}
+
+/** 行定义展开给共享 AppFilterPanel；选项来自字典，**异步到达**，所以这里必须是 computed */
+const filterRowDefs = computed<FilterRowDef[]>(() =>
+  FILTER_ROWS.map((row) => ({ key: row.key, label: row.label, options: row.options() })),
+)
+
+const filters = reactive<Record<CollabFilterRow['key'], string[]>>({
+  grade: [],
+  subject: [],
+  difficulty: [],
+  examType: [],
+})
+const keyword = ref('')
+const page = ref(1)
+
+/**
+ * 覆盖式回写：逐 key 写进这份 reactive 对象本身，**不让 `v-model` 整体替换它**。
+ * 换掉引用则脚本里这份 `filters` 再也读不到新值，筛选看着有选中态、列表却纹丝不动。
+ */
+function onFiltersChange(next: Record<string, string[]>) {
+  FILTER_ROWS.forEach((row) => {
+    filters[row.key] = next[row.key] ?? []
+  })
+}
+
+/**
+ * 只应用搜索条件、**不含页签**的任务集 —— 页签角标的计数口径。
+ *
+ * 计数必须跟着搜索条件走：角标写着「收题中 3」点进去只有 1 条，比不显示数字更糟
+ * （组卷工作台的试卷类型树用的是同一口径，见 PapersTab 的 `pool`）。
+ */
+const scoped = computed(() =>
+  tasks.value.filter((row) => {
+    for (const def of FILTER_ROWS) {
+      const selected = filters[def.key]
+      if (selected.length > 0 && !selected.includes(FIELD_OF[def.key](row))) return false
+    }
+    return !keyword.value || row.name.includes(keyword.value)
+  }),
+)
+
+function inTab(task: OrgCollabTask, key: TabKey): boolean {
+  if (key === 'all') return true
+  /* 「待我处理」= 我名下还没交出去的题型（invited / working）。已提交与已验收都算交出去了；
+     被退回整改的成员会回到 working，自然重新出现在这里。 */
+  if (key === 'mine') {
+    return task.members.some((m) => m.name === myName.value && (m.status === 'invited' || m.status === 'working'))
+  }
+  return task.status === key
+}
+
+const tabCounts = computed(
+  () =>
+    Object.fromEntries(TABS.map((tab) => [tab.key, scoped.value.filter((row) => inTab(row, tab.key)).length])) as Record<
+      TabKey,
+      number
+    >,
+)
+
+const filtered = computed(() => scoped.value.filter((row) => inTab(row, activeTab.value)))
+const rows = computed(() => filtered.value.slice((page.value - 1) * 8, page.value * 8))
+
+/* 换页签 / 改条件后停在原页码会看到空列表，回第一页 */
+watch([activeTab, () => JSON.stringify(filters), keyword], () => {
+  page.value = 1
+})
+
+/* 状态配色与组卷页共用一份（见 collab-status.ts 的「颜色语言」说明） */
+const STATUS_CLASS = COLLAB_STATUS_CLASS
+const MEMBER_CLASS = COLLAB_MEMBER_CLASS
+
+/* ===== 收题完成度：按分工算，而不是让用户自己去数题 ===== */
 
 function paperOf(task: OrgCollabTask): OrgPaper | undefined {
   return papers.value.find((row) => row.id === task.paperId)
@@ -87,12 +204,10 @@ function paperQuestionCountOf(task: OrgCollabTask): number {
   return paperOf(task)?.sections.reduce((sum, section) => sum + section.questions.length, 0) ?? 0
 }
 
-const stats = computed(() => ({
-  total: tasks.value.length,
-  collecting: tasks.value.filter((row) => row.status === 'collecting').length,
-  reviewing: tasks.value.filter((row) => row.status === 'reviewing').length,
-  mine: tasks.value.filter((row) => row.members.some((m) => m.name === '陈明远' && m.status !== 'submitted')).length,
-}))
+/** 是否是本任务的发起人。改要求 / 删任务只给发起人 —— 与 mock 侧「仅收题中可编辑」互为表里 */
+function isOwner(task: OrgCollabTask): boolean {
+  return task.owner === myName.value
+}
 
 /* ===== 新建 / 编辑任务 ===== */
 
@@ -376,39 +491,33 @@ onMounted(async () => {
   <div class="page">
     <AppPageHeader desc="一张试卷按题型拆给多位老师分头组卷，发起人定卷面要求，处理人只能选自己负责的题型，但可以看到整张试卷。">
       <template #actions>
-        <button class="btn btn-ghost" @click="router.push('/paper/compose')">
-          <AppIcon name="grid" :size="15" /> 题库组卷
-        </button>
-        <button class="btn btn-primary" @click="openCreate()">
+        <!-- 发起协同组卷是组长专属动作：老师也能组卷，但组卷工作台自己有菜单入口，
+             在本页再挂一个「题库组卷」只会让人分不清「我现在在哪张卷子里」 -->
+        <button v-if="can('paper', '发起协同组卷')" class="btn btn-primary" @click="openCreate()">
           <AppIcon name="plus" :size="15" /> 新建协同组卷任务
         </button>
       </template>
     </AppPageHeader>
 
-    <div class="stat-row">
-      <div class="stat-card panel">
-        <span class="stat-label">任务总数</span>
-        <b>{{ stats.total }}</b>
-        <em>含已完成</em>
-      </div>
-      <div class="stat-card panel">
-        <span class="stat-label">收题中</span>
-        <b>{{ stats.collecting }}</b>
-        <em>处理人仍在组卷</em>
-      </div>
-      <div class="stat-card panel">
-        <span class="stat-label">待审校</span>
-        <b>{{ stats.reviewing }}</b>
-        <em>各题型均已提交</em>
-      </div>
-      <div class="stat-card panel">
-        <span class="stat-label">待我处理</span>
-        <b>{{ stats.mine }}</b>
-        <em>我负责的题型尚未提交</em>
-      </div>
+    <!-- 状态维度只有这一处入口（原先的统计卡已并入页签）：点页签 = 按该状态过滤，角标 = 条数 -->
+    <div class="tab-bar">
+      <button
+        v-for="tab in TABS"
+        :key="tab.key"
+        class="tab-btn"
+        :class="{ on: tab.key === activeTab }"
+        type="button"
+        @click="activeTab = tab.key"
+      >
+        {{ tab.label }}
+        <!-- 有活等着我干时把角标点亮：一眼就能看出「切到这个身份有事情做」 -->
+        <span class="tab-count" :class="{ 'is-todo': tab.key === 'mine' && tabCounts.mine > 0 }">
+          {{ tabCounts[tab.key] }}
+        </span>
+      </button>
     </div>
 
-    <AppFilterPanel v-model="filters" :rows="FILTER_ROWS" />
+    <AppFilterPanel :rows="filterRowDefs" :model-value="filters" @update:model-value="onFiltersChange" />
 
     <div class="panel">
       <!-- 工具条自带 14/18 的内边距，与下方表格的满幅排布配合（表格要贴着面板边才能横向滚动） -->
@@ -432,7 +541,10 @@ onMounted(async () => {
           </thead>
           <tbody>
             <tr v-if="rows.length === 0">
-              <td colspan="8" class="empty-row">暂无协同组卷任务</td>
+              <!-- 空列表分两种：整个机构一条任务都没有，还是只是当前页签/条件下没有 -->
+              <td colspan="8" class="empty-row">
+                {{ tasks.length === 0 ? '暂无协同组卷任务' : '当前页签与搜索条件下暂无任务' }}
+              </td>
             </tr>
             <template v-else>
               <tr v-for="row in rows" :key="row.id">
@@ -443,7 +555,13 @@ onMounted(async () => {
                 <td>{{ row.requirement.grade }} · {{ row.requirement.subject }} · {{ row.requirement.duration }} 分钟</td>
                 <td>
                   <div class="assign-cell">
-                    <span v-for="member in row.members" :key="member.name" class="tag" :class="member.status === 'submitted' ? 'tag-green' : member.status === 'working' ? 'tag-blue' : 'tag-gray'">
+                    <span
+                      v-for="member in row.members"
+                      :key="member.name"
+                      class="tag"
+                      :class="MEMBER_CLASS[member.status]"
+                      :title="member.reviewNote ? `退回意见：${member.reviewNote}` : undefined"
+                    >
                       {{ member.name }}：{{ member.questionTypes.join('、') || '未分配' }}
                     </span>
                   </div>
@@ -463,9 +581,13 @@ onMounted(async () => {
                   <div class="op-group">
                     <button class="mini-btn" @click="router.push(`/paper/collab/task?id=${row.id}`)">进入组卷</button>
                     <button class="mini-btn" @click="detail = row">进度</button>
-                    <button class="mini-btn" @click="openEdit(row)">要求</button>
-                    <button class="mini-btn" @click="router.push(`/paper/edit?id=${row.paperId}`)">编辑卷面</button>
-                    <button class="mini-btn danger" @click="onDelete(row)">删除</button>
+                    <!-- 「要求 / 删除」只给发起人：改要求会重建成员分工（连带清掉验收痕迹），
+                         删任务更是把别人的活一起删了，两者都不该让处理人点到。
+                         「要求」还要卡在收题中 —— 任务一进验收流程，mock 侧也会拒绝（见 saveCollabTask）。 -->
+                    <button v-if="isOwner(row) && row.status === 'collecting'" class="mini-btn" @click="openEdit(row)">要求</button>
+                    <!-- 新标签页打开：改完卷面还要回这张列表接着处理下一份（见 utils/paper-edit.ts） -->
+                    <a class="mini-btn" :href="paperEditHref(row.paperId)" target="_blank" rel="noopener">编辑卷面</a>
+                    <button v-if="isOwner(row)" class="mini-btn danger" @click="onDelete(row)">删除</button>
                   </div>
                 </td>
               </tr>
@@ -622,7 +744,7 @@ onMounted(async () => {
       <div v-for="member in detail.members" :key="member.name" class="prog-row">
         <div class="prog-top">
           <b>{{ member.name }}</b>
-          <span class="tag" :class="member.status === 'submitted' ? 'tag-green' : member.status === 'working' ? 'tag-blue' : 'tag-gray'">
+          <span class="tag" :class="MEMBER_CLASS[member.status]">
             {{ COLLAB_MEMBER_TEXT[member.status] }}
           </span>
           <i v-if="member.online" class="online-dot" title="在线" />
@@ -635,6 +757,7 @@ onMounted(async () => {
         </div>
         <p class="f-hint">负责题型：{{ member.questionTypes.join('、') }} · 权限：{{ member.perms.join('/') }}</p>
         <p class="f-hint">最近动作：{{ member.lastActiveAt }}</p>
+        <p v-if="member.reviewNote" class="f-hint is-warn">退回意见：{{ member.reviewNote }}</p>
       </div>
 
       <div class="section-title" style="margin-top: 18px">版本记录</div>
@@ -651,13 +774,37 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }
+/* 页签栏用下划线式，与下面卡片式的搜索面板分开 —— 页签是「换个角度看同一批任务」，
+   搜索面板是「收窄这批任务」，两者的分量本来就不该长得一样 */
+.tab-bar {
+  display: flex; align-items: center; gap: 2px;
+  border-bottom: 1.5px solid var(--border);
+  margin-bottom: 14px;
+}
+.tab-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: none; background: transparent;
+  font-family: inherit; font-size: 13.5px; color: var(--ink-2);
+  padding: 9px 14px 10px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1.5px; /* 压住 .tab-bar 的下边框，选中态下划线才与它严丝合缝 */
+  transition: color 0.15s, border-color 0.15s;
+}
+.tab-btn:hover { color: var(--brand-deep); }
+.tab-btn.on { color: var(--brand-deep); font-weight: 700; border-bottom-color: var(--brand); }
+.tab-count {
+  min-width: 18px; height: 17px; padding: 0 5px;
+  border-radius: 999px; background: var(--border); color: var(--ink-2);
+  font-size: 11px; font-weight: 700; line-height: 17px; text-align: center;
+}
+.tab-btn.on .tab-count { background: var(--brand); color: #fff; }
+/* 有活等着我干时把角标点亮：一眼就能看出「切到这个身份有事情做」。
+   选中态由上面那条 `.tab-btn.on .tab-count` 覆盖成实心 —— 它的选择器权重更高（3 个 class vs 2 个），
+   与书写顺序无关，所以不必再补一条 `.tab-btn.on .tab-count.is-todo` */
+.tab-count.is-todo { background: var(--warn-soft); color: var(--warn); }
+
 /* 列表工具条与面板同宽同边距：表格满幅贴边才能横向滚动，所以内边距给在工具条这一层 */
 .list-head { padding: 14px 18px 0; }
-.stat-card { padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
-.stat-label { font-size: 12.5px; color: var(--sub); }
-.stat-card b { font-size: 24px; color: var(--brand-deep); line-height: 1.2; }
-.stat-card em { font-size: 11.5px; color: var(--sub); font-style: normal; }
 
 .assign-cell { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; max-width: 260px; }
 .prog { min-width: 120px; }

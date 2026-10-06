@@ -21,6 +21,13 @@ const loading = ref(false)
 const loginKeyword = ref('')
 const opFilter = reactive<Record<string, string[]>>({ module: [] })
 
+/* AppFilterPanel 回传整份筛选值（覆盖式回写），逐 key 写回这份 reactive 对象本身。
+   不能交给 `v-model`：它会替换掉整个对象，而替换引用不是一次响应式写入 —— 点了 chip
+   页面不会有任何反应（连选中态都不亮）。机构端 CollabView 里有同款说明。 */
+function onOpFiltersChange(next: Record<string, string[]>) {
+  opFilter.module = next.module ?? []
+}
+
 const currentHint = computed(() => TABS.find((tab) => tab.key === activeTab.value)?.hint ?? '')
 
 async function load() {
@@ -141,7 +148,7 @@ onMounted(load)
 
     <!-- 操作日志 -->
     <div v-else-if="activeTab === 'operation'" class="tab-body">
-      <AppFilterPanel v-model="opFilter" :rows="OP_FILTER_ROWS" />
+      <AppFilterPanel :rows="OP_FILTER_ROWS" :model-value="opFilter" @update:model-value="onOpFiltersChange" />
       <div class="data-table-wrap">
         <table class="data-table">
           <thead>

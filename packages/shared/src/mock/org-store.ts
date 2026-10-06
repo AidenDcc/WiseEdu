@@ -4,6 +4,8 @@
  */
 import type {
   AiCheckResult,
+  AiComposeParams,
+  AiComposeTemplate,
   AnalysisQuestionStat,
   AnswerItem,
   AnswerStatus,
@@ -73,10 +75,12 @@ import type {
 import {
   COLLAB_STATUS_TEXT,
   COLLAB_MEMBER_TEXT,
+  EARLIER_YEAR,
   TEACH_KIND_TEXT,
   LECTURE_BLOCK_TEXT,
   SLIDE_LAYOUT_TEXT,
   MISTAKE_REASONS,
+  isEarlierYear,
 } from '../api/models'
 import { getCacheUser } from '../api/auth'
 import { registerMediaSrc, unregisterMediaSrc } from '../utils/media-ref'
@@ -92,7 +96,24 @@ function nowStr(offsetHours = 0): string {
 }
 
 /** 当前登录机构用户（演示固定为 orgadmin；真实场景由 token 解析） */
-export const CURRENT = { id: 101, name: '陈明远', role: 'orgAdmin' as 'orgAdmin' | 'auditor' | 'teacher' }
+export const CURRENT = { id: 101, name: '陈明远', role: 'orgAdmin' as MockRole }
+
+export type MockRole = 'orgAdmin' | 'leader' | 'auditor' | 'teacher'
+
+/**
+ * 切换「当前用户」（演示用身份切换的唯一入口）。
+ *
+ * 为什么必须改这份常量而不是只改登录态：本文件里约 50 处 `owner / actor / createdBy` 都取自
+ * `CURRENT`（PAPER / 协同组卷 / 集体备课 / 审批……），只改前端显示的话，切到组长后新建的任务
+ * 发起人仍然写着机构管理员 —— 演示时一眼就穿帮。
+ *
+ * 只改属性、不换对象：`const` 绑定不能重新赋值，而各处引用的都是同一个对象。
+ */
+export function setMockCurrent(input: { id?: number; name: string; role: MockRole }): void {
+  CURRENT.name = input.name
+  CURRENT.role = input.role
+  if (input.id != null) CURRENT.id = input.id
+}
 
 /** AI 额度（FR-TM-014） */
 export const aiQuota = { used: 412, quota: 1000 }
@@ -2395,7 +2416,14 @@ export const textbookMatrix: TextbookOption[] = [
   },
 ]
 
-/** 知识点树定义（叶子 tag 与题目 knowledge 值保持一致） */
+/**
+ * 知识点树定义。
+ *
+ * 叶子 `tag` 与题目 `knowledge` 值保持一致；**同一棵树里的 tag 不得重复** —— 选中态是按 tag
+ * 判的（见 KnowledgePicker 的 `nodeState`），两个叶子共用一个 tag 时点其中一个会让另一个
+ * 也亮起来，而值是同一个、根本区分不开。要表达「同一知识点的两种说法」就并成一个叶子，
+ * 不要写两行同一个 tag。
+ */
 interface TreeSpec {
   name: string
   tag?: string
@@ -2710,7 +2738,7 @@ const TREE_SPECS: Record<string, TreeSpec[]> = {
       name: '集合与常用逻辑用语',
       children: [
         { name: '集合的概念与表示', tag: '集合' },
-        { name: '集合间的关系与运算', tag: '集合' },
+        { name: '集合间的关系与运算', tag: '集合运算' },
         { name: '充分条件与必要条件', tag: '常用逻辑用语' },
       ],
     },
@@ -2740,14 +2768,14 @@ const TREE_SPECS: Record<string, TreeSpec[]> = {
       name: '数列',
       children: [
         { name: '等差数列', tag: '数列' },
-        { name: '等比数列', tag: '数列' },
+        { name: '等比数列', tag: '等比数列' },
       ],
     },
     {
       name: '立体几何与空间向量',
       children: [
         { name: '空间几何体', tag: '立体几何' },
-        { name: '点线面位置关系', tag: '立体几何' },
+        { name: '点线面位置关系', tag: '点线面位置关系' },
         { name: '空间向量及其应用', tag: '空间向量' },
       ],
     },
@@ -2771,7 +2799,7 @@ const TREE_SPECS: Record<string, TreeSpec[]> = {
     {
       name: '力学',
       children: [
-        { name: '运动的描述', tag: '匀变速直线运动' },
+        { name: '运动的描述', tag: '运动的描述' },
         { name: '匀变速直线运动的研究', tag: '匀变速直线运动' },
         { name: '相互作用与力的平衡', tag: '力的合成' },
         { name: '牛顿运动定律', tag: '牛顿运动定律' },
@@ -3438,7 +3466,9 @@ export function decidePhotoResult(
 
 /* ================= 试卷（FR-PP-001 ~ 016 / 022 ~ 026） ================= */
 
-let paperSeq = 300
+/* 330 而不是 300：种子试卷已手工占用 301~322（含 exam-seeds 的 313~315），
+   从 300 起步的话新建的第一张卷就与种子卷撞 id，保存时改到的是别人的卷子。 */
+let paperSeq = 330
 let sectionSeq = 900
 
 export const PAPER_STATUS_TEXT: Record<string, string> = {
@@ -3508,16 +3538,27 @@ const PAPER_COMPETITION_RULES: Array<[RegExp, string]> = [
   [/英语能力竞赛/, '全国中学生英语能力竞赛'],
 ]
 
+/**
+ * 试卷的地区轮转，**与题目的 `REGIONS[id % len]` 分开**。
+ *
+ * 地区字典铺满 34 个省级行政区后，直接沿用题目那一套会算出很难看的结果：试卷 id 从 301 起，
+ * `301 % 35 = 21`，于是 301~315 这十几份卷整整齐齐落在列表尾部（广西 / 海南 / 西藏 / 青海 /
+ * 宁夏 / 香港…），最常见的江浙沪反而一个都点不到。地区的取值域是「这批卷来自哪些地方」，
+ * 本来就该是教育大省，与题库那份全量轮转不是一回事 —— 与 `PAPER_DIFFICULTIES` 同一种处理。
+ */
+const PAPER_REGIONS = ['全国', '北京', '上海', '江苏', '浙江', '广东', '山东', '湖北', '四川', '湖南', '河南', '河北']
+
 function seedPaperMeta(
   id: number,
   subject: string,
   name: string,
 ): Pick<OrgPaper, 'difficulty' | 'examType' | 'competition' | 'region' | 'source' | 'year' | 'month'> {
-  const { region, competition } = seedQuestionMeta(id, subject)
+  /* 杯赛仍走题干那一套：题目的杯赛只挂理科题，这条规则与地区无关，两处共用一份更不容易漂 */
+  const { competition } = seedQuestionMeta(id, subject)
   return {
     difficulty: PAPER_DIFFICULTIES[id % PAPER_DIFFICULTIES.length],
     examType: competitionExamType(subject, name) ?? PAPER_EXAM_TYPE_RULES.find(([re]) => re.test(name))?.[1] ?? '单元测试',
-    region,
+    region: PAPER_REGIONS[id % PAPER_REGIONS.length],
     competition: PAPER_COMPETITION_RULES.find(([re]) => re.test(name))?.[1] ?? competition,
     source: /真题|中考|高考|分班|竞赛|联赛/.test(name) ? '真题导入' : '手动组卷',
     ...seedPaperYearMonth(id, name),
@@ -3860,6 +3901,10 @@ export function savePaper(input: Partial<OrgPaper> & { name: string; submit?: bo
     sections: input.sections ?? target.sections,
     /* 随卷参考资料：显式传 `[]` 表示清空，不传则保留原值（白名单式 Object.assign 会丢掉没列出的字段） */
     attachments: input.attachments ?? target.attachments,
+    /* 卷面附加区块（表格 / 四线格 / 横线）同上：`[]` 表示这次把附加块全删了 */
+    extras: input.extras ?? target.extras,
+    /* 注意事项：`[]` 是「老师把这一块删了」，与 `undefined`（没配过 → 印默认稿）不是一回事 */
+    notices: input.notices ?? target.notices,
     updatedAt: nowStr(),
   })
   if (!isEdit) {
@@ -3938,44 +3983,128 @@ export function reviewPaper(id: number, pass: boolean, opinion: string): OrgPape
   item.status = pass ? 'approved' : 'rejected'
   item.reviewOpinion = opinion
   item.updatedAt = nowStr()
+  /* 协同产出的试卷审核完要把结果写回任务，否则同一张卷会在「试卷审核中心」显示已通过、
+     在「协同组卷」里永远停在「已送审」。必须判 `task` 存在 —— 这是通用审核入口，
+     普通试卷（不属任何协同任务）也走这里。 */
+  const task = collabTasks.find((row) => row.paperId === item.id)
+  if (task) task.status = pass ? 'done' : 'rejected'
   pushMessage({
     tab: 'todo',
     title: `试卷审核${pass ? '通过' : '驳回'}：《${item.name}》`,
     summary: pass ? '已入机构公开试卷库' : `驳回意见：${opinion}`,
     module: '试卷审核',
-    link: '/paper/list',
+    link: task ? `/paper/collab/task?id=${task.id}` : '/paper/list',
   })
   return item
 }
 
-/** AI 智能组卷（FR-PP-008/009）：按题型结构抽题；产出试卷存「我的文件」所选文件夹 */
-export function aiComposePaper(input: {
-  name: string
-  subject: string
-  grade: string
-  structure: Array<{ type: string; count: number; score: number }>
-  folderId?: number
-}): { paper: OrgPaper; aiPicked: number } {
+/* ================= 智能组卷（FR-PP-008/009） ================= */
+
+/**
+ * 抽题的加权分。知识点那 1000 分**大于其余全部之和（450）**，因此它的效果等价于硬条件：
+ * 命中知识点的题一律排在未命中的之前；而题量不足时低分题会自动补上，不会因为
+ * 「这个知识点只有 3 道题、用户要 8 道」就出一张残卷。
+ *
+ * 其余四维是**优先**而不是过滤 —— 全都做硬过滤的话，选「困难 + 2022 年」基本必然空卷，
+ * 而产品原话就是「优先地区」「优先年份」。
+ */
+const AI_KNOWLEDGE_WEIGHT = 1000
+const AI_GRADE_WEIGHT = 200
+const AI_DIFFICULTY_WEIGHT = 120
+const AI_EXAM_TYPE_WEIGHT = 60
+const AI_REGION_WEIGHT = 40
+const AI_YEAR_WEIGHT = 30
+
+/**
+ * 题目的年份 = **用过它的那些已入库试卷**的年份。
+ *
+ * 题目自己没有年份字段（`OrgQuestion` 只有 `updatedAt`，而种子题的 updatedAt 全是
+ * `nowStr(-N)` 即最近十几天 —— 拿它当「年份」的话四档里只有今年能命中，这个控件等于没有）。
+ * 年份本来就是**试卷**的属性，反过来查才是「优先用 2025 年那批真题里的题」这个真实诉求。
+ * 没被任何试卷用过的题算不出年份，只是拿不到这 30 分，不影响其余维度。
+ */
+function questionYears(): Map<number, string[]> {
+  const map = new Map<number, string[]>()
+  papers.forEach((paper) => {
+    if (paper.status !== 'approved' || !paper.year) return
+    paper.sections.forEach((section) =>
+      section.questions.forEach((item) => {
+        const years = map.get(item.questionId) ?? []
+        years.push(paper.year!)
+        map.set(item.questionId, years)
+      }),
+    )
+  })
+  return map
+}
+
+/** 单题分值：老师只配题量，分值由题型推一个默认值（与 PAPER_DIFFICULTIES 同一类做法） */
+const AI_TYPE_SCORES: Array<[RegExp, number]> = [
+  [/多选/, 4],
+  [/单选|选择/, 3],
+  [/判断/, 2],
+  [/填空/, 4],
+  [/解答|计算|证明|应用|作文|改错/, 10],
+]
+
+function aiQuestionScore(type: string): number {
+  return AI_TYPE_SCORES.find(([re]) => re.test(type))?.[1] ?? 5
+}
+
+function aiWeightOf(question: OrgQuestion, input: AiComposeParams, years: Map<number, string[]>): number {
+  let weight = 0
+  if (question.knowledge.some((tag) => input.knowledge.includes(tag))) weight += AI_KNOWLEDGE_WEIGHT
+  if (question.grade === input.grade) weight += AI_GRADE_WEIGHT
+  if (input.difficulty && question.difficulty === input.difficulty) weight += AI_DIFFICULTY_WEIGHT
+  if (input.examType && question.examType === input.examType) weight += AI_EXAM_TYPE_WEIGHT
+  /* 「全国」是「不分地区」的哨兵：不加分，否则它会去偏袒 region 恰好写着「全国」的题 */
+  if (input.region && input.region !== '全国' && question.region === input.region) weight += AI_REGION_WEIGHT
+  if (input.year) {
+    const owned = years.get(question.id) ?? []
+    const hit = input.year === EARLIER_YEAR ? owned.some((year) => isEarlierYear(year)) : owned.includes(input.year)
+    if (hit) weight += AI_YEAR_WEIGHT
+  }
+  return weight
+}
+
+/** 智能组卷：按「知识点 + 优先项」打分抽题；产出试卷存「我的文件」所选文件夹 */
+export function aiComposePaper(input: AiComposeParams): { paper: OrgPaper; aiPicked: number } {
   if (input.folderId == null) throw new Error('请先选择试卷在「我的文件」中的存储位置')
+  if (!input.knowledge.length) throw new Error('请先从左侧知识点树中选择至少一个知识点')
   consumeQuota(1)
+  const approved = questions.filter((q) => q.status === 'approved' && q.subject === input.subject)
+  const years = questionYears()
+  /* 一张卷里不重复用同一道题：两个大题撞了同一题型时，第二段要跳过第一段已选的 */
+  const used = new Set<number>()
   let aiPicked = 0
   const sections: PaperSection[] = input.structure.map((row, i) => {
-    /* 优先同学科同年级的已入库题目；该学科题量不足时回退到全库同学科，再回退到仅按题型 */
-    const base = questions.filter((q) => q.type === row.type && q.status === 'approved')
-    const sameSubject = base.filter((q) => q.subject === input.subject)
-    const pool = sameSubject.filter((q) => q.grade === input.grade).length >= row.count
-      ? sameSubject.filter((q) => q.grade === input.grade)
-      : sameSubject.length >= row.count
-        ? sameSubject
-        : base
+    const pool = approved
+      .filter((q) => q.type === row.type && !used.has(q.id))
+      .map((q) => ({ q, weight: aiWeightOf(q, input, years) }))
+      /* 同分按 id 排：不加这一层的话 Array.sort 的结果取决于原数组顺序，同一套参数
+         两次组卷可能抽出不同的题，而「我的模板」正是靠同一套参数复现同一批题 */
+      .sort((a, b) => b.weight - a.weight || a.q.id - b.q.id)
     const picked: Array<{ questionId: number; score: number }> = []
     for (let j = 0; j < row.count; j += 1) {
-      const candidate = pool[(j + i) % Math.max(pool.length, 1)]
-      if (candidate) picked.push({ questionId: candidate.id, score: row.score })
-      else aiPicked += 1
+      const candidate = pool[j]
+      if (!candidate) {
+        aiPicked += 1
+        continue
+      }
+      used.add(candidate.q.id)
+      picked.push({ questionId: candidate.q.id, score: aiQuestionScore(row.type) })
     }
     return { id: ++sectionSeq, title: `${'一二三四五六七八'[i]}、${row.type}`, questions: picked }
   })
+  /* 显式选过的维度写进卷本身（试卷库按这些维度筛选，新卷不该落一个与用户所选相矛盾的随机值）。
+     **不能直接传 `examType: input.examType || undefined`**：seedPaper 是把入参 spread 在
+     seedPaperMeta 的推导值之上的，一个值为 undefined 的自有属性照样会覆盖，反而把推导值抹掉。
+     年份要另外判：`EARLIER_YEAR` 是档位哨兵不是年份，落到卷上会变成一个筛不到的假值。 */
+  const meta: Partial<OrgPaper> = {}
+  if (input.difficulty) meta.difficulty = input.difficulty
+  if (input.examType) meta.examType = input.examType
+  if (input.region) meta.region = input.region
+  if (/^\d{4}$/.test(input.year)) meta.year = input.year
   const paper = seedPaper({
     id: ++paperSeq,
     name: input.name,
@@ -3986,10 +4115,129 @@ export function aiComposePaper(input: {
     owner: CURRENT.name,
     source: 'AI 组卷',
     folderId: input.folderId,
+    ...meta,
   })
   papers.unshift(paper)
   linkPaperFile(paper)
+  recordAiTemplate(input)
   return { paper, aiPicked }
+}
+
+/* ===== 「我的模板」：组卷成功后自动记一条，不是用户手动收藏 ===== */
+
+let aiTemplateSeq = 0
+
+/**
+ * 演示用的三条历史模板。
+ *
+ * 两个「必须对上」的地方，对不上就是一眼假：
+ * - `knowledge` 必须是**数学树里真实存在的叶子 tag**（见 TREE_SPECS 的数学树）。tag 对不上树，
+ *   点「复用」套回去时左树一个都勾不上，用户看到的是「模板写着 3 个知识点、树上全没亮」。
+ * - `examType` / `difficulty` / `region` 都取字典里真实存在的值，理由同上。
+ */
+const AI_TEMPLATE_SEEDS: Array<Omit<AiComposeTemplate, 'id' | 'owner' | 'updatedAt'>> = [
+  {
+    name: '高一数学 · 三角函数随堂测',
+    subject: '数学',
+    grade: '高一',
+    knowledge: ['三角函数', '三角恒等变换'],
+    examType: '随堂练习',
+    difficulty: '中等',
+    region: '全国',
+    year: EARLIER_YEAR,
+    structure: [
+      { type: '单选', count: 8 },
+      { type: '填空', count: 4 },
+      { type: '解答', count: 2 },
+    ],
+    useCount: 6,
+  },
+  {
+    name: '高一数学 · 函数与导数单元测',
+    subject: '数学',
+    grade: '高一',
+    knowledge: ['函数概念', '函数单调性', '函数与导数'],
+    examType: '单元测试',
+    difficulty: '较难',
+    region: '江苏',
+    year: '2025',
+    structure: [
+      { type: '单选', count: 10 },
+      { type: '填空', count: 5 },
+      { type: '解答', count: 3 },
+    ],
+    useCount: 3,
+  },
+  {
+    name: '高一数学 · 数列专题训练',
+    subject: '数学',
+    grade: '高一',
+    knowledge: ['数列'],
+    examType: '专题训练',
+    difficulty: '中等',
+    region: '浙江',
+    year: '2026',
+    structure: [
+      { type: '单选', count: 6 },
+      { type: '解答', count: 4 },
+    ],
+    useCount: 1,
+  },
+]
+
+export const aiComposeTemplates: AiComposeTemplate[] = AI_TEMPLATE_SEEDS.map((seed, index) => ({
+  ...seed,
+  id: ++aiTemplateSeq,
+  owner: CURRENT.name,
+  updatedAt: nowStr(-(index + 1) * 30),
+}))
+
+/** 参数指纹：只比「决定抽哪些题」的字段。name 不算 —— 改个卷名仍是同一套参数，不该记成两条 */
+function aiTemplateKey(template: Omit<AiComposeTemplate, 'id' | 'owner' | 'useCount' | 'updatedAt'>): string {
+  return JSON.stringify([
+    template.subject,
+    template.grade,
+    [...template.knowledge].sort(),
+    template.examType,
+    template.difficulty,
+    template.region,
+    template.year,
+    template.structure,
+  ])
+}
+
+/**
+ * 记一次组卷：同一套参数已有记录就 `useCount + 1`，否则新增一条。
+ *
+ * 靠参数指纹而不是让前端传 templateId：用户「手动凑出和某个模板一样的参数」与
+ * 「点了复用」在语义上没有区别 —— 都是这套参数又被用了一次。模板名保持不动，
+ * 它是「这套参数」的名字，不是某一次的卷名。
+ */
+function recordAiTemplate(input: AiComposeParams): void {
+  const { folderId: _folderId, ...params } = input
+  const key = aiTemplateKey(params)
+  const existing = aiComposeTemplates.find((row) => row.owner === CURRENT.name && aiTemplateKey(row) === key)
+  if (existing) {
+    existing.useCount += 1
+    existing.updatedAt = nowStr()
+    return
+  }
+  aiComposeTemplates.unshift({ ...params, id: ++aiTemplateSeq, owner: CURRENT.name, useCount: 1, updatedAt: nowStr() })
+}
+
+/** 我的模板：只返回当前用户自己的，最近用过的排前面 */
+export function listAiComposeTemplates(): AiComposeTemplate[] {
+  return aiComposeTemplates
+    .filter((row) => row.owner === CURRENT.name)
+    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+}
+
+export function deleteAiComposeTemplate(id: number): void {
+  const index = aiComposeTemplates.findIndex((row) => row.id === id)
+  if (index < 0) throw new Error('模板不存在')
+  /* 不是自己的不给删：列表本身就只展示自己的，走到这个分支说明 id 是猜的 */
+  if (aiComposeTemplates[index].owner !== CURRENT.name) throw new Error('只能删除自己的模板')
+  aiComposeTemplates.splice(index, 1)
 }
 
 /** 换一题（FR-PP-009）：同知识点/题型/难度替换 */
@@ -4104,6 +4352,7 @@ function collabMemberOf(input: Partial<CollabMember> & { name: string }, require
     status: input.status ?? 'invited',
     online: input.online ?? false,
     lastActiveAt: input.lastActiveAt ?? nowStr(-2),
+    ...(input.reviewNote ? { reviewNote: input.reviewNote } : {}),
   }
 }
 
@@ -4147,6 +4396,18 @@ function paperOfTask(task: OrgCollabTask): OrgPaper {
   return paper
 }
 
+/**
+ * 「卷面还能不能动」的统一判据：只有收题中 / 待验收两个阶段可以改卷面。
+ *
+ * 为什么必须拦：入卷、抽题、撤销版本这几处的老实现会顺手把成员状态打回 `working`，
+ * 而任务状态保持不变。到了待送审之后再来一下，就会出现「任务已送审、成员却在组卷中」
+ * 这种自相矛盾的状态，组长前面点头验收过的内容也被悄悄改掉了。
+ */
+function assertPaperEditable(task: OrgCollabTask, action: string): void {
+  if (task.status === 'collecting' || task.status === 'reviewing') return
+  throw new Error(`任务已「${COLLAB_STATUS_TEXT[task.status]}」，不能再${action}`)
+}
+
 /** 某个成员负责的题型（用于入卷时的权限判定；未匹配到成员时视为「不在任务中」） */
 export function collabAllowedTypes(taskId: number, memberName: string): string[] {
   const member = taskOf(taskId).members.find((row) => row.name === memberName)
@@ -4154,13 +4415,87 @@ export function collabAllowedTypes(taskId: number, memberName: string): string[]
 }
 
 export const collabTasks: OrgCollabTask[] = [
+  /* 603：已完成（演示终态：审核通过后的协同卷）。放在最前面 —— 任务列表按数组顺序展示，
+     演示时先看到一条走完的，才知道下面两条是「还在走」的。 */
+  (() => {
+    const requirement = collabRequirementOf({
+      subject: '数学',
+      grade: '高一',
+      duration: 90,
+      structure: [
+        { type: '单选', count: 3, score: 5 },
+        { type: '填空', count: 2, score: 5 },
+      ],
+      knowledge: ['集合', '函数与导数'],
+      remark: '单元测评，覆盖面以第一章为主。',
+    })
+    const paper = seedPaper({
+      id: 322,
+      name: '高一数学第一章单元测评卷（协同）',
+      status: 'approved',
+      owner: '王静',
+      source: '协同组卷',
+      sections: [
+        { id: ++sectionSeq, title: '一、单项选择题', questions: [{ questionId: 9001, score: 5 }, { questionId: 9009, score: 5 }, { questionId: 9010, score: 5 }] },
+        { id: ++sectionSeq, title: '二、填空', questions: [{ questionId: 9005, score: 5 }, { questionId: 9012, score: 5 }] },
+      ],
+    })
+    papers.unshift(paper)
+    const task: OrgCollabTask = {
+      id: 603,
+      paperId: paper.id,
+      name: paper.name,
+      requirement,
+      members: [
+        collabMemberOf({ name: '李文博', questionTypes: ['单选'], perms: ['选题', '改分值'], status: 'accepted', online: true, lastActiveAt: nowStr(-30) }, requirement),
+        collabMemberOf({ name: '孙悦', questionTypes: ['填空'], perms: ['选题', '改分值'], status: 'accepted', lastActiveAt: nowStr(-28) }, requirement),
+      ],
+      versions: [],
+      status: 'done',
+      createdAt: nowStr(-52),
+      owner: '王静',
+    }
+    task.versions = [
+      {
+        id: ++versionSeq,
+        no: 1,
+        time: nowStr(-52),
+        actor: '王静',
+        summary: '创建协同组卷任务，按题型分工（单选 3 / 填空 2）',
+        questionCount: paperQuestionCount(paper),
+        totalScore: paperTotalScore(paper),
+        sections: JSON.parse(JSON.stringify(paper.sections)) as PaperSection[],
+      },
+      {
+        id: ++versionSeq,
+        no: 2,
+        time: nowStr(-40),
+        actor: '王静',
+        summary: '验收通过，提交试卷审核',
+        questionCount: paperQuestionCount(paper),
+        totalScore: paperTotalScore(paper),
+        sections: JSON.parse(JSON.stringify(paper.sections)) as PaperSection[],
+      },
+      {
+        id: ++versionSeq,
+        no: 3,
+        time: nowStr(-36),
+        actor: '沈丽华',
+        summary: '审核通过，已入机构公开试卷库',
+        questionCount: paperQuestionCount(paper),
+        totalScore: paperTotalScore(paper),
+        sections: JSON.parse(JSON.stringify(paper.sections)) as PaperSection[],
+      },
+    ]
+    return task
+  })(),
+  /* 601：收题中 —— 留给「参与组卷老师」演示：进任务页筛选题目、加入试卷、提交我的部分 */
   (() => {
     const requirement = collabRequirementOf({
       subject: '数学',
       grade: '高一',
       duration: 120,
       structure: [
-        { type: '单选', count: 8, score: 5 },
         { type: '填空', count: 4, score: 5 },
         { type: '解答', count: 3, score: 12 },
       ],
@@ -4171,10 +4506,10 @@ export const collabTasks: OrgCollabTask[] = [
       id: 320,
       name: '2026 级高一数学第三次月考卷（协同）',
       status: 'draft',
-      owner: '陈明远',
+      owner: '王静',
+      source: '协同组卷',
       sections: [
-        { id: ++sectionSeq, title: '一、单项选择题', questions: [{ questionId: 9001, score: 5 }, { questionId: 9004, score: 5 }] },
-        { id: ++sectionSeq, title: '二、填空', questions: [{ questionId: 9002, score: 5 }] },
+        { id: ++sectionSeq, title: '二、填空', questions: [{ questionId: 9013, score: 5 }, { questionId: 9020, score: 5 }] },
         { id: ++sectionSeq, title: '三、解答', questions: [] },
       ],
     })
@@ -4185,23 +4520,21 @@ export const collabTasks: OrgCollabTask[] = [
       name: paper.name,
       requirement,
       members: [
-        collabMemberOf({ name: '陈明远', questionTypes: ['单选'], perms: ['选题', '改分值', '编辑卷头'], status: 'working', online: true }, requirement),
-        collabMemberOf({ name: '李文博', questionTypes: ['填空'], perms: ['选题', '改分值'], status: 'working', online: true }, requirement),
-        collabMemberOf({ name: '沈丽华', questionTypes: ['解答'], perms: ['选题'], status: 'submitted', lastActiveAt: nowStr(-20) }, requirement),
-        collabMemberOf({ name: '王静', questionTypes: ['多选'], perms: ['选题'], status: 'invited', lastActiveAt: nowStr(-40) }, requirement),
+        collabMemberOf({ name: '李文博', questionTypes: ['填空'], perms: ['选题', '改分值'], status: 'working', online: true, lastActiveAt: nowStr(-6) }, requirement),
+        collabMemberOf({ name: '孙悦', questionTypes: ['解答'], perms: ['选题', '改分值'], status: 'working', lastActiveAt: nowStr(-15) }, requirement),
       ],
       versions: [],
       status: 'collecting',
       createdAt: nowStr(-50),
-      owner: '陈明远',
+      owner: '王静',
     }
     task.versions = [
       {
         id: ++versionSeq,
         no: 1,
         time: nowStr(-50),
-        actor: '陈明远',
-        summary: '创建协同组卷任务，按题型分工（单选 8 / 填空 4 / 解答 3）',
+        actor: '王静',
+        summary: '创建协同组卷任务，按题型分工（填空 4 / 解答 3）',
         questionCount: paperQuestionCount(paper),
         totalScore: paperTotalScore(paper),
         sections: JSON.parse(JSON.stringify(paper.sections)) as PaperSection[],
@@ -4209,19 +4542,9 @@ export const collabTasks: OrgCollabTask[] = [
       {
         id: ++versionSeq,
         no: 2,
-        time: nowStr(-30),
-        actor: '陈明远',
-        summary: '加入 2 道单项选择题（第 1、3 题）',
-        questionCount: paperQuestionCount(paper),
-        totalScore: paperTotalScore(paper),
-        sections: JSON.parse(JSON.stringify(paper.sections)) as PaperSection[],
-      },
-      {
-        id: ++versionSeq,
-        no: 3,
         time: nowStr(-20),
-        actor: '沈丽华',
-        summary: '提交 1 道解答并调整模块分值',
+        actor: '李文博',
+        summary: '李文博 加入 2 道填空题',
         questionCount: paperQuestionCount(paper),
         totalScore: paperTotalScore(paper),
         sections: JSON.parse(JSON.stringify(paper.sections)) as PaperSection[],
@@ -4229,25 +4552,46 @@ export const collabTasks: OrgCollabTask[] = [
     ]
     return task
   })(),
+  /* 602：待验收 —— 留给「年级学科组长」演示：逐位验收通过 → 提交审核（全员已提交，见 member.status） */
   (() => {
     const requirement = collabRequirementOf({
-      subject: '语文',
+      subject: '数学',
       grade: '高一',
-      duration: 150,
+      duration: 120,
       structure: [
-        { type: '单选', count: 6, score: 3 },
-        { type: '解答', count: 4, score: 8 },
+        { type: '填空', count: 4, score: 5 },
+        { type: '解答', count: 3, score: 12 },
       ],
-      knowledge: ['现代文阅读', '古诗文默写'],
-      remark: '现代文阅读请选用 2025 年后发表的文章；文言文选自《史记》。',
+      knowledge: ['立体几何', '空间向量', '集合'],
+      remark: '期中前模拟：填空控制在 4 题，解答须覆盖立体几何与数列各一题。',
     })
     const paper = seedPaper({
       id: 321,
-      name: '高一语文期末联合命题卷',
-      subject: '语文',
+      name: '高一年级数学期中考前模拟卷（协同）',
       status: 'draft',
-      owner: '沈丽华',
-      sections: [{ id: ++sectionSeq, title: '一、单项选择题', questions: [] }],
+      owner: '王静',
+      source: '协同组卷',
+      sections: [
+        {
+          id: ++sectionSeq,
+          title: '二、填空',
+          questions: [
+            { questionId: 9005, score: 5 },
+            { questionId: 9008, score: 5 },
+            { questionId: 9012, score: 5 },
+            { questionId: 9022, score: 5 },
+          ],
+        },
+        {
+          id: ++sectionSeq,
+          title: '三、解答',
+          questions: [
+            { questionId: 9003, score: 12 },
+            { questionId: 9007, score: 12 },
+            { questionId: 9014, score: 12 },
+          ],
+        },
+      ],
     })
     papers.unshift(paper)
     const task: OrgCollabTask = {
@@ -4256,23 +4600,43 @@ export const collabTasks: OrgCollabTask[] = [
       name: paper.name,
       requirement,
       members: [
-        collabMemberOf({ name: '沈丽华', questionTypes: ['单选'], perms: ['选题', '改分值', '编辑卷头'], status: 'working', online: true }, requirement),
-        collabMemberOf({ name: '孙悦', questionTypes: ['解答'], perms: ['选题', '改分值'], status: 'working' }, requirement),
+        collabMemberOf({ name: '李文博', questionTypes: ['填空'], perms: ['选题', '改分值'], status: 'submitted', online: true, lastActiveAt: nowStr(-8) }, requirement),
+        collabMemberOf({ name: '孙悦', questionTypes: ['解答'], perms: ['选题', '改分值'], status: 'submitted', lastActiveAt: nowStr(-4) }, requirement),
       ],
       versions: [],
-      status: 'collecting',
-      createdAt: nowStr(-8),
-      owner: '沈丽华',
+      status: 'reviewing',
+      createdAt: nowStr(-30),
+      owner: '王静',
     }
     task.versions = [
       {
         id: ++versionSeq,
         no: 1,
+        time: nowStr(-30),
+        actor: '王静',
+        summary: '创建协同组卷任务，按题型分工（填空 4 / 解答 3）',
+        questionCount: paperQuestionCount(paper),
+        totalScore: paperTotalScore(paper),
+        sections: JSON.parse(JSON.stringify(paper.sections)) as PaperSection[],
+      },
+      {
+        id: ++versionSeq,
+        no: 2,
         time: nowStr(-8),
-        actor: '沈丽华',
-        summary: '创建协同组卷任务，邀请孙悦负责解答',
-        questionCount: 0,
-        totalScore: 0,
+        actor: '李文博',
+        summary: '李文博 提交了负责的题型',
+        questionCount: paperQuestionCount(paper),
+        totalScore: paperTotalScore(paper),
+        sections: JSON.parse(JSON.stringify(paper.sections)) as PaperSection[],
+      },
+      {
+        id: ++versionSeq,
+        no: 3,
+        time: nowStr(-4),
+        actor: '孙悦',
+        summary: '孙悦 提交了负责的题型',
+        questionCount: paperQuestionCount(paper),
+        totalScore: paperTotalScore(paper),
         sections: JSON.parse(JSON.stringify(paper.sections)) as PaperSection[],
       },
     ]
@@ -4370,6 +4734,11 @@ export function saveCollabTask(input: {
     return { task: created, paper }
   }
 
+  /* 只有收题中还能改要求与分工：到了待验收之后再改题型结构，等于把组长刚验收过的那份东西
+     换成另一份（成员是整批重建的，`reviewNote` 之类痕迹也带不过来），验收就白做了 */
+  if (task.status !== 'collecting') {
+    throw new Error(`任务已「${COLLAB_STATUS_TEXT[task.status]}」，如需调整请先让发起人退回修改`)
+  }
   const paper = paperOfTask(task)
   Object.assign(task, {
     name: input.name.trim(),
@@ -4442,6 +4811,7 @@ export function collabAddQuestions(input: {
   const member = task.members.find((row) => row.name === input.memberName)
   if (!member) throw new Error('当前用户不在该任务的处理人名单中')
   if (member.perms.includes('只读') && member.perms.length === 1) throw new Error('该任务对你是只读权限，无法加入题目')
+  assertPaperEditable(task, '加入题目')
 
   const inPaper = new Set(paper.sections.flatMap((section) => section.questions.map((row) => row.questionId)))
   let added = 0
@@ -4479,6 +4849,7 @@ export function collabRemoveQuestion(input: { taskId: number; memberName: string
   if (!member.questionTypes.includes(question.type)) {
     throw new Error(`「${question.type}」由其他成员负责，你无权移除`)
   }
+  assertPaperEditable(task, '移除题目')
   let removed = false
   paper.sections.forEach((section) => {
     const index = section.questions.findIndex((row) => row.questionId === input.questionId)
@@ -4518,6 +4889,7 @@ export function collabAiCompose(input: {
   if (!member.questionTypes.includes(input.type)) {
     throw new Error(`你只负责「${member.questionTypes.join('、')}」，不能为「${input.type}」抽题`)
   }
+  assertPaperEditable(task, '用 AI 抽题')
   const wanted = task.requirement.structure.find((row) => row.type === input.type)
   if (!wanted) throw new Error('试卷题型要求中没有该题型')
 
@@ -4615,9 +4987,18 @@ export function collabSubmitMember(input: { taskId: number; memberName: string }
   }, 0)
   const quota = member.quota || 1
   if (done < quota) throw new Error(`还差 ${quota - done} 道题未完成（已交 ${done}/${quota}）`)
+  /* 只有收题中 / 待验收能提交。到了待送审（全员已验收）之后，谁的重新提交都会让
+     「组长已验收」与「成员又改了」并存，审核员审的是哪一版说不清 —— 要改先让组长退回。
+     口径与 collabReopenMember 一致。 */
+  if (task.status !== 'collecting' && task.status !== 'reviewing') {
+    throw new Error(`任务已「${COLLAB_STATUS_TEXT[task.status]}」，请让发起人先退回修改`)
+  }
   member.status = 'submitted'
+  /* 重新提交即视为已按整改意见改过 —— 意见留着会让组长以为还没改 */
+  delete member.reviewNote
   member.lastActiveAt = nowStr()
-  if (task.members.every((row) => row.status === 'submitted')) task.status = 'reviewing'
+  /* `accepted` 也算已交：组长可能已经验收了先交的那几位，不能因为人家验收过就卡住流程 */
+  if (task.members.every((row) => row.status === 'submitted' || row.status === 'accepted')) task.status = 'reviewing'
   task.versions.push(snapVersion(paper, input.memberName, `${input.memberName} 提交了负责的题型`))
   pushMessage({
     tab: 'collab',
@@ -4629,15 +5010,140 @@ export function collabSubmitMember(input: { taskId: number; memberName: string }
   return task
 }
 
-/** 把成员状态回退为「组卷中」（用于撤销提交 / 继续修改） */
+/**
+ * 把成员状态回退为「组卷中」（用于成员自己撤销提交 / 继续修改）。
+ *
+ * 只有收题中 / 待验收能撤销：到了待送审、已送审、已完成之后往回撤，会让「组长已提交审核」
+ * 与「还有人在改卷面」并存 —— 审核员审的是哪一版就说不清了。要改只能走组长的「退回修改」。
+ */
 export function collabReopenMember(input: { taskId: number; memberName: string }): OrgCollabTask {
   const task = taskOf(input.taskId)
   const member = task.members.find((row) => row.name === input.memberName)
   if (!member) throw new Error('当前用户不在该任务的处理人名单中')
+  if (task.status !== 'collecting' && task.status !== 'reviewing') {
+    throw new Error(`任务已「${COLLAB_STATUS_TEXT[task.status]}」，请让发起人先退回修改`)
+  }
   member.status = 'working'
   member.lastActiveAt = nowStr()
   if (task.status !== 'collecting') task.status = 'collecting'
   return task
+}
+
+/* ---------------- 收尾：逐人验收 → 提交审核 → 审核结果回流 ----------------
+   这三步的权限判据是「当前身份 === task.owner」，由前端把关；mock 不校验调用者是谁
+   （与其余协同接口同一口径：演示环境没有真实登录态可依赖）。
+*/
+
+/**
+ * 组长验收通过某位老师的题型；全部验收完 → 任务转「待送审」。
+ *
+ * 收题中也能验收（先交的先验）：某位老师被退回整改时任务会回到收题中，此时另一位已提交的
+ * 成果仍然可以照常验收，不必等返工的那位改完。放在待送审之后则一律拒绝 —— 那是审核流程的事。
+ */
+export function collabAcceptMember(input: { taskId: number; memberName: string }): OrgCollabTask {
+  const task = taskOf(input.taskId)
+  const paper = paperOfTask(task)
+  if (task.status !== 'reviewing' && task.status !== 'collecting') {
+    throw new Error(`任务当前是「${COLLAB_STATUS_TEXT[task.status]}」，没有待验收的内容`)
+  }
+  const member = task.members.find((row) => row.name === input.memberName)
+  if (!member) throw new Error('该成员不在任务的处理人名单中')
+  if (member.status !== 'submitted') throw new Error(`${member.name} 还没提交，无法验收`)
+  member.status = 'accepted'
+  delete member.reviewNote
+  member.lastActiveAt = nowStr()
+  if (task.members.every((row) => row.status === 'accepted')) task.status = 'ready'
+  task.versions.push(snapVersion(paper, CURRENT.name, `验收通过 ${member.name} 负责的题型`))
+  return task
+}
+
+/** 组长退回整改某位老师的题型：意见必填，成员回「组卷中」，任务退回「收题中」 */
+export function collabRejectMember(input: { taskId: number; memberName: string; opinion: string }): OrgCollabTask {
+  const task = taskOf(input.taskId)
+  const paper = paperOfTask(task)
+  const opinion = input.opinion.trim()
+  if (opinion.length < 5) throw new Error('退回意见必填（5-200 字）')
+  if (task.status !== 'reviewing' && task.status !== 'collecting') {
+    throw new Error(`任务当前是「${COLLAB_STATUS_TEXT[task.status]}」，不能退回整改`)
+  }
+  const member = task.members.find((row) => row.name === input.memberName)
+  if (!member) throw new Error('该成员不在任务的处理人名单中')
+  /* 只能退回「已提交」的那一份：还在组卷中的草稿没什么可退的，他本来就在改 */
+  if (member.status !== 'submitted') throw new Error(`${member.name} 还没有提交，无法退回整改`)
+  member.status = 'working'
+  member.reviewNote = opinion
+  member.lastActiveAt = nowStr()
+  /* 退回任意一人，任务就回到收题中：其余已验收的人保持 accepted，不必跟着重来 */
+  task.status = 'collecting'
+  task.versions.push(snapVersion(paper, CURRENT.name, `退回 ${member.name} 整改`, opinion))
+  pushMessage({
+    tab: 'collab',
+    title: `《${task.name}》中有内容被退回整改`,
+    summary: `${member.name}：${opinion}`,
+    module: '协同组卷',
+    link: `/paper/collab/task?id=${task.id}`,
+  })
+  return task
+}
+
+/**
+ * 组长提交审核：任务整卷转入试卷审核中心（`PaperStatus.pending`）。
+ *
+ * 复用试卷自身的审核状态而不是给任务另建一套 —— 审核中心、试卷库读的都是 `papers` 里的
+ * 同一个 `status`，协同任务再存一份「已审核 / 已通过」必然跟它打架。
+ */
+export function collabSubmitReview(input: { taskId: number }): { task: OrgCollabTask; paper: OrgPaper } {
+  const task = taskOf(input.taskId)
+  const paper = paperOfTask(task)
+  if (task.status !== 'ready') throw new Error(`任务当前是「${COLLAB_STATUS_TEXT[task.status]}」，还不能提交审核`)
+  const total = paper.sections.reduce((sum, section) => sum + section.questions.length, 0)
+  if (!total) throw new Error('试卷还没有题目，不能提交审核')
+  const bad = paper.sections.some((section) =>
+    section.questions.some((row) => !(Number(row.score) >= 0.5 && Number(row.score) <= 100)),
+  )
+  if (bad) throw new Error('单题分值须在 0.5 ~ 100 之间')
+  paper.status = 'pending'
+  delete paper.reviewOpinion
+  paper.updatedAt = nowStr()
+  task.status = 'submitted'
+  task.versions.push(snapVersion(paper, CURRENT.name, '组长验收完成，提交试卷审核'))
+  pushMessage({
+    tab: 'review',
+    title: `协同组卷《${task.name}》已提交审核`,
+    summary: `共 ${total} 题 · 发起人 ${task.owner}`,
+    module: '试卷审核',
+    link: '/paper/review',
+  })
+  return { task, paper }
+}
+
+/** 送审后撤回（审核员还没处理时）：试卷回草稿，任务回「待送审」 */
+export function collabWithdrawReview(input: { taskId: number }): { task: OrgCollabTask; paper: OrgPaper } {
+  const task = taskOf(input.taskId)
+  const paper = paperOfTask(task)
+  if (task.status !== 'submitted') throw new Error('任务不在「已送审」状态，无法撤回')
+  if (paper.status !== 'pending') throw new Error('审核已出结果，不能撤回')
+  paper.status = 'draft'
+  paper.updatedAt = nowStr()
+  task.status = 'ready'
+  task.versions.push(snapVersion(paper, CURRENT.name, '撤回审核，继续修订'))
+  return { task, paper }
+}
+
+/** 审核被驳回后组长点「退回修改」：试卷回草稿，全员回到组卷中继续改 */
+export function collabReopenAfterReject(input: { taskId: number }): { task: OrgCollabTask; paper: OrgPaper } {
+  const task = taskOf(input.taskId)
+  const paper = paperOfTask(task)
+  if (task.status !== 'rejected') throw new Error('任务不在「已驳回」状态')
+  paper.status = 'draft'
+  paper.updatedAt = nowStr()
+  task.status = 'collecting'
+  task.members.forEach((member) => {
+    member.status = 'working'
+    delete member.reviewNote
+  })
+  task.versions.push(snapVersion(paper, CURRENT.name, '按审核意见退回修改'))
+  return { task, paper }
 }
 
 export function listPaperVersions(paperId: number): PaperVersion[] {
@@ -4648,6 +5154,7 @@ export function listPaperVersions(paperId: number): PaperVersion[] {
 export function restorePaperVersion(input: { paperId: number; versionId: number; actor?: string }): { paper: OrgPaper; versions: PaperVersion[] } {
   const task = collabTasks.find((row) => row.paperId === input.paperId)
   if (!task) throw new Error('该试卷没有版本记录（仅协同组卷的试卷保留版本）')
+  assertPaperEditable(task, '撤销版本')
   const paper = paperOfTask(task)
   const version = task.versions.find((row) => row.id === input.versionId)
   if (!version) throw new Error('版本不存在')
@@ -4670,6 +5177,7 @@ export function replacePaperVersion(input: { paperId: number; versionId: number;
   const paper = paperOfTask(task)
   const version = task.versions.find((row) => row.id === input.versionId)
   if (!version) throw new Error('版本不存在')
+  assertPaperEditable(task, '替换卷面')
   const latest = task.versions.reduce((max, row) => (row.no > max.no ? row : max), task.versions[0])
   applyVersion(paper, version)
   const actor = input.actor ?? CURRENT.name
@@ -6296,7 +6804,8 @@ export const staff: StaffMember[] = [
   { id: 401, name: '陈明远', phone: '13900000001', role: '管理员', campus: '本部校区', enabled: true, pendingReviews: 0, lastLoginAt: nowStr(-1) },
   { id: 402, name: '沈丽华', phone: '13900000002', role: '审核员', campus: '本部校区', enabled: true, pendingReviews: 3, lastLoginAt: nowStr(-3) },
   { id: 403, name: '李文博', phone: '13900000003', role: '老师', campus: '东湖校区', enabled: true, pendingReviews: 0, lastLoginAt: nowStr(-6) },
-  { id: 404, name: '王静', phone: '13900000004', role: '老师', campus: '本部校区', enabled: true, pendingReviews: 0, lastLoginAt: nowStr(-30) },
+  /* 王静是「年级学科组长」：右上角演示身份切成组长时用的就是她，协同组卷的种子任务也归她发起 */
+  { id: 404, name: '王静', phone: '13900000004', role: '年级学科组长', campus: '本部校区', enabled: true, pendingReviews: 0, lastLoginAt: nowStr(-30) },
   { id: 405, name: '赵鹏', phone: '13900000005', role: '出题专员', campus: '东湖校区', enabled: false, pendingReviews: 1, lastLoginAt: nowStr(-600) },
   { id: 406, name: '孙悦', phone: '13900000006', role: '老师', campus: '本部校区', enabled: true, pendingReviews: 0, lastLoginAt: nowStr(-70) },
 ]
@@ -6349,25 +6858,120 @@ export function deleteStaff(id: number): void {
   STAFF_QUOTA.current = staff.length
 }
 
-/** 角色权限矩阵（FR-OS-005 ~ 008） */
+/**
+ * 角色权限矩阵（FR-OS-005 ~ 008）。
+ *
+ * `key` 必须与机构端侧边栏的模块一一对应（apps/tenant/src/menu.ts 的 `MenuItem.module`）——
+ * 这是这张矩阵从「演示数据」变成「真生效」的关键：`usePermission` 就是拿模块 key 到这里查的。
+ * 加菜单不加这里 = 新菜单对所有角色都可见（未收录的模块按放行处理），不会把人锁在门外。
+ *
+ * `ops` 只列该模块真正有意义的动作：「查看」是**准入位**，没有它整个模块的菜单都不显示；
+ * 其余 op 用于更细的准入判断（如审核中心的页面要求「审核」，协同组卷的「新建任务」按钮要求
+ * 「发起协同组卷」）。不要为了整齐给每个模块都凑满六个 op —— 界面上会多出一排永远不会被读到的勾。
+ */
 export const PERM_MODULES: Array<{ key: string; title: string; ops: string[] }> = [
-  { key: 'question', title: '题目管理', ops: ['查看', '新增', '编辑', '删除', '审核', '导出'] },
-  { key: 'paper', title: '试卷管理', ops: ['查看', '新增', '编辑', '删除', '审核', '导出'] },
-  { key: 'material', title: '教辅管理', ops: ['查看', '新增', '编辑', '删除'] },
+  { key: 'dashboard', title: '工作台', ops: ['查看'] },
   { key: 'file', title: '我的文件', ops: ['查看', '上传', '删除'] },
+  { key: 'question', title: '题目管理', ops: ['查看', '新增', '编辑', '删除', '审核', '导出'] },
+  /* 「发起协同组卷」与「查看」分开：参与组卷的老师要能进协同组卷页，但不能自己发起任务 */
+  { key: 'paper', title: '试卷管理', ops: ['查看', '新增', '编辑', '删除', '审核', '导出', '发起协同组卷'] },
+  { key: 'teach', title: '备课中心', ops: ['查看', '新增', '编辑', '删除'] },
+  { key: 'exam', title: '考试阅卷', ops: ['查看', '新建考试', '阅卷', '分析'] },
+  { key: 'student', title: '班级学生', ops: ['查看', '编辑', '导入'] },
+  { key: 'ai-center', title: 'AI 能力中心', ops: ['查看', '复核'] },
+  { key: 'prep', title: '集体备课', ops: ['查看', '发起', '参与'] },
+  { key: 'homework', title: '作业系统', ops: ['查看', '布置', '批改'] },
+  { key: 'resource', title: '校本资源', ops: ['查看', '上传', '审批'] },
+  { key: 'material', title: '教辅管理', ops: ['查看', '新增', '编辑', '删除'] },
   { key: 'formula', title: '公式中心', ops: ['查看', '新增', '分享'] },
   { key: 'prompt', title: '提示词模板', ops: ['查看', '测试'] },
   { key: 'square', title: '知识广场', ops: ['查看', '下载'] },
   { key: 'org', title: '机构管理', ops: ['查看', '配置'] },
+  { key: 'recycle', title: '回收站', ops: ['查看', '还原', '彻底删除'] },
 ]
 
 const FULL = (ops: string[]) => ops
 
+/* 五个预置角色的口径：
+   - 管理员 = 全模块全权限（`locked` 不可改，否则一次误操作就能把所有人锁在系统外）；
+   - 审核员 = 题目 / 试卷的审核链路 + 只读的辅助模块，没有「发起协同组卷」；
+   - 老师 = 机构端的「参与组卷老师」：只保留组卷闭环要用的四个模块（工作台 / 我的文件 /
+     题目管理 / 试卷管理），没有审核入口、也不能自己发起协同任务。演示时菜单差异一眼可见；
+   - 出题专员 = 只做题不发布；
+   - 年级学科组长 = 除机构管理与班级学生之外的全量业务菜单，但没有「审核」——
+     审核是审核员与管理员的事，组长负责的是发起协同组卷与验收，两者不该由同一人把关。
+   **顺序即界面上角色的排列顺序**，年级学科组长追加在末尾：StaffView 用下标取默认角色
+   （`roleNames[2]`），插在中间会让「新增员工」的默认角色跟着变。 */
 export const orgRoles: OrgRole[] = [
   { id: 1, name: '管理员', builtin: true, locked: true, perms: Object.fromEntries(PERM_MODULES.map((m) => [m.key, FULL(m.ops)])) },
-  { id: 2, name: '审核员', builtin: true, locked: false, perms: { question: ['查看', '审核', '导出'], paper: ['查看', '审核', '导出'], material: ['查看'], file: ['查看'], formula: ['查看'], prompt: ['查看', '测试'], square: ['查看', '下载'], org: [] } },
-  { id: 3, name: '老师', builtin: true, locked: false, perms: { question: ['查看', '新增', '编辑', '导出'], paper: ['查看', '新增', '编辑', '导出'], material: ['查看', '新增', '编辑'], file: ['查看', '上传'], formula: ['查看', '新增', '分享'], prompt: ['查看', '测试'], square: ['查看', '下载'], org: [] } },
-  { id: 4, name: '出题专员', builtin: false, locked: false, perms: { question: ['查看', '新增', '编辑'], paper: ['查看'], material: ['查看'], file: ['查看', '上传'], formula: ['查看'], prompt: ['查看'], square: ['查看'], org: [] } },
+  {
+    id: 2,
+    name: '审核员',
+    builtin: true,
+    locked: false,
+    perms: {
+      dashboard: ['查看'],
+      question: ['查看', '审核', '导出'],
+      paper: ['查看', '审核', '导出'],
+      'ai-center': ['查看', '复核'],
+      file: ['查看'],
+      material: ['查看'],
+      formula: ['查看'],
+      prompt: ['查看', '测试'],
+      square: ['查看', '下载'],
+    },
+  },
+  {
+    id: 3,
+    name: '老师',
+    builtin: true,
+    locked: false,
+    perms: {
+      dashboard: ['查看'],
+      file: ['查看', '上传'],
+      question: ['查看', '新增', '编辑', '导出'],
+      paper: ['查看', '新增', '编辑', '导出'],
+    },
+  },
+  {
+    id: 4,
+    name: '出题专员',
+    builtin: false,
+    locked: false,
+    perms: {
+      dashboard: ['查看'],
+      question: ['查看', '新增', '编辑'],
+      paper: ['查看'],
+      file: ['查看', '上传'],
+      material: ['查看'],
+      formula: ['查看'],
+      prompt: ['查看'],
+      square: ['查看'],
+    },
+  },
+  {
+    id: 5,
+    name: '年级学科组长',
+    builtin: true,
+    locked: false,
+    perms: {
+      dashboard: ['查看'],
+      file: ['查看', '上传', '删除'],
+      question: ['查看', '新增', '编辑', '导出'],
+      paper: ['查看', '新增', '编辑', '导出', '发起协同组卷'],
+      teach: ['查看', '新增', '编辑'],
+      exam: ['查看', '阅卷', '分析'],
+      'ai-center': ['查看'],
+      prep: ['查看', '发起', '参与'],
+      homework: ['查看', '布置', '批改'],
+      resource: ['查看', '上传'],
+      material: ['查看', '新增', '编辑'],
+      formula: ['查看', '新增', '分享'],
+      prompt: ['查看', '测试'],
+      square: ['查看', '下载'],
+      recycle: ['查看', '还原'],
+    },
+  },
 ]
 
 let roleSeq = 10
@@ -6501,17 +7105,35 @@ export interface OrgMenuNode {
   key: string
   title: string
   enabled: boolean
+  /** 平台侧锁定（商用套餐决定的开关），机构改不了 */
   platformLocked?: boolean
-  children?: Array<{ key: string; title: string; enabled: boolean; platformLocked?: boolean }>
+  /**
+   * 机构自己也不该关掉的菜单。与 `platformLocked` 效果相同（开关禁用、保存时强制打回 enabled），
+   * 但**原因不同**，界面上给的说明也不同：平台锁定是「套餐没给你这个」，locked 是
+   * 「关了它你就再也进不去关它的那个页面了」—— 机构管理就是后者。
+   */
+  locked?: boolean
+  children?: Array<{ key: string; title: string; enabled: boolean; platformLocked?: boolean; locked?: boolean }>
 }
 
+/**
+ * 机构整体的菜单开关（FR-OS-008）。
+ *
+ * `key` 与侧边栏路径一一对应（去掉前导斜杠）：`paper/collab` ↔ `/paper/collab`。
+ * **必须与 apps/tenant/src/menu.ts 的叶子保持同步** —— 这里是「机构整体开不开这个菜单」，
+ * 角色矩阵是「这个角色能不能看」，两者取交集后才是侧边栏真正渲染的内容。
+ * 树里缺了某个叶子不会报错，只是那个叶子不受机构开关控制（默认开）。
+ */
 export const orgMenuTree: OrgMenuNode[] = [
+  { key: 'dashboard', title: '工作台', enabled: true },
+  { key: 'file', title: '我的文件', enabled: true },
   {
     key: 'question',
     title: '题目管理',
     enabled: true,
     children: [
       { key: 'question/bank', title: '题库管理', enabled: true },
+      { key: 'question/personal', title: '个人题库', enabled: true },
       { key: 'question/create', title: '录题中心', enabled: true },
       { key: 'question/photo', title: '图片识题', enabled: true },
       { key: 'question/review', title: '题目审核中心', enabled: true },
@@ -6526,6 +7148,7 @@ export const orgMenuTree: OrgMenuNode[] = [
       // 题库组卷在侧边栏以新标签页打开（独立全屏工作台），此处仅同步菜单权限树
       { key: 'paper/compose', title: '题库组卷', enabled: true },
       { key: 'paper/collab', title: '协同组卷', enabled: true },
+      { key: 'paper/ai', title: '智能组卷', enabled: true },
       { key: 'paper/review', title: '试卷审核中心', enabled: true },
     ],
   },
@@ -6547,7 +7170,26 @@ export const orgMenuTree: OrgMenuNode[] = [
     children: [
       { key: 'exam/grading', title: '在线阅卷', enabled: true },
       { key: 'exam/analysis', title: '试卷分析', enabled: true },
+      { key: 'exam/profile', title: '学情画像', enabled: true },
       { key: 'exam/mistake', title: '错题本', enabled: true },
+    ],
+  },
+  {
+    key: 'student',
+    title: '班级学生',
+    enabled: true,
+    children: [
+      { key: 'student/class', title: '班级管理', enabled: true },
+      { key: 'student/archive', title: '学生档案', enabled: true },
+    ],
+  },
+  {
+    key: 'ai-center',
+    title: 'AI 能力中心',
+    enabled: true,
+    children: [
+      { key: 'ai-center/workbench', title: 'AI 工作台', enabled: true },
+      { key: 'ai-center/review', title: 'AI 内容复核', enabled: true },
     ],
   },
   { key: 'prep', title: '集体备课', enabled: true },
@@ -6573,7 +7215,6 @@ export const orgMenuTree: OrgMenuNode[] = [
       { key: 'material/media/clip', title: '微课切片', enabled: true },
     ],
   },
-  { key: 'file', title: '我的文件', enabled: true },
   {
     key: 'formula',
     title: '公式中心',
@@ -6591,11 +7232,50 @@ export const orgMenuTree: OrgMenuNode[] = [
     platformLocked: true,
   },
   { key: 'square', title: '知识广场', enabled: true },
+  {
+    key: 'org',
+    title: '机构管理',
+    enabled: true,
+    // 关掉机构管理，就再也没人进得来把它打开 —— 这是「机构自己也锁」，不是平台锁定
+    locked: true,
+    children: [
+      { key: 'org/staff', title: '员工账号', enabled: true },
+      { key: 'org/roles', title: '角色权限', enabled: true },
+      /* 本页自己也是 locked：关掉它 = 从侧边栏和路由两处都进不来，再没人能把它打开 */
+      { key: 'org/menus', title: '菜单权限', enabled: true, locked: true },
+      { key: 'org/campus', title: '校区管理', enabled: true },
+      { key: 'org/logs', title: '日志管理', enabled: true },
+      { key: 'org/notify', title: '通知配置', enabled: true },
+      { key: 'org/settings', title: '机构设置', enabled: true },
+    ],
+  },
+  { key: 'recycle', title: '回收站', enabled: true },
 ]
 
+/**
+ * 保存机构菜单开关。
+ *
+ * `locked` / `platformLocked` 的分组在这里被强制打回 `enabled: true`，**不能只靠界面把开关置灰**：
+ * 接口是可以被直接调用的，而且老数据里可能已经存着 `enabled: false`。界面禁用是提示，
+ * 这里才是保证 —— 否则一次越权调用就能把机构管理整个关掉，且再也打不开。
+ */
 export function saveOrgMenus(items: OrgMenuNode[]): void {
   orgMenuTree.length = 0
-  orgMenuTree.push(...items)
+  orgMenuTree.push(...forceLockedEnabled(items))
+}
+
+function forceLockedEnabled(items: OrgMenuNode[]): OrgMenuNode[] {
+  return items.map((row) => {
+    const forced = Boolean(row.locked || row.platformLocked)
+    return {
+      ...row,
+      enabled: forced ? true : row.enabled,
+      children: row.children?.map((child) => ({
+        ...child,
+        enabled: child.locked || child.platformLocked ? true : child.enabled,
+      })),
+    }
+  })
 }
 
 /* ================= 全局搜索（FR-GN-026） ================= */

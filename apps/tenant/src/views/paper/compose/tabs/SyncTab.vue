@@ -263,7 +263,7 @@ const previewChapter = ref<Chapter | null>(null)
   border-bottom: 1px solid var(--border);
 }
 .st-cascade .f-select { width: auto; min-width: 132px; height: 34px; font-size: 12.5px; }
-.st-cascade .f-select:disabled { background: #f6f8fb; }
+.st-cascade .f-select:disabled { background-color: #f6f8fb; }
 .st-material { min-width: 220px !important; }
 .st-compose { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; }
 

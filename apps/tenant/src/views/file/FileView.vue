@@ -32,6 +32,7 @@ import type { FileRecognizeResult, RecognizedQuestion } from '@/api/ai-file'
 import { useBaseData } from '@/composables/useBaseData'
 import { useViewMode } from '@/composables/useViewMode'
 import { downloadFile, formatFileSize } from '@/utils/file'
+import { openPaperEdit, paperEditHref } from '@/utils/paper-edit'
 
 /**
  * 我的文件（FR-FL-001 ~ 005）：网盘式文件管理器。
@@ -556,7 +557,7 @@ const PREVIEW_HINT: Partial<Record<OrgFile['kind'], string>> = {
   word: 'Word 文档，下载后可用本地 Office 打开；在线预览与编辑将在后续版本接入。',
   ppt: 'PPT 演示文稿，下载后可用本地 Office 打开；在线预览将在后续版本接入。',
   paper: '个人创建的试卷存放在这里，点「打开试卷」可继续编辑；送审通过后进入试卷库（只读）。',
-  aiPaper: 'AI 智能组卷产出的试卷，点「打开试卷」可继续编辑；送审通过后进入试卷库（只读）。',
+  aiPaper: '智能组卷产出的试卷，点「打开试卷」可继续编辑；送审通过后进入试卷库（只读）。',
   composePaper: '组卷产出的试卷，点「打开试卷」可继续编辑；送审通过后进入试卷库（只读）。',
   courseware: '课件由备课中心维护，可在「备课中心 → 课件」中打开。',
   lecture: '讲义由备课中心维护，可在「备课中心 → 讲义」中打开。',
@@ -577,7 +578,13 @@ const previewHint = computed(() => {
  * 预览弹窗给一个跳转，否则「点文件名打开预览」这类文件只能看到一句提示。
  * 试卷类文件带 paperId（建卷落文件时写入）的直达试卷编辑页；种子数据没挂卷，退回试卷库列表。
  */
-const PREVIEW_HOME: Partial<Record<OrgFile['kind'], { text: string; path: string }>> = {
+interface PreviewHome {
+  text: string
+  path: string
+  /** 新标签页打开（模板里渲染成 `<a target="_blank">`）：只有试卷编辑页是这样，见 utils/paper-edit.ts */
+  newTab?: true
+}
+const PREVIEW_HOME: Partial<Record<OrgFile['kind'], PreviewHome>> = {
   paper: { text: '去试卷库打开', path: '/paper/list' },
   aiPaper: { text: '去试卷库打开', path: '/paper/list' },
   composePaper: { text: '去试卷库打开', path: '/paper/list' },
@@ -587,14 +594,15 @@ const PREVIEW_HOME: Partial<Record<OrgFile['kind'], { text: string; path: string
   miniapp: { text: '去小程序动画打开', path: '/material/media/animation' },
   animation: { text: '去小程序动画打开', path: '/material/media/animation' },
 }
-const previewHome = computed(() => {
+const previewHome = computed<PreviewHome | undefined>(() => {
   const current = preview.value
   if (!current) return undefined
-  const home = PREVIEW_HOME[current.row.file.kind]
   const paperId = current.row.file.paperId
-  if (paperId != null) return { text: '打开试卷', path: `/paper/edit?id=${paperId}` }
-  return home
+  /* 关联了试卷的文件：进卷面编辑页，且开在新标签页 —— 改完还要回这张文件列表接着处理别的文件 */
+  if (paperId != null) return { text: '打开试卷', path: paperEditHref(paperId), newTab: true }
+  return PREVIEW_HOME[current.row.file.kind]
 })
+/** 站内页面同页签跳转（试卷编辑页走模板里的 `<a target="_blank">`，不经过这里） */
 function openPreviewHome() {
   const home = previewHome.value
   if (!home) return
@@ -671,9 +679,9 @@ function menuItems(row: Row): MenuAction[] {
 
 function onEdit(row: Row) {
   if (row.type !== 'file') return
-  /* 关联了试卷的文件，「编辑」就是打开卷面编辑页 */
+  /* 关联了试卷的文件，「编辑」就是打开卷面编辑页（新标签页，见 utils/paper-edit.ts） */
   if (row.file.paperId != null) {
-    router.push(`/paper/edit?id=${row.file.paperId}`)
+    if (!openPaperEdit(row.file.paperId)) router.push(paperEditHref(row.file.paperId))
     return
   }
   const where: Partial<Record<OrgFile['kind'], string>> = {
@@ -745,8 +753,10 @@ function onLocate(row: Row) {
 
 function onRowAction(row: Row, key: string) {
   if (key === 'open') enterFolder(row.id)
-  else if (key === 'open-paper' && row.type === 'file' && row.file.paperId != null)
-    router.push(`/paper/edit?id=${row.file.paperId}`)
+  else if (key === 'open-paper' && row.type === 'file' && row.file.paperId != null) {
+    /* 与「编辑」同一个去处，同样开新标签页；被拦了才退回同页签 */
+    if (!openPaperEdit(row.file.paperId)) router.push(paperEditHref(row.file.paperId))
+  }
   else if (key === 'preview') openPreview(row)
   else if (key === 'edit') onEdit(row)
   else if (key === 'download') onDownload(row)
@@ -1270,7 +1280,19 @@ onBeforeUnmount(() => {
       </div>
       <template #footer>
         <button class="btn btn-ghost" @click="closePreview">关闭</button>
-        <button v-if="previewHome" class="btn btn-ghost" @click="openPreviewHome">
+        <!-- 试卷编辑页开新标签页（锚点而非 window.open，见 utils/paper-edit.ts）；
+             点完顺手关掉预览弹窗，回到文件列表 -->
+        <a
+          v-if="previewHome && previewHome.newTab"
+          class="btn btn-ghost"
+          :href="previewHome.path"
+          target="_blank"
+          rel="noopener"
+          @click="closePreview"
+        >
+          <AppIcon name="arrow-right" :size="14" /> {{ previewHome.text }}
+        </a>
+        <button v-else-if="previewHome" class="btn btn-ghost" @click="openPreviewHome">
           <AppIcon name="arrow-right" :size="14" /> {{ previewHome.text }}
         </button>
         <button v-if="preview.url" class="btn btn-primary" @click="onDownload(preview.row)">

@@ -17,7 +17,8 @@ export interface PaperTypeGroup {
 
 <script setup lang="ts">
 /**
- * 组卷工作台「试卷」页签左侧的试卷类型树：分类（同步教学 / 阶段测试 / 小升初 / 竞赛）→ 考试类型。
+ * 试卷类型树：分类（同步教学 / 阶段测试 / 小升初 / 竞赛）→ 考试类型。
+ * 两处在用 —— 组卷工作台「试卷」页签（叫「试卷类型」）与试卷库（叫「考试类型」，见 `title`）。
  *
  * 两级都是**扁平渲染**（一行一个按钮）而不是嵌套 `<ul>`：折叠只是控制叶子行要不要生成，
  * 缩进靠 `depth` 算 padding，这样滚动、hover、键盘焦点都只有一类元素要管。
@@ -29,11 +30,20 @@ export interface PaperTypeGroup {
 import { computed, ref, watch } from 'vue'
 import { AppIcon } from '@aiteach/shared'
 
-const props = defineProps<{
-  groups: PaperTypeGroup[]
-  /** 已选中的考试类型名；空数组 = 全部试卷 */
-  selected: string[]
-}>()
+const props = withDefaults(
+  defineProps<{
+    groups: PaperTypeGroup[]
+    /** 已选中的考试类型名；空数组 = 全部试卷 */
+    selected: string[]
+    /**
+     * 面板标题。同一个树在两处用不同说法：组卷工作台叫「试卷类型」（它筛的是能拿来组卷的卷），
+     * 试卷库叫「考试类型」（标题里出现「试卷」两字，在一整页试卷里等于没说）。
+     * 空态文案跟着它走，不必各写一句。
+     */
+    title?: string
+  }>(),
+  { title: '试卷类型' },
+)
 
 const emit = defineEmits<{ change: [names: string[]] }>()
 
@@ -135,7 +145,7 @@ function selectLeaf(name: string) {
 
 <template>
   <aside class="panel type-panel">
-    <div class="pt-head">试卷类型</div>
+    <div class="pt-head">{{ props.title }}</div>
 
     <div class="pt-tree">
       <template
@@ -176,7 +186,7 @@ function selectLeaf(name: string) {
         </div>
       </template>
 
-      <p v-if="visibleGroups.length === 0" class="pt-empty">当前年级 / 学科下暂无可选的试卷类型</p>
+      <p v-if="visibleGroups.length === 0" class="pt-empty">当前年级 / 学科下暂无可选的{{ props.title }}</p>
     </div>
   </aside>
 </template>

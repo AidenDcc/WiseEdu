@@ -119,6 +119,8 @@ interface BankFilterRow {
   label: string
   dict?: string
   options?: string[]
+  /** 放不下的行收回一行 + 「展开 / 收起」，见 FilterRowDef.collapsible */
+  collapsible?: boolean
 }
 
 /** 使用次数没法按精确值做筛选项，按档给；档位边界贴着种子分布，保证每档都有题 */
@@ -143,7 +145,8 @@ const MORE_ROWS: BankFilterRow[] = [
   /* 「纠错题目」= 有没有老师提交过纠错反馈；要处理这些题时选「已提交纠错」把它们捞出来 */
   { key: 'correction', label: '纠错题目', options: ['已提交纠错', '未提交纠错'] },
   { key: 'useCount', label: '使用次数', options: USE_COUNT_BUCKETS.map((row) => row.label) },
-  { key: 'region', label: '地区', dict: 'region' },
+  /* 地区铺满 34 个省级行政区，一行放不下 —— 收起态只留一行，需要时再展开 */
+  { key: 'region', label: '地区', dict: 'region', collapsible: true },
   { key: 'source', label: '来源', options: QUESTION_SOURCE_OPTIONS },
   { key: 'term', label: '学期', options: ['上学期', '下学期'] },
 ]
@@ -169,7 +172,12 @@ const typeItems = ref<TenantDictItem[]>([])
 
 /** 展开给共享 AppFilterPanel 的行定义（选项为空的字典行由组件显示「暂无可选项」） */
 function toRowDefs(rows: BankFilterRow[]): FilterRowDef[] {
-  return rows.map((row) => ({ key: row.key, label: row.label, options: rowOptions(row) }))
+  return rows.map((row) => ({
+    key: row.key,
+    label: row.label,
+    options: rowOptions(row),
+    collapsible: row.collapsible,
+  }))
 }
 const filterRows = computed<FilterRowDef[]>(() => toRowDefs(FILTER_ROWS))
 const moreFilterRows = computed<FilterRowDef[]>(() => toRowDefs(MORE_ROWS))

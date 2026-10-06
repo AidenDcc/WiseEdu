@@ -6,6 +6,8 @@ import type { MenuItem } from '@/menu'
 import { footerMenus, menus } from '@/menu'
 import { useAuthStore } from '@/stores/auth'
 import { useScope } from '@/composables/useScope'
+import { useDemoRole, type DemoRole } from '@/composables/useDemoRole'
+import { useVisibleMenus } from '@/composables/useVisibleMenus'
 import ScopePicker from '@/components/ui/ScopePicker.vue'
 import GlobalSearchOverlay from '@/components/search/GlobalSearchOverlay.vue'
 import OrgNotificationCenter from '@/components/OrgNotificationCenter.vue'
@@ -15,6 +17,10 @@ import { fetchOrgMessages } from '@/api/org'
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+
+/* ===== 菜单裁剪：机构菜单开关 × 角色权限 =====
+   侧边栏、折叠浮层、底部入口、面包屑四处的取数都从这里走（见 useVisibleMenus.ts 的说明）。 */
+const { visibleMenus, visibleFooterMenus } = useVisibleMenus()
 
 /* ===== 侧边栏折叠（状态记忆） ===== */
 const COLLAPSE_KEY = `aiteach:${getAppConfig().appName}:sidebar-collapsed`
@@ -26,11 +32,18 @@ watch(collapsed, (value) => {
 
 /** 分组展开状态：默认展开包含当前路由的分组 */
 const expandedKeys = ref<string[]>([])
-for (const item of menus) {
-  if (item.children?.some((child) => route.path.startsWith(child.path))) {
-    expandedKeys.value.push(item.path)
+
+function expandActiveGroup() {
+  for (const item of visibleMenus.value) {
+    if (item.children?.some((child) => route.path.startsWith(child.path)) && !expandedKeys.value.includes(item.path)) {
+      expandedKeys.value.push(item.path)
+    }
   }
 }
+expandActiveGroup()
+/* 权限是异步到达的：首次渲染时菜单可能还是全量（矩阵未加载），等真菜单出来后
+   再补算一次当前路由所在分组，否则「刷新后直接落在 /paper/collab，侧边栏却是收着的」。 */
+watch(visibleMenus, expandActiveGroup)
 
 function toggleGroup(path: string) {
   const index = expandedKeys.value.indexOf(path)
@@ -46,8 +59,10 @@ function isGroupActive(item: { path: string; children?: { path: string }[] }) {
 const flyout = ref<{ path: string; top: number } | null>(null)
 let flyoutTimer: number | undefined
 
+/* 从裁剪后的菜单里找：折叠态的浮层与展开态的侧边栏必须显示同一批菜单，
+   否则折叠起来会冒出一个已经无权访问的分组 */
 const flyoutItem = computed(() =>
-  menus.find((item) => item.path === flyout.value?.path),
+  visibleMenus.value.find((item) => item.path === flyout.value?.path),
 )
 
 function openFlyout(item: MenuItem, event: MouseEvent) {
@@ -77,7 +92,9 @@ function onGroupHeadClick(item: MenuItem, event: MouseEvent) {
 onBeforeUnmount(() => clearTimeout(flyoutTimer))
 
 /* 页面名不再单独显示，改由面包屑承担（层级取自 menu.ts，路由本身是平铺的）。
-   底部的 footerMenus 也要并进来：回收站等页面的菜单项在那里。 */
+   底部的 footerMenus 也要并进来：回收站等页面的菜单项在那里。
+   **这里刻意用全量 `menus` 而不是 `visibleMenus`**：面包屑靠菜单树做前缀匹配，
+   用裁剪后的列表会让隐藏分组的深层页退化成单层标题。它是描述性的，不参与裁剪。 */
 const crumbs = computed(() =>
   buildBreadcrumb([...menus, ...footerMenus], route.path, route.meta.title as string),
 )
@@ -129,9 +146,23 @@ async function onLogout() {
   router.push('/login')
 }
 
+/* ===== 演示身份（右上角用户下拉里切换） =====
+   机构端只有一个登录账号，而机构管理员 / 年级学科组长 / 参与组卷老师的菜单与权限完全不同。
+   见 composables/useDemoRole.ts 的说明：不重登、不动 token。 */
+const { identity, identities, apply } = useDemoRole()
+
+function switchIdentity(role: DemoRole) {
+  if (role === identity.value.role) return
+  const user = apply(role)
+  userMenuOpen.value = false
+  showToast(`已切换为「${user?.name ?? ''} · ${user?.roleName ?? ''}」`, 'success')
+}
+
 onMounted(refreshUnread)
 /* 触发字典加载并归一缓存的年级 / 学科（下拉选项与默认值都依赖字典） */
 onMounted(() => void ensureScope())
+/* mock 是内存态，刷新后回到默认身份 —— 挂载时按缓存把身份贴回去（含 CURRENT 与 auth.user） */
+onMounted(() => apply(identity.value.role))
 </script>
 
 <template>
@@ -149,7 +180,7 @@ onMounted(() => void ensureScope())
       </div>
 
       <nav class="menu">
-        <template v-for="item in menus" :key="item.path">
+        <template v-for="item in visibleMenus" :key="item.path">
           <!-- 直接链接（工作台） -->
           <RouterLink
             v-if="!item.children"
@@ -214,7 +245,7 @@ onMounted(() => void ensureScope())
 
       <div class="sidebar-extra">
         <RouterLink
-          v-for="item in footerMenus"
+          v-for="item in visibleFooterMenus"
           :key="item.path"
           :to="item.path"
           class="menu-item"
@@ -319,6 +350,28 @@ onMounted(() => void ensureScope())
                   <div class="org">{{ auth.user?.orgName }}</div>
                   <div class="account">{{ auth.user?.account }}</div>
                 </div>
+
+                <!-- 演示身份：用于演示不同角色的菜单与权限差异（真实场景由组织架构决定，
+                     登录账号始终是 orgadmin，这里只是就地换视角，见 useDemoRole.ts） -->
+                <div class="user-menu-group">
+                  <span class="user-menu-label">演示身份</span>
+                  <span class="user-menu-tip">切换后菜单与权限一起变，无需重新登录</span>
+                </div>
+                <button
+                  v-for="row in identities"
+                  :key="row.role"
+                  class="user-menu-item identity-item"
+                  :class="{ on: row.role === identity.role }"
+                  @click="switchIdentity(row.role)"
+                >
+                  <AppIcon :name="row.role === identity.role ? 'check' : 'users'" :size="15" />
+                  <span class="identity-text">
+                    <b>{{ row.name }} · {{ row.roleName }}</b>
+                    <em>{{ row.desc }}</em>
+                  </span>
+                </button>
+
+                <div class="user-menu-divider" />
                 <button class="user-menu-item" @click="router.push('/profile')">
                   <AppIcon name="users" :size="15" /> 个人中心
                 </button>
@@ -624,7 +677,7 @@ onMounted(() => void ensureScope())
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  width: 200px;
+  width: 268px;
   background: #fff;
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -652,6 +705,20 @@ onMounted(() => void ensureScope())
 .user-menu-item:hover { background: #f2f4fa; }
 .user-menu-item.danger { color: var(--danger); }
 .user-menu-item.danger:hover { background: var(--danger-soft); }
+
+/* 演示身份：三条选项比普通菜单项高（要放下说明文字），故下拉整体加宽 */
+.user-menu-group { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px 4px; }
+.user-menu-label { font-size: 12px; font-weight: 700; color: var(--ink); }
+.user-menu-tip { font-size: 11.5px; color: var(--sub); }
+.user-menu-divider { height: 1px; background: var(--border); margin: 6px 0; }
+/* 说明文字折行会把图标挤歪，故与文字顶对齐 */
+.identity-item { align-items: flex-start; }
+.identity-item svg { margin-top: 2px; }
+.identity-item.on { background: var(--brand-soft); color: var(--brand-deep); }
+.identity-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.identity-text b { font-size: 12.5px; font-weight: 600; }
+.identity-text em { font-size: 11.5px; font-style: normal; color: var(--sub); line-height: 1.5; }
+.identity-item.on .identity-text em { color: var(--brand-deep); opacity: 0.75; }
 
 .fade-enter-active, .fade-leave-active { transition: opacity 0.15s, transform 0.15s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; transform: translateY(-6px); }

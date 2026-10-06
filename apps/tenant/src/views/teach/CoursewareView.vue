@@ -47,6 +47,16 @@ const FILTER_ROWS = computed<FilterRowDef[]>(() => [
   { key: 'status', label: '状态', options: Object.values(TEACH_DOC_STATUS_TEXT), multiple: false },
 ])
 const filters = reactive<Record<string, string[]>>({ subject: [], grade: [], status: [] })
+
+/* AppFilterPanel 回传整份筛选值（覆盖式回写），逐 key 写回这份 reactive 对象本身。
+   不能交给 `v-model`：它会替换掉整个对象，而替换引用不是一次响应式写入 —— 点了 chip
+   页面不会有任何反应（连选中态都不亮），详见 CollabView 里同款函数的说明。 */
+function onFiltersChange(next: Record<string, string[]>) {
+  filters.subject = next.subject ?? []
+  filters.grade = next.grade ?? []
+  filters.status = next.status ?? []
+}
+
 const keyword = ref('')
 const page = ref(1)
 const filtered = computed(() =>
@@ -611,7 +621,7 @@ onMounted(async () => {
       </template>
     </AppPageHeader>
 
-    <AppFilterPanel v-model="filters" :rows="FILTER_ROWS" />
+    <AppFilterPanel :rows="FILTER_ROWS" :model-value="filters" @update:model-value="onFiltersChange" />
 
     <div class="panel">
       <!-- 工具条自带 14/18 的内边距，与下方栅格 / 分页的边距对齐 -->

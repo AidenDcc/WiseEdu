@@ -4,6 +4,9 @@ import { AppIcon, AppPageHeader, appConfirm, showToast } from '@aiteach/shared'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import { fetchOrgMenus, saveOrgMenus } from '@/api/org'
 import type { OrgMenuNodeApi } from '@/api/org'
+import { useVisibleMenus } from '@/composables/useVisibleMenus'
+
+const { refresh: refreshMenus } = useVisibleMenus()
 
 const menus = ref<OrgMenuNodeApi[]>([])
 const dirty = ref(false)
@@ -20,9 +23,26 @@ const enabledCount = computed(() =>
 )
 const totalCount = computed(() => menus.value.reduce((sum, group) => sum + 1 + (group.children ?? []).length, 0))
 
+/**
+ * 受锁的两种原因，界面上要给不同的说法 —— 都写成「套餐约束」会让用户去问超管，
+ * 而「机构管理」其实是自己关不得：
+ * - `platformLocked`：平台套餐没开通，得找超管；
+ * - `locked`：关掉之后没人能再进来打开（如机构管理），系统强制保持开启。
+ */
+function lockText(node: { platformLocked?: boolean; locked?: boolean }): string {
+  if (node.platformLocked) return '套餐约束'
+  if (node.locked) return '系统必需'
+  return ''
+}
+
 function onGroupChange(group: OrgMenuNodeApi, value: boolean) {
-  if (group.platformLocked) {
-    showToast('「提示词模板」受平台套餐约束，需超级管理员在套餐中开通', 'error')
+  if (group.platformLocked || group.locked) {
+    showToast(
+      group.platformLocked
+        ? `「${group.title}」受平台套餐约束，需超级管理员在套餐中开通`
+        : `「${group.title}」关闭后将无法再进入本页重新开启，系统保持其开启`,
+      'error',
+    )
     return
   }
   group.enabled = value
@@ -32,7 +52,15 @@ function onGroupChange(group: OrgMenuNodeApi, value: boolean) {
   dirty.value = true
 }
 
-function onChildChange(group: OrgMenuNodeApi, child: { key: string; enabled: boolean }, value: boolean) {
+function onChildChange(
+  group: OrgMenuNodeApi,
+  child: { key: string; title: string; enabled: boolean; locked?: boolean },
+  value: boolean,
+) {
+  if (child.locked) {
+    showToast(`「${child.title}」关闭后将无法再进入本页重新开启，系统保持其开启`, 'error')
+    return
+  }
   child.enabled = value
   // 任一子项开启 → 父组开启；全部关闭 → 父组保持开启但无子项（演示允许）
   if (value && !group.enabled) group.enabled = true
@@ -44,6 +72,10 @@ async function onSave() {
   try {
     await saveOrgMenus(JSON.parse(JSON.stringify(menus.value)))
     dirty.value = false
+    /* 保存完立刻重拉：侧边栏读的是同一份内存树，但**本地这份 draft 和服务端刚做的
+       强制修正（锁定分组一律打回开启）可能不一致**，重拉一次让界面与真实生效的一致。 */
+    await refreshMenus()
+    await load()
     showToast('菜单权限已保存，员工端侧边栏即时生效', 'success')
   } catch (error) {
     showToast(error instanceof Error ? error.message : '保存失败', 'error')
@@ -62,7 +94,7 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <AppPageHeader desc="控制员工端可见的侧边栏菜单；带 🔒 标记受超管套餐约束" />
+    <AppPageHeader desc="控制员工端可见的侧边栏菜单；带锁标记的不可关闭（「套餐约束」需超管开通，「系统必需」关闭后将无法再进入本页）" />
 
     <div class="panel menu-panel">
       <div class="menu-stats">
@@ -73,26 +105,30 @@ onMounted(load)
 
       <div class="menu-list">
         <div v-for="group in menus" :key="group.key" class="menu-group">
-          <div class="group-row" :class="{ locked: group.platformLocked }">
+          <div class="group-row" :class="{ locked: group.platformLocked || group.locked }">
             <span class="group-title">
               {{ group.title }}
-              <span v-if="group.platformLocked" class="lock-tag" title="平台套餐约束">
-                <AppIcon name="shield" :size="12" /> 套餐约束
+              <span v-if="lockText(group)" class="lock-tag" :title="lockText(group)">
+                <AppIcon name="shield" :size="12" /> {{ lockText(group) }}
               </span>
             </span>
             <AppSwitch
               :model-value="group.enabled"
-              :disabled="group.platformLocked"
+              :disabled="group.platformLocked || group.locked"
               @update:model-value="(v: boolean) => onGroupChange(group, v)"
             />
           </div>
           <div v-if="group.children?.length" class="child-list">
             <div v-for="child in group.children" :key="child.key" class="child-row">
               <AppIcon name="chevron-right" :size="13" />
-              <span class="child-title">{{ child.title }}</span>
+              <span class="child-title">
+                {{ child.title }}
+                <span v-if="child.locked" class="lock-tag" title="关闭后将无法再进入本页">系统必需</span>
+              </span>
+              <!-- 父组关闭时子项无从谈起；受锁的子项自己单独禁（如「菜单权限」本页） -->
               <AppSwitch
                 :model-value="child.enabled"
-                :disabled="!group.enabled && !group.platformLocked"
+                :disabled="!group.enabled || !!child.locked"
                 @update:model-value="(v: boolean) => onChildChange(group, child, v)"
               />
             </div>

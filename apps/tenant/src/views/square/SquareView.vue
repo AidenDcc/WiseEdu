@@ -26,6 +26,18 @@ const FILTER_ROWS = computed<FilterRowDef[]>(() => [
 
 const filters = reactive<Record<string, string[]>>({ kind: [], subject: [] })
 const keyword = ref('')
+
+/**
+ * 覆盖式回写：逐 key 写进这份 reactive 对象本身，**不能让 `v-model` 整体替换它**。
+ * `v-model` 在这里是两个坏结果二选一：dev 产物写的是 `$setup.filters` 属性，脚本里这份引用
+ * 一动不动；生产产物把整份对象换成普通对象，不再有响应性可追踪。两种情况都是
+ * **点了 chip 页面毫无反应**，故显式回写（与 ListView / BankView 同一写法）。
+ */
+function onFiltersChange(next: Record<string, string[]>) {
+  filters.kind = next.kind ?? []
+  filters.subject = next.subject ?? []
+}
+
 /** 「为你推荐」批次（换一批） */
 const batch = ref(0)
 
@@ -89,7 +101,7 @@ onMounted(load)
       </template>
     </AppPageHeader>
 
-    <AppFilterPanel v-model="filters" :rows="FILTER_ROWS" />
+    <AppFilterPanel :rows="FILTER_ROWS" :model-value="filters" @update:model-value="onFiltersChange" />
 
     <div class="panel">
       <div class="list-head">

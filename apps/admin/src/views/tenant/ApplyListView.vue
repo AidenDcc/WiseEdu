@@ -14,6 +14,15 @@ const FILTER_ROWS: FilterRowDef[] = [
 ]
 
 const FILTERS = reactive<Record<string, string[]>>({ status: [], orgType: [] })
+
+/* AppFilterPanel 回传整份筛选值（覆盖式回写），逐 key 写回这份 reactive 对象本身。
+   不能交给 `v-model`：它会替换掉整个对象，而替换引用不是一次响应式写入 ——
+   下面那句 `watch(FILTERS, load, { deep: true })` 就永远不会触发。
+   机构端 CollabView 里有同款说明。 */
+function onFiltersChange(next: Record<string, string[]>) {
+  FILTERS.status = next.status ?? []
+  FILTERS.orgType = next.orgType ?? []
+}
 const keyword = ref('')
 
 const list = ref<TenantApply[]>([])
@@ -165,7 +174,7 @@ onMounted(async () => {
 
     <!-- 列表 -->
     <div class="panel">
-      <AppFilterPanel v-model="FILTERS" :rows="FILTER_ROWS" />
+      <AppFilterPanel :rows="FILTER_ROWS" :model-value="FILTERS" @update:model-value="onFiltersChange" />
       <AppListToolbar v-model="keyword" placeholder="机构名称 / 申请编号" :search-width="220">
         <template #right>
           <button class="btn btn-ghost btn-sm" @click="resetFilters">重置</button>

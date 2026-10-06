@@ -99,6 +99,7 @@ function clearAll() {
         :options="row.options"
         :multiple="row.multiple !== false"
         :option-labels="row.optionLabels"
+        :collapsible="row.collapsible"
         :model-value="selectedOf(row.key)"
         @update:model-value="onRowChange(row.key, $event)"
       />
@@ -117,6 +118,7 @@ function clearAll() {
             :options="row.options"
             :multiple="row.multiple !== false"
             :option-labels="row.optionLabels"
+            :collapsible="row.collapsible"
             :model-value="selectedOf(row.key)"
             @update:model-value="onRowChange(row.key, $event)"
           />

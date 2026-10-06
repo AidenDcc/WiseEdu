@@ -9,6 +9,7 @@
  * 阅读顺序是「先左版后右版」再翻面。所以纸张规格里带一个习惯版数，
  * 分页以「版」为单位装箱（每版可填高度 = 版心高），再按版数把若干版拼到一张纸面上。
  */
+import type { PaperExtra, PaperExtraKind } from '@aiteach/shared'
 
 /** mm → CSS px（96dpi）；纸张尺寸换算的唯一出口 */
 export const MM = 96 / 25.4
@@ -237,6 +238,13 @@ export type PaperBlock =
     }
   /** 大题材料（阅读文本 / 文言文 / 诗歌 / 英语短文）：整版通栏，本大题各小题共用 */
   | { key: string; kind: 'material'; span: 2; hint: string; text: string }
+  /**
+   * 附加区块（表格 / 四线格 / 横线）：整版通栏，无题号不计分。
+   *
+   * 刻意做成**排版块**而不是塞进某道题的题面：块是分页的原子，格子只有整块落在一版里
+   * 才不会被拦腰截断（一半格子在这一页、一半在下一页）。
+   */
+  | { key: string; kind: 'extra'; span: 2; extra: PaperExtra }
   | {
       key: string
       kind: 'question'
@@ -261,6 +269,42 @@ export type PaperBlock =
       lines: number
       boxH: number
     }
+
+/* ================ 卷面附加区块（表格 / 四线格 / 横线） ================ */
+
+/**
+ * 「插入」菜单的可选项，顺序即菜单顺序。文案不带「插入」二字 —— 菜单标题与按钮上已经写着
+ * 「插入格子」，条目再写一遍就是「插入插入表格」。
+ *
+ * 三项都是「给学生写字的格子」，差别只在格型：表格是行列框、四线格是英语书写用的四条横线、
+ * 横线是通用的等距作答线。这份配置是**唯一一份**（菜单文案、目录行、块工具条的标签、
+ * 目录行的图标都取自这里），加第四项时记得同时改 `makePaperExtra` 的默认尺寸。
+ */
+export const PAPER_EXTRAS: Array<{ kind: PaperExtraKind; text: string; icon: string }> = [
+  { kind: 'table', text: '表格', icon: 'grid' },
+  { kind: 'english', text: '四线格', icon: 'list-ul' },
+  { kind: 'lines', text: '横线', icon: 'minus' },
+]
+
+/** 新建附加区块：默认尺寸取各格型的常用值，插入后可在块工具条里改 */
+export function makePaperExtra(kind: PaperExtraKind, id: number): PaperExtra {
+  if (kind === 'table') return { id, kind, rows: 3, cols: 4 }
+  if (kind === 'english') return { id, kind, rows: 4, cols: 1 }
+  /* 横线一行就是一行正文高，6 行约等于一段解答的位置 */
+  return { id, kind, rows: 6, cols: 1 }
+}
+
+/**
+ * 卷首「注意事项」的内置默认稿 —— 老师没配过（`paper.notices === undefined`）时印这一份。
+ *
+ * 放在这里而不是 PaperBlock 里，是因为编辑页要用它**回填**输入框：卷面印着默认稿、
+ * 面板里却是空的，老师会以为没生效。空数组（`[]`）是另一回事 —— 那是「这一块不要了」。
+ */
+export const DEFAULT_PAPER_NOTICES = [
+  '答题前请将姓名、班级、考号填写清楚，并核对试卷页数与题数。',
+  '选择题作答后请将答案填写在题后括号内，解答题须写出必要的文字说明与演算步骤。',
+  '考试结束后，将试卷与答题卡一并交回，不得带出考场。',
+]
 
 /** 客观题：有选项即视为客观题（判断题选项为 √/×） */
 export function isObjective(item: { options: string[] } | undefined): boolean {

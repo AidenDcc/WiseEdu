@@ -13,7 +13,7 @@
  */
 import type { OrgPaper, OrgQuestion } from '@aiteach/shared'
 import { isRichContent, sanitizeRichHtml } from '@aiteach/shared'
-import { ANSWER_LINES } from '@/components/paper/paper-layouts'
+import { ANSWER_LINES, DEFAULT_PAPER_NOTICES } from '@/components/paper/paper-layouts'
 import { isJudgeNoOptions, judgeAnswerText, optionColumnsOf } from '@/utils/question-card'
 
 /** 学生版（只有题）/ 教师版（附答案与解析）/ 纯答案页 */
@@ -81,6 +81,21 @@ function baseCss(): string {
     .p-sub { text-align: center; font-size: 10.5pt; color: #444; margin-bottom: 10px; }
     .p-info { border: 1px solid #333; border-radius: 3px; padding: 6px 10px; font-size: 10.5pt; margin-bottom: 16px; }
     .p-info span { display: inline-block; min-width: 22%; }
+    /* 卷首注意事项：与卷面上一样，上下两道横线夹住，条目逐条缩进 */
+    .p-notice { border-top: 1px solid #333; border-bottom: 1px solid #333; padding: 6px 2px; margin-bottom: 14px; font-size: 10.5pt; line-height: 1.7; }
+    .p-notice b { font-family: "Heiti SC", "Microsoft YaHei", sans-serif; }
+    .p-notice p { margin: 2px 0 0; }
+    /* 附加区块的格子：表格走 border-collapse 的真表格（Word 认得），
+       四线格是「顶上一条线 + 三条带下边框的行」= 四条横线，横线是逐行带下边框的定高块。
+       都按 100% 铺满版心。行高用 px 定死：Word 对百分比高度与弹性布局都不认，定死才印得准。 */
+    .p-grid { width: 100%; border-collapse: collapse; margin: 12px 0; }
+    .p-grid td { border: 1px solid #333; height: 26px; }
+    .p-en { margin: 12px 0; }
+    .p-en-row { border-top: 1px solid #999; margin-bottom: 16px; }
+    .p-en-row i { display: block; height: 10px; border-bottom: 1px solid #999; }
+    .p-en-row i.strong { border-bottom: 2px solid #333; }
+    .p-lines { margin: 12px 0; }
+    .p-line { height: 26px; border-bottom: 1px solid #666; }
     h2.sec { font-family: "Heiti SC", "Microsoft YaHei", sans-serif; font-size: 13pt; margin: 18px 0 8px; }
     .sec-note { font-size: 10.5pt; font-weight: normal; color: #555; margin-left: 8px; }
     .material { border: 1px solid #bbb; background: #fafafa; padding: 10px 12px; margin: 6px 0 12px; font-size: 11pt; }
@@ -187,6 +202,31 @@ function answerOnlyHtml(q: ExportQuestion): string {
   return `<tr><td class="no">${q.no}</td><td>${answer}</td></tr>`
 }
 
+/**
+ * 卷面附加区块（表格 / 四线格 / 横线）。
+ *
+ * 不用 CSS grid 而用 `<table>` 排格子：导出件是给 Word / WPS 打开的，
+ * 那些排版引擎对 `display: grid` 支持极差（多半会退化成一列），`<table>` 才是它们认的格子。
+ * 四线格与横线则是若干带边框的定高块 —— 线就是块的边框，本质是一样的东西。
+ */
+function extrasHtml(paper: OrgPaper): string {
+  return (paper.extras ?? [])
+    .map((extra) => {
+      if (extra.kind === 'english') {
+        /* 一组四条线，自上而下依次是：容器的上边框（淡）、三条带下边框的行。
+           第 2、4 条加重（.strong）—— 与卷面上 `.pb-en-line.is-strong` 同一口径 */
+        const group = '<div class="p-en-row"><i class="strong"></i><i></i><i class="strong"></i></div>'
+        return `<div class="p-en">${group.repeat(extra.rows)}</div>`
+      }
+      if (extra.kind === 'lines') {
+        return `<div class="p-lines">${'<div class="p-line"></div>'.repeat(extra.rows)}</div>`
+      }
+      const row = `<tr>${'<td>&nbsp;</td>'.repeat(extra.cols)}</tr>`
+      return `<table class="p-grid">${row.repeat(extra.rows)}</table>`
+    })
+    .join('')
+}
+
 function answerCardHtml(views: ReturnType<typeof buildViews>): string {
   const rows: string[] = []
   views.forEach((view) => {
@@ -215,6 +255,11 @@ export function buildPaperHtml(paper: OrgPaper, questions: OrgQuestion[], option
   const all = views.flatMap((view) => view.questions)
   const totalScore = views.reduce((sum, view) => sum + view.score, 0)
   const teacher = options.version === 'teacher'
+  /* 卷首注意事项：口径与 PaperBlock 完全一致 —— 没配过（undefined）用内置默认稿，
+     配成空数组（[]）就一条都不印。导出件与卷面必须同一条不落，否则「所见即所得」是空话。 */
+  const notices = (paper.notices === undefined ? DEFAULT_PAPER_NOTICES : paper.notices)
+    .map((row) => row.trim())
+    .filter(Boolean)
 
   const head = `
     <div class="p-title">${escapeHtml(paper.name)}</div>
@@ -224,8 +269,11 @@ export function buildPaperHtml(paper: OrgPaper, questions: OrgQuestion[], option
         ? '<div class="p-info"><span>学校：＿＿＿＿</span><span>班级：＿＿＿＿</span><span>姓名：＿＿＿＿</span><span>考号：＿＿＿＿</span></div>'
         : ''
     }
+    ${notices.length ? `<div class="p-notice"><b>注意事项：</b>${notices.map((row, i) => `<p>${i + 1}．${escapeHtml(row)}</p>`).join('')}</div>` : ''}
   `
 
+  /* 附加区块（表格 / 四线格 / 横线）接在全部答题区之后 —— 与编辑页、预览弹窗同一顺序。
+     纯答案版不带：那一版只列答案，格子在那里没有意义。 */
   const body =
     options.version === 'answer'
       ? `<h2 class="card-title">参考答案</h2><table class="ans">${all.map(answerOnlyHtml).join('')}</table>`
@@ -240,7 +288,7 @@ export function buildPaperHtml(paper: OrgPaper, questions: OrgQuestion[], option
               .map((q) => questionHtml(q, teacher))
               .join('')}`
           })
-          .join('')
+          .join('') + extrasHtml(paper)
 
   const card = options.withAnswerCard && options.version !== 'answer' ? answerCardHtml(views) : ''
   const versionText = options.version === 'teacher' ? '教师版（含答案解析）' : options.version === 'answer' ? '参考答案' : '学生版'

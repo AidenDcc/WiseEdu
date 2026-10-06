@@ -18,13 +18,27 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AppIcon, appConfirm, showToast, toPlainText, truncateRich, AppModal } from '@aiteach/shared'
-import type { MediaKind, OrgCollabTask, OrgMedia, OrgPaper, OrgQuestion, PaperAttachment, PaperSection } from '@aiteach/shared'
+import type {
+  MediaKind,
+  OrgCollabTask,
+  OrgMedia,
+  OrgPaper,
+  OrgQuestion,
+  PaperAttachment,
+  PaperExtra,
+  PaperExtraKind,
+  PaperSection,
+} from '@aiteach/shared'
 import PaperBlock from '@/components/paper/PaperBlock.vue'
 import PaperPreviewModal from '@/components/paper/PaperPreviewModal.vue'
+import AppDropdownMenu from '@/components/ui/AppDropdownMenu.vue'
 import {
+  DEFAULT_PAPER_NOTICES,
+  PAPER_EXTRAS,
   PAPER_LAYOUTS,
   PAPER_SIZES,
   isObjective,
+  makePaperExtra,
   paperGeometry,
   presetOf,
   presetVars,
@@ -49,7 +63,6 @@ import {
 import { useBaseData } from '@/composables/useBaseData'
 import { useComposeBasket } from '@/composables/useComposeBasket'
 import { defaultScore, findSectionIndex, makeSectionTitle, sectionKeywordsOf, sectionLabelOf, MAX_SECTIONS } from './paper-sections'
-import { exportPaperDoc, exportPaperPdf, type ExportVersion } from '@/utils/paper-export'
 
 const route = useRoute()
 const router = useRouter()
@@ -68,6 +81,27 @@ const sections = ref<PaperSection[]>([])
  * 移错了直接在面板里移出即可。
  */
 const attachments = ref<PaperAttachment[]>([])
+/**
+ * 卷面附加区块（表格 / 四线格 / 横线）。
+ *
+ * 与 `attachments` 一样**不进撤销栈**：撤销栈快照的是 `sections`（答题区），
+ * 把格子块一起塞进去要连带改历史面板的每一处；而且插错一个格子，
+ * 在块工具条里选中删掉就行，比先撤销卷面再重来轻得多。
+ *
+ * 顺序即卷面顺序，且一律排在各答题区之后（见 paperBlocks）—— 格子是给最后那道题写字用的。
+ */
+const extras = ref<PaperExtra[]>([])
+/** 新增区块的 id 自增源：同一张卷里要区分两个「表格」，见 load() 的重建 */
+let extraSeq = 1
+/**
+ * 卷首「注意事项」的编辑稿：一整段文本，**一行一条**。
+ *
+ * 存文本而不是数组，是因为面板里就是个 textarea —— 边打字边按行拆再写回输入框，
+ * 光标会在刚敲下的空行上乱跳。真正的数组由下面的 `notices` 在保存/排版时现拆。
+ */
+const noticesDraft = ref('')
+/** 卷首注意事项条目：拆行、去空行。空数组 = 卷面不印这一块（见 paper-layouts 的默认稿说明） */
+const notices = computed(() => noticesDraft.value.split('\n').map((row) => row.trim()).filter(Boolean))
 const meta = reactive({ owner: '', sharedSquare: false, status: 'draft' as OrgPaper['status'] })
 const questions = ref<OrgQuestion[]>([])
 const ownPaperIds = ref<number[]>([])
@@ -90,6 +124,8 @@ const paper = computed<OrgPaper>(() => ({
   status: meta.status,
   sections: sections.value,
   attachments: attachments.value,
+  extras: extras.value,
+  notices: notices.value,
   owner: meta.owner || '当前用户',
   updatedAt: nowText(),
   sharedSquare: meta.sharedSquare,
@@ -199,6 +235,10 @@ const paperBlocks = computed<EditBlock[]>(() => {
       })
     })
   })
+  /* 附加区块（表格 / 四线格 / 横线）排在全部答题区之后。
+     顺序必须与 PaperPreviewModal 一致（那里也是 append 在最后），否则预览里的换页位置
+     与本页对不上 —— 而本页的卖点就是「所见即所得」。 */
+  extras.value.forEach((extra) => list.push({ key: `p-extra-${extra.id}`, kind: 'extra', span: 2, extra }))
   return list
 })
 
@@ -265,8 +305,27 @@ function fitZoom() {
 }
 
 function nudgeZoom(delta: number) {
+  /* 手调过缩放就不再是「适应宽度」—— 留着选中会让下一次窗口变化把用户的缩放悄悄冲掉 */
   autoFit.value = false
   zoom.value = Math.min(1.6, Math.max(0.25, Number((zoom.value + delta).toFixed(2))))
+}
+
+/** 输入框里的纯数字（`%` 由旁边的 span 画，两者才好在同一行里上下居中） */
+const zoomText = computed(() => String(Math.round(zoom.value * 100)))
+
+/**
+ * 手输缩放百分比。非法输入（空、非数字、0 或负数）不改 `zoom`，
+ * 但**必须把输入框写回显示值** —— `:value` 绑的是 `zoom`，值没变 Vue 就不会重渲染这一格，
+ * 浏览器里会一直留着用户敲进去的那串乱码。
+ */
+function onZoomInput(event: Event) {
+  const input = event.target as HTMLInputElement
+  const value = Number(input.value.replace(/[^\d.]/g, ''))
+  if (Number.isFinite(value) && value > 0) {
+    autoFit.value = false
+    zoom.value = Math.min(1.6, Math.max(0.25, Number((value / 100).toFixed(2))))
+  }
+  input.value = zoomText.value
 }
 
 const sheetStyle = computed(() => ({
@@ -296,6 +355,8 @@ type Selection =
   | { kind: 'section'; si: number }
   | { kind: 'material'; si: number }
   | { kind: 'question'; si: number; qi: number }
+  /** 附加区块（表格 / 四线格 / 横线）：按 id 选中，不归任何大题 */
+  | { kind: 'extra'; id: number }
 
 const selected = ref<Selection | null>({ kind: 'head' })
 
@@ -318,16 +379,15 @@ function selectBlock(block: EditBlock) {
   else if (block.kind === 'material' && block.si != null) selected.value = { kind: 'material', si: block.si }
   else if (block.kind === 'question' && block.si != null && block.qi != null) {
     selected.value = { kind: 'question', si: block.si, qi: block.qi }
-  }
-  nextTick(() => {
-    document.querySelector(`[data-block="${block.key}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-  })
+  } else if (block.kind === 'extra') selected.value = { kind: 'extra', id: block.extra.id }
+  scrollToKey(block.key)
 }
 
 function isSelected(block: EditBlock): boolean {
   const sel = selected.value
   if (!sel) return false
   if (sel.kind === 'head') return block.kind === 'head'
+  if (sel.kind === 'extra') return block.kind === 'extra' && block.extra.id === sel.id
   if (block.si !== sel.si) return false
   if (sel.kind === 'section') return block.kind === 'section'
   if (sel.kind === 'material') return block.kind === 'material'
@@ -345,6 +405,71 @@ const selectedSection = computed(() => {
   if (sel?.kind !== 'section' && sel?.kind !== 'material') return null
   return sections.value[sel.si] ?? null
 })
+
+/* ================= 附加区块（表格 / 四线格 / 横线） ================= */
+
+/** 「插入」下拉的菜单项：与 paper-layouts 的 PAPER_EXTRAS 同一份，加第四种格型只改那一处 */
+const extraItems = PAPER_EXTRAS.map((row) => ({ key: row.kind, label: row.text, icon: row.icon }))
+
+const selectedExtra = computed(() => {
+  const sel = selected.value
+  return sel?.kind === 'extra' ? extras.value.find((row) => row.id === sel.id) ?? null : null
+})
+/** 块工具条上的块名（取菜单里那份文案，不另写一份中文） */
+const selectedExtraText = computed(() => extraTextOf(selectedExtra.value?.kind))
+
+/** 附加区块的显示名：菜单里那份文案是唯一一份，各处都从这里取 */
+function extraTextOf(kind: PaperExtraKind | undefined): string {
+  return PAPER_EXTRAS.find((row) => row.kind === kind)?.text ?? '附加区块'
+}
+
+/** 附加区块的图标：与菜单同一份配置，目录行与菜单里长得一样 */
+function extraIconOf(kind: PaperExtraKind | undefined): string {
+  return PAPER_EXTRAS.find((row) => row.kind === kind)?.icon ?? 'grid'
+}
+
+/**
+ * 插入一个附加区块：**追加到卷末**并立刻选中它（选中才会出现块工具条，行列数在那里调）。
+ *
+ * 为什么不做「插到当前选中块之后」：卷面顺序由大题、小题决定，插在中间就得把 `extras`
+ * 与 `sections` 的次序交织起来存，保存格式、分版、预览三处都得跟着改；而实际用法就是
+ * 「给最后那道作文题配一张作文纸」，追加到卷末已经够用。
+ *
+ * 不 commit 进撤销栈 —— 与 `attachments` 同一口径（见 `extras` 的声明）。插错了，
+ * 在块工具条上删掉即可，比「先撤销卷面改动、再重来一遍」轻得多。
+ */
+function insertExtra(kind: string) {
+  const extra = makePaperExtra(kind as PaperExtraKind, extraSeq++)
+  extras.value = [...extras.value, extra]
+  selected.value = { kind: 'extra', id: extra.id }
+  scrollToKey(`p-extra-${extra.id}`)
+  /* 只有表格有列数可调，四线格与横线都是通栏 —— 提示里别报一个调不了的量 */
+  const sizeText = extra.kind === 'table' ? '行列数' : '行数'
+  showToast(`${extraTextOf(extra.kind)}已加在卷末，可在块工具条里调${sizeText}`, 'success')
+}
+
+/** 把某个块滚进视野（`nearest`：已经在视野里就不动，别把老师正在看的地方推走） */
+function scrollToKey(key: string) {
+  nextTick(() => {
+    document.querySelector(`[data-block="${key}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  })
+}
+
+/** 改**当前选中**附加区块的行 / 列数：夹在 1~40，防止手滑输入 0 或 999 把分版算爆 */
+function setExtraSize(key: 'rows' | 'cols', value: number) {
+  const target = selectedExtra.value
+  if (!target) return
+  const size = Math.min(40, Math.max(1, Math.round(Number(value) || 0)))
+  extras.value = extras.value.map((row) => (row.id === target.id ? { ...row, [key]: size } : row))
+}
+
+function removeExtra() {
+  const target = selectedExtra.value
+  if (!target) return
+  extras.value = extras.value.filter((row) => row.id !== target.id)
+  /* 块没了就把选中退回卷头，否则块工具条会停在卷面上已经不存在的那个块上 */
+  selected.value = { kind: 'head' }
+}
 
 /* ================= 本地历史（撤销 / 重做 / 历史记录面板） ================= */
 
@@ -755,7 +880,7 @@ async function onReplace() {
   }
 }
 
-/* ================= 保存 / 预览 / 导出 / 打印 ================= */
+/* ================= 保存 / 预览 ================= */
 
 const previewOpen = ref(false)
 const previewInitial = reactive({ opened: false })
@@ -785,6 +910,10 @@ async function save(submit = false) {
       sections: JSON.parse(JSON.stringify(sections.value)) as PaperSection[],
       /* 随卷参考资料：显式传数组（空数组 = 清空），不传的话 savePaper 会保留原值 */
       attachments: JSON.parse(JSON.stringify(attachments.value)) as PaperAttachment[],
+      /* 卷面附加区块（表格 / 四线格 / 横线）同上：`[]` = 这次把它们全删了 */
+      extras: JSON.parse(JSON.stringify(extras.value)) as PaperExtra[],
+      /* 注意事项：空数组是「老师把这一块删了」，不能省成 undefined —— 那会被当成「没配过」印回默认稿 */
+      notices: notices.value,
       submit,
     })
     form.id = saved.id
@@ -801,24 +930,11 @@ async function save(submit = false) {
   }
 }
 
-const exportVersion = ref<ExportVersion>('student')
-
-function onExport(kind: 'doc' | 'pdf') {
-  const options = { version: exportVersion.value, withInfo: true, withAnswerCard: true }
-  try {
-    if (kind === 'doc') showToast(`已导出 ${exportPaperDoc(paper.value, questions.value, options)}`, 'success')
-    else {
-      exportPaperPdf(paper.value, questions.value, options)
-      showToast('已在新窗口打开，选择「另存为 PDF」即可', 'success')
-    }
-  } catch (error) {
-    showToast(error instanceof Error ? error.message : '导出失败', 'error')
-  }
-}
-
-function onPrint() {
-  window.print()
-}
+/* 顶栏原先的「导出 / 打印 / 卷面版本」三个控件已移除 —— 它们是**重复入口**：
+   导出 Word / PDF 与「学生版 / 教师版 / 纯答案」这套参数，预览弹窗（PaperPreviewModal）
+   里本来就有一整套，而预览正是从本页顶栏进的。
+   页面底部的 `@media print` 与 `body.pe-print-open` 仍然保留：那是给浏览器自带的
+   Ctrl/⌘+P 用的（类只在编辑页挂载，其它页面打印不受影响），与顶栏有没有按钮无关。 */
 
 /** 全文设置 → 预览的初始值：点预览时不该把刚设好的版式重置掉 */
 const previewSize = computed(() => sizeKey.value)
@@ -867,6 +983,13 @@ async function load() {
     meta.status = source.status
     sections.value = JSON.parse(JSON.stringify(source.sections)) as PaperSection[]
     attachments.value = JSON.parse(JSON.stringify(source.attachments ?? [])) as PaperAttachment[]
+    extras.value = JSON.parse(JSON.stringify(source.extras ?? [])) as PaperExtra[]
+    /* 自增源从既有区块的最大 id 之后接着发号：否则新插入的块会和已有的撞 id，
+       blockMap 里同 key 的块互相顶替，选中与高度就全乱了 */
+    extraSeq = Math.max(0, ...extras.value.map((row) => row.id)) + 1
+    /* 没配过注意事项的卷子（`undefined`）用默认稿**回填输入框**：卷面上印着默认稿、
+       面板里却是空的，老师会以为设置没生效。存过的（含空数组）原样带出。 */
+    noticesDraft.value = (source.notices ?? DEFAULT_PAPER_NOTICES).join('\n')
     sectionSeq = Math.max(...sections.value.map((row) => row.id), 0) + 1
     /* 撤销栈需要一个起点：把「刚打开时」的卷面记为第一版，否则第一次撤销是空的 */
     snapshots.value = []
@@ -928,8 +1051,12 @@ async function loadMedia() {
   media.value = await fetchMedia()
 }
 
+/* 卷面（或纸张 / 版式 / 页眉样式）一变就要重新量块高 —— 块高决定分页。
+   **但这里绝不能把 `measured` 打回 false**：那会让下面的 `v-for="sheet in measured ? sheets : []"`
+   在一帧之内把整叠纸页卸载掉，画布里只剩「正在按…纸面排版」那一行，滚动容器的内容高度瞬间塌掉，
+   浏览器的 scrollTop 被钳回 0 —— 用户看到的就是「在工具条里改个分值，画布自己弹回顶部」。
+   宁可让旧高度多撑一帧（分页下一帧 rAF 量完就自正），也不要把滚动位置弄丢。 */
 watch([paperBlocks, () => `${geo.value.panelW}|${preset.value.key}|${preset.value.headStyle}`], () => {
-  measured.value = false
   nextTick(scheduleMeasure)
 })
 watch([geo, canvasW, autoFit], () => {
@@ -970,9 +1097,6 @@ function mmOf(px: number): number {
   <div class="pe-shell">
     <!-- ===== 顶部：卷名 + 主操作 ===== -->
     <header class="pe-head">
-      <button class="pe-back" type="button" title="返回试卷库" @click="router.push('/paper/list')">
-        <AppIcon name="chevron-left" :size="16" />
-      </button>
       <div class="pe-title-wrap">
         <input v-model="form.name" class="pe-title" maxlength="50" placeholder="试卷名称（2-50 字）" />
         <div class="pe-title-meta">
@@ -982,29 +1106,15 @@ function mmOf(px: number): number {
         </div>
       </div>
 
+      <!-- 顶栏只留「这一页独有、别处进不去」的动作：
+           撤销/重做下面工具条里有，导出/打印/卷面版本在预览弹窗里有（那里本来就是导出的发起点），
+           返回也没必要 —— 本页是别人的新标签页，关掉即可。 -->
       <div class="pe-head-ops">
-        <button class="btn btn-ghost btn-sm" type="button" :disabled="!canUndo" title="撤销（⌘Z）" @click="undo">
-          <AppIcon name="undo" :size="14" />
-        </button>
-        <button class="btn btn-ghost btn-sm" type="button" :disabled="!canRedo" title="重做（⇧⌘Z）" @click="redo">
-          <AppIcon name="redo" :size="14" />
-        </button>
-        <select v-model="exportVersion" class="pe-select" title="导出卷面版本">
-          <option value="student">学生版</option>
-          <option value="teacher">教师版</option>
-          <option value="answer">纯答案</option>
-        </select>
-        <button class="btn btn-ghost btn-sm" type="button" @click="onExport('doc')">
-          <AppIcon name="download" :size="14" /> 导出
-        </button>
-        <button class="btn btn-ghost btn-sm" type="button" @click="onPrint">
-          <AppIcon name="print" :size="14" /> 打印
-        </button>
         <button class="btn btn-ghost btn-sm" type="button" @click="openCollab">
-          <AppIcon name="users" :size="14" /> {{ currentTask ? '进入协同任务' : '协同组卷' }}
+          <AppIcon name="users" :size="14" /> {{ currentTask ? '协同任务' : '协同组卷' }}
         </button>
         <button class="btn btn-ghost btn-sm" type="button" @click="previewOpen = true">
-          <AppIcon name="eye" :size="14" /> 预览试卷
+          <AppIcon name="eye" :size="14" /> 预览
         </button>
         <button class="btn btn-primary btn-sm" type="button" :disabled="saving" @click="save(false)">
           {{ saving ? '保存中…' : '保存' }}
@@ -1012,7 +1122,10 @@ function mmOf(px: number): number {
       </div>
     </header>
 
-    <!-- ===== 工具栏（对标 Word 式功能条：插入 / 版式 / 视图） ===== -->
+    <!-- ===== 工具栏（对标 Word 式功能条：插入 / 视图） =====
+         刻意不再摆「版式 / 纸张 / 方向」：那三项是**卷级**设置，全文设置面板与底部版式条里
+         都已经有了，工具栏再放一份，改完不知道以哪一处为准。这里只留随手要用的动作。
+         「目录」开关也不在这里 —— 它挪到了左边框上（见 .pe-outline-tab）。 -->
     <div class="pe-toolbar">
       <div class="pe-tool-group">
         <button class="pe-tool" type="button" :disabled="!canUndo" @click="undo"><AppIcon name="undo" :size="14" /> 撤销</button>
@@ -1020,6 +1133,12 @@ function mmOf(px: number): number {
       </div>
       <span class="pe-tool-sep" />
       <div class="pe-tool-group">
+        <!-- 表格 / 四线格 / 横线：格型会越加越多，用下拉而不是平铺三个按钮 -->
+        <AppDropdownMenu :items="extraItems" align="left" :width="186" @select="insertExtra">
+          <button class="pe-tool" type="button">
+            <AppIcon name="grid" :size="14" /> 插入格子 <AppIcon name="chevron-down" :size="12" />
+          </button>
+        </AppDropdownMenu>
         <button class="pe-tool" type="button" @click="panelRail = panelRail === 'bank' ? '' : 'bank'">
           <AppIcon name="plus" :size="14" /> 插入题目
         </button>
@@ -1035,30 +1154,17 @@ function mmOf(px: number): number {
       </div>
       <span class="pe-tool-sep" />
       <div class="pe-tool-group">
-        <span class="pe-tool-label">版式</span>
-        <select v-model="layoutKey" class="pe-select" style="width: 148px">
-          <option v-for="row in PAPER_LAYOUTS" :key="row.key" :value="row.key">{{ row.name }}</option>
-        </select>
-        <span class="pe-tool-label">纸张</span>
-        <select v-model="sizeKey" class="pe-select" style="width: 150px">
-          <option v-for="row in PAPER_SIZES" :key="row.key" :value="row.key">{{ row.name }}（{{ row.mm }}）</option>
-        </select>
-        <div class="pe-seg">
-          <button type="button" :class="{ on: orientation === 'portrait' }" @click="orientation = 'portrait'">纵向</button>
-          <button type="button" :class="{ on: orientation === 'landscape' }" @click="orientation = 'landscape'">横向</button>
+        <span class="pe-tool-label">缩放</span>
+        <div class="pe-seg pe-zoom-seg">
+          <button type="button" title="缩小" @click="nudgeZoom(-0.1)"><AppIcon name="minus" :size="13" /></button>
+          <!-- 数字可手输：`%` 单独一个 span，才能和数字在同一行里上下居中对齐 -->
+          <label class="pe-zoom-cell" title="可直接输入百分比">
+            <input :value="zoomText" inputmode="numeric" aria-label="缩放百分比" @change="onZoomInput" />
+            <span>%</span>
+          </label>
+          <button type="button" title="放大" @click="nudgeZoom(0.1)"><AppIcon name="plus" :size="13" /></button>
         </div>
-      </div>
-      <span class="pe-tool-sep" />
-      <div class="pe-tool-group">
-        <button class="pe-tool" type="button" :class="{ on: outlineOpen }" @click="outlineOpen = !outlineOpen">
-          <AppIcon name="list-ul" :size="14" /> 目录
-        </button>
-        <div class="pe-seg">
-          <button type="button" @click="nudgeZoom(-0.1)"><AppIcon name="minus" :size="13" /></button>
-          <span class="pe-zoom">{{ Math.round(zoom * 100) }}%</span>
-          <button type="button" @click="nudgeZoom(0.1)"><AppIcon name="plus" :size="13" /></button>
-        </div>
-        <button class="pe-tool" type="button" :class="{ on: autoFit }" @click="autoFit = true">适应宽度</button>
+        <button class="pe-tool" type="button" :class="{ on: autoFit }" @click="autoFit = true">适应</button>
       </div>
       <div class="pe-tool-group pe-tool-right">
         <span class="pe-tool-hint">共 {{ sheets.length }} 页 · 一面 {{ geo.panels }} 版</span>
@@ -1066,6 +1172,14 @@ function mmOf(px: number): number {
     </div>
 
     <div class="pe-body">
+      <!-- 目录开关：钉在左边框上的竖把手，只在目录**收起**时露出来。
+           展开后由目录自带的「收起」按钮接管 —— 同一时刻只有一个开关，
+           不会出现「两个都能点、点了还不知道会怎样」的重复入口。 -->
+      <button v-if="!outlineOpen" class="pe-outline-tab" type="button" title="展开目录" @click="outlineOpen = true">
+        <AppIcon name="list-ul" :size="14" />
+        <span>目录</span>
+      </button>
+
       <!-- ===== 左：目录（大纲） ===== -->
       <aside v-if="outlineOpen" class="pe-outline">
         <div class="pe-outline-head">
@@ -1092,12 +1206,28 @@ function mmOf(px: number): number {
             第 {{ qi + 1 }} 题 · {{ itemOf(entry.questionId)?.type ?? '未知' }} · {{ entry.score }} 分
           </button>
         </div>
+        <!-- 附加区块列在最后：卷面上它们也排在各答题区之后，目录顺序跟卷面一致 -->
+        <button
+          v-for="row in extras"
+          :key="row.id"
+          class="pe-ol-row"
+          type="button"
+          @click="scrollToBlock(`p-extra-${row.id}`)"
+        >
+          <AppIcon :name="extraIconOf(row.kind)" :size="13" /> {{ extraTextOf(row.kind) }}
+          <em v-if="row.kind === 'table'">{{ row.rows }} × {{ row.cols }}</em>
+          <em v-else>{{ row.rows }} 行</em>
+        </button>
         <p class="pe-outline-tip">点击目录可定位到卷面对应位置</p>
       </aside>
 
-      <!-- ===== 中：纸面画布 ===== -->
-      <div ref="canvas" class="pe-canvas">
-        <!-- 浮动块工具条：选中块的即时操作（绝对定位，不参与纸面排版） -->
+      <!-- ===== 中：纸面画布 =====
+           两级结构：上面那条块工具条是**钉死的**（不随纸面滚动），下面 .pe-canvas 才是滚动区。
+           原先工具条在画布内部用 `position: sticky`，于是它既被纸页滚动拖着走、又参与内容重排 ——
+           在工具条里改个分值，卷面重新分版、整叠纸页卸载重建，滚动位置就被一起带走了。
+           拆成兄弟节点后，滚动只发生在下方，工具条的高度变化也再也影响不到画布的滚动几何。 -->
+      <div class="pe-stage">
+        <!-- 块工具条：选中块的即时操作 -->
         <div v-if="selected" class="pe-blockbar">
           <template v-if="selected.kind === 'head'">
             <span class="pe-bb-label">卷头</span>
@@ -1111,6 +1241,34 @@ function mmOf(px: number): number {
             </datalist>
             <input v-model.number="form.duration" type="number" min="10" max="300" class="f-input pe-bb-input" style="width: 76px" />
             <span class="pe-bb-hint">分钟</span>
+          </template>
+
+          <!-- 附加区块：行列数就地改。只有表格有列数，四线格与横线都是通栏 -->
+          <template v-else-if="selectedExtra">
+            <span class="pe-bb-label">{{ selectedExtraText }}</span>
+            <input
+              type="number"
+              min="1"
+              max="40"
+              class="f-input pe-bb-input"
+              style="width: 70px"
+              :value="selectedExtra.rows"
+              @change="setExtraSize('rows', Number(($event.target as HTMLInputElement).value))"
+            />
+            <span class="pe-bb-hint">行</span>
+            <template v-if="selectedExtra.kind === 'table'">
+              <input
+                type="number"
+                min="1"
+                max="40"
+                class="f-input pe-bb-input"
+                style="width: 70px"
+                :value="selectedExtra.cols"
+                @change="setExtraSize('cols', Number(($event.target as HTMLInputElement).value))"
+              />
+              <span class="pe-bb-hint">列</span>
+            </template>
+            <button class="mini-btn danger" type="button" @click="removeExtra">删除此块</button>
           </template>
 
           <template v-else-if="selected.kind === 'section' && selectedSection">
@@ -1173,63 +1331,65 @@ function mmOf(px: number): number {
           </template>
         </div>
 
-        <div v-if="loading" class="pe-empty">正在载入试卷…</div>
-        <div v-else-if="totalCount === 0 && !sections.length" class="pe-empty">该试卷还没有大题</div>
-        <div v-else-if="!measured" class="pe-empty">正在按 {{ size.name }} 纸面排版…</div>
+        <div ref="canvas" class="pe-canvas">
+          <div v-if="loading" class="pe-empty">正在载入试卷…</div>
+          <div v-else-if="totalCount === 0 && !sections.length" class="pe-empty">该试卷还没有大题</div>
+          <div v-else-if="!measured" class="pe-empty">正在按 {{ size.name }} 纸面排版…</div>
 
-        <div v-for="sheet in measured ? sheets : []" :key="sheet.key" class="pe-page">
-          <div class="pe-page-tag">第 {{ sheet.index }} 页 / 共 {{ sheet.total }} 页</div>
-          <div class="pe-sheet-wrap" :style="sheetWrapStyle">
-            <div class="pe-sheet" :style="sheetStyle">
-              <div v-if="preset.headStyle === 'seal'" class="pe-seal">
-                <span>姓名＿＿＿＿＿ 班级＿＿＿＿＿ 考号＿＿＿＿＿ 密封线内不要答题</span>
-              </div>
-              <div class="pe-body-inner" :style="bodyStyle">
-                <div class="pe-panels" :class="{ 'is-multi': geo.panels > 1 }">
-                  <div v-for="(panel, pi) in sheet.pages" :key="pi" class="pe-panel">
-                    <template v-for="(row, ri) in panel.rows" :key="ri">
-                      <div
-                        v-if="row.kind === 'full'"
-                        class="pe-row"
-                        :class="{ 'is-sel': isSelectedKey(row.block.key) }"
-                        :data-block="row.block.key"
-                        @click="selectKey(row.block.key)"
-                      >
-                        <PaperBlock :block="row.block" :paper="paper" :questions="questions" :preset="preset" :teacher="false" />
-                      </div>
-                      <div v-else class="pe-row pe-cols" :style="{ gap: `${colGap}px` }">
-                        <div v-for="(col, ci) in [row.left, row.right]" :key="ci" class="pe-col">
-                          <div
-                            v-for="block in col"
-                            :key="block.key"
-                            class="pe-col-block"
-                            :class="{ 'is-sel': isSelectedKey(block.key) }"
-                            :data-block="block.key"
-                            @click="selectKey(block.key)"
-                          >
-                            <PaperBlock :block="block" :paper="paper" :questions="questions" :preset="preset" :teacher="false" />
+          <div v-for="sheet in measured ? sheets : []" :key="sheet.key" class="pe-page">
+            <div class="pe-page-tag">第 {{ sheet.index }} 页 / 共 {{ sheet.total }} 页</div>
+            <div class="pe-sheet-wrap" :style="sheetWrapStyle">
+              <div class="pe-sheet" :style="sheetStyle">
+                <div v-if="preset.headStyle === 'seal'" class="pe-seal">
+                  <span>姓名＿＿＿＿＿ 班级＿＿＿＿＿ 考号＿＿＿＿＿ 密封线内不要答题</span>
+                </div>
+                <div class="pe-body-inner" :style="bodyStyle">
+                  <div class="pe-panels" :class="{ 'is-multi': geo.panels > 1 }">
+                    <div v-for="(panel, pi) in sheet.pages" :key="pi" class="pe-panel">
+                      <template v-for="(row, ri) in panel.rows" :key="ri">
+                        <div
+                          v-if="row.kind === 'full'"
+                          class="pe-row"
+                          :class="{ 'is-sel': isSelectedKey(row.block.key) }"
+                          :data-block="row.block.key"
+                          @click="selectKey(row.block.key)"
+                        >
+                          <PaperBlock :block="row.block" :paper="paper" :questions="questions" :preset="preset" :teacher="false" />
+                        </div>
+                        <div v-else class="pe-row pe-cols" :style="{ gap: `${colGap}px` }">
+                          <div v-for="(col, ci) in [row.left, row.right]" :key="ci" class="pe-col">
+                            <div
+                              v-for="block in col"
+                              :key="block.key"
+                              class="pe-col-block"
+                              :class="{ 'is-sel': isSelectedKey(block.key) }"
+                              :data-block="block.key"
+                              @click="selectKey(block.key)"
+                            >
+                              <PaperBlock :block="block" :paper="paper" :questions="questions" :preset="preset" :teacher="false" />
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </template>
+                      </template>
+                    </div>
                   </div>
                 </div>
+                <div v-if="preset.pageNumber" class="pe-foot">第 {{ sheet.index }} 页 · 共 {{ sheet.total }} 页</div>
               </div>
-              <div v-if="preset.pageNumber" class="pe-foot">第 {{ sheet.index }} 页 · 共 {{ sheet.total }} 页</div>
             </div>
           </div>
-        </div>
 
-        <!-- 隐藏测量层：与纸面同组件同变量同宽度 -->
-        <div ref="measureHost" class="pe-measure" :style="vars">
-          <div
-            v-for="block in paperBlocks"
-            :key="block.key"
-            class="pe-measure-item"
-            :data-block-key="block.key"
-            :style="{ width: measureWidth(block) }"
-          >
-            <PaperBlock :block="block" :paper="paper" :questions="questions" :preset="preset" :teacher="false" />
+          <!-- 隐藏测量层：与纸面同组件同变量同宽度 -->
+          <div ref="measureHost" class="pe-measure" :style="vars">
+            <div
+              v-for="block in paperBlocks"
+              :key="block.key"
+              class="pe-measure-item"
+              :data-block-key="block.key"
+              :style="{ width: measureWidth(block) }"
+            >
+              <PaperBlock :block="block" :paper="paper" :questions="questions" :preset="preset" :teacher="false" />
+            </div>
           </div>
         </div>
       </div>
@@ -1311,6 +1471,21 @@ function mmOf(px: number): number {
                   <option value="trail">题干末尾</option>
                 </select>
               </div>
+            </div>
+
+            <!-- 卷首注意事项：卷面上印在卷头正下方的那一块，一行一条。空着就不印 -->
+            <div class="pe-field">
+              <label>卷首注意事项</label>
+              <textarea
+                v-model="noticesDraft"
+                class="f-textarea"
+                rows="4"
+                placeholder="一行一条，卷面按 1．2．3． 顺序印在卷头下方；全部清空则卷面不再印这一块"
+              />
+              <p class="f-hint">一行一条，同一条内不要换行。清空后卷面不再印这一块。</p>
+              <button class="mini-btn" type="button" @click="noticesDraft = DEFAULT_PAPER_NOTICES.join('\n')">
+                恢复默认说明
+              </button>
             </div>
 
             <label class="pe-check">
@@ -1634,19 +1809,6 @@ function mmOf(px: number): number {
   flex-shrink: 0;
   z-index: 30;
 }
-.pe-back {
-  width: 34px;
-  height: 34px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: #fff;
-  color: var(--ink-2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.pe-back:hover { border-color: var(--brand); color: var(--brand-deep); }
 .pe-title-wrap { flex: 1; min-width: 0; }
 .pe-title {
   width: 100%;
@@ -1671,16 +1833,6 @@ function mmOf(px: number): number {
 }
 .pe-owner { color: var(--sub); }
 .pe-head-ops { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.pe-select {
-  height: 34px;
-  border: 1.5px solid var(--border);
-  border-radius: 9px;
-  background: #fff;
-  font-size: 12.5px;
-  color: var(--ink-2);
-  padding: 0 8px;
-}
-.pe-select:focus { border-color: var(--brand); outline: none; }
 
 /* ===== 工具栏 ===== */
 .pe-toolbar {
@@ -1714,7 +1866,6 @@ function mmOf(px: number): number {
 .pe-tool:hover:not(:disabled) { background: #f2f5fa; }
 .pe-tool:disabled { color: #c3cad8; cursor: not-allowed; }
 .pe-tool.on { background: var(--brand-soft); color: var(--brand-deep); border-color: var(--brand); }
-.pe-zoom { font-size: 12px; color: var(--ink-2); min-width: 40px; text-align: center; }
 .pe-seg { display: inline-flex; border: 1.5px solid var(--border); border-radius: 9px; overflow: hidden; background: #fff; }
 .pe-seg.full { width: 100%; }
 .pe-seg button {
@@ -1732,8 +1883,66 @@ function mmOf(px: number): number {
 .pe-seg button:hover { background: #f2f5fa; }
 .pe-seg button.on { background: var(--brand-soft); color: var(--brand-deep); font-weight: 600; }
 
+/* 缩放输入格：数字可手输，`%` 单独一个 span。
+   两者都在 flex 行里 `align-items: center` 对齐 —— 早先把「100%」当一整块文本居中，
+   数字与百分号各按自己的基线落位，看着是歪的。输入框去掉了行高与内边距，
+   免得它自带的 line-height 把整格顶高。 */
+.pe-zoom-seg { align-items: stretch; }
+.pe-zoom-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 0 6px;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  background: #fff;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+.pe-zoom-cell input {
+  width: 30px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  line-height: 1;
+  color: inherit;
+  text-align: right;
+}
+.pe-zoom-cell input:focus { outline: none; color: var(--brand-deep); font-weight: 600; }
+
 /* ===== 主体三区 ===== */
-.pe-body { flex: 1; display: flex; min-height: 0; }
+/* relative 是给左边框上那个目录把手做定位基准 */
+.pe-body { flex: 1; display: flex; min-height: 0; position: relative; }
+
+/* 目录开关：贴在左边界上的竖把手。
+   绝对定位浮在画布之上，**不占版面宽度** —— 目录收起时画布是满宽的，
+   为一条开关留 30px 的白边反而更碍眼。只在目录收起时出现（v-if），
+   展开后由目录自带的「收起」按钮接管，同一时刻只有一个出口。 */
+.pe-outline-tab {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 5px;
+  border: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 10px 10px 0;
+  background: #fff;
+  color: var(--ink-2);
+  font-size: 12px;
+  /* 竖排：把手窄，横排的「目录」两字会把条撑得很宽 */
+  writing-mode: vertical-rl;
+  letter-spacing: 2px;
+  box-shadow: 2px 0 8px rgba(20, 30, 60, 0.07);
+}
+.pe-outline-tab:hover { color: var(--brand-deep); border-color: var(--brand); }
 
 /* 左：目录 */
 .pe-outline {
@@ -1781,7 +1990,8 @@ function mmOf(px: number): number {
 }
 .pe-ol-row:hover { background: #f2f5fa; }
 .pe-ol-row.strong { font-weight: 700; color: var(--ink); }
-.pe-ol-row.strong em { margin-left: auto; font-style: normal; font-size: 11px; color: var(--sub); font-weight: 400; }
+/* 行尾的附注（大题的「N 题 / M 分」、附加区块的「3 × 4」）：靠到最右边，不吃斜体 */
+.pe-ol-row em { margin-left: auto; font-style: normal; font-size: 11px; color: var(--sub); font-weight: 400; }
 .pe-ol-sub {
   display: block;
   width: 100%;
@@ -1796,38 +2006,44 @@ function mmOf(px: number): number {
 .pe-ol-sub:hover { background: #f2f5fa; color: var(--brand-deep); }
 .pe-outline-tip { font-size: 11.5px; color: var(--sub); padding: 12px 8px 0; line-height: 1.6; }
 
-/* 中：画布 */
-.pe-canvas {
+/* 中：画布。
+   两级：.pe-stage 是「块工具条 + 画布」这一列，.pe-canvas 才是滚动区。
+   背景色与 flex: 1 归 .pe-stage —— 工具条要铺满整个中栏宽度，不能被画布的左右内边距夹住。 */
+.pe-stage {
   flex: 1;
   min-width: 0;
-  overflow: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   background: #eef1f6;
+}
+.pe-canvas {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
   padding: 18px 32px 60px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 22px;
-  position: relative;
 }
 .pe-empty { margin: auto; font-size: 13px; color: var(--sub); }
 
-/* 浮动块工具条 */
+/* 块工具条：钉在中栏顶部，**不在画布的滚动区里**（画布是下面那个 .pe-canvas）。
+   早先它是画布内容里的 `position: sticky` —— 既要跟着纸页滚，又要在内容重排时跟着重排；
+   结果「在工具条里改个数值 → 卷面重新分版」这一下连滚动位置一起带走了。
+   现在它是 flex 列的一项、`flex-shrink: 0`，高度变化只挤压下面的画布，碰不到滚动几何。
+   左右不留内边距、底边留一条描边：它是钉住的条，不是浮在纸面上的卡片。 */
 .pe-blockbar {
-  position: sticky;
-  top: 0;
+  flex-shrink: 0;
   z-index: 20;
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
   background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: var(--shadow);
-  padding: 7px 12px;
-  margin-bottom: 6px;
-  align-self: stretch;
-  max-width: 1180px;
+  border-bottom: 1px solid var(--border);
+  padding: 8px 18px;
 }
 .pe-bb-label { font-size: 12.5px; font-weight: 700; color: var(--ink); }
 .pe-bb-hint { font-size: 11.5px; color: var(--sub); }
@@ -2117,6 +2333,7 @@ function mmOf(px: number): number {
   .pe-head,
   .pe-toolbar,
   .pe-outline,
+  .pe-outline-tab,
   .pe-side,
   .pe-rail,
   .pe-footbar,
@@ -2126,10 +2343,10 @@ function mmOf(px: number): number {
 
   .pe-shell { height: auto !important; overflow: visible !important; }
   .pe-body { display: block !important; }
+  .pe-stage { display: block !important; background: none !important; }
   .pe-canvas {
     display: block !important;
     overflow: visible !important;
-    background: none !important;
     padding: 0 !important;
   }
   .pe-page { display: block !important; }

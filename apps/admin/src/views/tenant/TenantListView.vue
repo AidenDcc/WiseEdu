@@ -27,6 +27,15 @@ const DURATIONS = [
 ]
 
 const FILTERS = reactive<Record<string, string[]>>({ status: [], package: [], orgType: [] })
+
+/* AppFilterPanel 回传整份筛选值（覆盖式回写），逐 key 写回这份 reactive 对象本身。
+   不能交给 `v-model`：它会替换掉整个对象，而替换引用不是一次响应式写入 —— 点了 chip
+   既不亮选中态也不重新筛选。机构端 CollabView 里有同款说明。 */
+function onFiltersChange(next: Record<string, string[]>) {
+  FILTERS.status = next.status ?? []
+  FILTERS.package = next.package ?? []
+  FILTERS.orgType = next.orgType ?? []
+}
 const keyword = ref('')
 const expireFrom = ref('')
 const expireTo = ref('')
@@ -359,7 +368,7 @@ async function submitCreate() {
   <div>
     <div class="panel">
       <!-- 筛选栏 -->
-      <AppFilterPanel v-model="FILTERS" :rows="FILTER_ROWS">
+      <AppFilterPanel :rows="FILTER_ROWS" :model-value="FILTERS" @update:model-value="onFiltersChange">
         <template #extra>
           <div class="range-row">
             <span class="range-label">到期时间</span>

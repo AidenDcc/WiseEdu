@@ -19,7 +19,7 @@
 import { computed, ref, watch } from 'vue'
 import { AppIcon, showToast } from '@aiteach/shared'
 import type { OrgKnowledgeNode } from '@aiteach/shared'
-import { useKnowledgePool } from '@/composables/useKnowledgePool'
+import { collectTags, useKnowledgePool } from '@/composables/useKnowledgePool'
 
 const props = defineProps<{
   modelValue: string[]
@@ -40,6 +40,14 @@ const props = defineProps<{
    * 撑满会把树压成一条缝）。
    */
   fill?: boolean
+  /**
+   * 藏起顶部那条「已选 N 个知识点 + chip」。
+   *
+   * 给智能组卷用：那一页的已选知识点要回显在**右侧第一步的表单里**（左树与表单是两个区域，
+   * 左树只负责勾选），而这条 chip 行长在树自己的根节点里 —— 不藏的话同一批知识点会在
+   * 左右两处各长一遍，用户会以为选重了。
+   */
+  hideSelected?: boolean
 }>()
 
 const emit = defineEmits<{ 'update:modelValue': [tags: string[]] }>()
@@ -202,21 +210,35 @@ const treeRows = computed<TreeRow[]>(() => {
   return rows
 })
 
-/* 学科/版本变了，旧展开状态与选中标签都对应不上新树了 */
+/** 作用域变了：旧展开状态对应不上新树了，收起重来 */
 watch(
   () => `${props.grade ?? ''}|${props.subject}|${props.version ?? ''}`,
   () => {
     query.value = ''
     expanded.value = new Set(nodes.value.filter((node) => node.parentId == null).map((node) => node.id))
-    if (props.modelValue.length) emit('update:modelValue', [])
   },
 )
 
-/* 首次加载完成后展开所有根节点 */
+/**
+ * 新树到位后：**摘掉新树里已经不存在的已选标签**，并展开根节点。
+ *
+ * 清空**不按「作用域 key 变没变」判，而按「这些标签在新树里还成不成立」判**。两者换学科时
+ * 结果一样（数学的标签在英语树里一个不剩，等于清空），但**换年级**时不一样：知识点树是按学科
+ * （+学段）取的，同科换年级往往返回同一批叶子 —— 旧写法会在用户挑完知识点、只是回头改一下
+ * 年级时把已选全抹掉，而树上其实什么都没变，看起来就是「我刚选的东西自己没了」。
+ * 逐标签过滤在标签真换了时照样清干净，所以这么改只赚不亏。
+ *
+ * 过滤放在 `nodes` 变化之后、而不是作用域变化的那一拍：作用域变了、新树还在路上时，
+ * 拿旧树去判会把本来有效的标签误删。
+ */
 watch(nodes, (list) => {
   if (expanded.value.size === 0 && list.length) {
     expanded.value = new Set(list.filter((node) => node.parentId == null).map((node) => node.id))
   }
+  if (!props.modelValue.length || !list.length) return
+  const tags = new Set(collectTags(list))
+  const kept = props.modelValue.filter((tag) => tags.has(tag))
+  if (kept.length !== props.modelValue.length) emit('update:modelValue', kept)
 })
 
 const treeStyle = computed(() => (props.fill ? undefined : { maxHeight: props.maxHeight ?? '300px' }))
@@ -224,8 +246,8 @@ const treeStyle = computed(() => (props.fill ? undefined : { maxHeight: props.ma
 
 <template>
   <div class="kp-picker" :class="{ fill }">
-    <!-- 已选知识点：可逐个删除 -->
-    <div v-if="modelValue.length" class="kp-selected">
+    <!-- 已选知识点：可逐个删除（`hideSelected` 时交给调用方在别处长，见 props 注释） -->
+    <div v-if="modelValue.length && !hideSelected" class="kp-selected">
       <span class="kp-selected-label">已选 {{ modelValue.length }} 个知识点</span>
       <button v-for="tag in modelValue" :key="tag" class="kp-chip" type="button" @click="removeTag(tag)">
         {{ tag }}

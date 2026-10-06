@@ -621,11 +621,60 @@ export interface PaperAttachment {
   sizeMb: number
 }
 
+/** 卷面附加区块的三种形态：表格 / 四线格 / 横线 */
+export type PaperExtraKind = 'table' | 'english' | 'lines'
+
+/**
+ * 卷面附加区块（FR-PP：试卷编辑「插入」）。
+ *
+ * 它们**不属于任何大题**：没有题号、不计分、不参与总分，只是印在卷面上供学生作答的格子
+ * （表格题、英语书写、通用横线）。故与 `attachments` 同理，走 `OrgPaper.extras` 单开一个字段，
+ * 而不是塞进 `PaperSection.questions`（那里的 id 空间是题库题目）。
+ *
+ * 存在顺序：数组顺序即卷面上的先后顺序，统一排在各答题区之后（见 PaperEditView 的 paperBlocks）。
+ */
+export interface PaperExtra {
+  /** 块内唯一 id（同一张卷里区分两个「表格」） */
+  id: number
+  kind: PaperExtraKind
+  /** 表格行数 / 四线格组数 / 横线条数 */
+  rows: number
+  /** 只有表格用得上；四线格与横线都是通栏，此值无意义（留 1） */
+  cols: number
+}
+
 export type PaperStatus = 'draft' | 'aiReview' | 'pending' | 'approved' | 'rejected'
 
 /** 试卷来源的候选取值（新建试卷按入口自动标记；试卷库「来源」筛选用同一份） */
 export const PAPER_SOURCE_OPTIONS = ['手动组卷', '协同组卷', 'AI 组卷', '真题导入', '文档识别'] as const
 export type PaperSource = (typeof PAPER_SOURCE_OPTIONS)[number]
+
+/**
+ * 年份筛选里「更早以前」的哨兵值。
+ *
+ * 它不是年份，只是年份行里的一个取值：「2026 年」和「更早以前」可以同时选中
+ * （= 2026 年的卷，或比近三届更早的卷）。故意取一个不可能与真实年份相撞的字符串。
+ *
+ * 定义在 shared 而不是组卷工作台的 types.ts：**mock 也要判它**（智能组卷按
+ * 「优先年份」给题打分，见 org-store 的 aiComposePaper），而 mock 不能反向 import 租户端代码。
+ * 前端那三处仍从 `views/paper/compose/types.ts` 导入（那里 re-export，路径不变）。
+ */
+export const EARLIER_YEAR = 'earlier'
+
+/** 年份行里单列的最新几届：更早的年份都并进「更早以前」，这一行才不会年年越铺越长 */
+export const RECENT_YEAR_COUNT = 3
+
+/**
+ * 年份是否落在「更早以前」这一档（比最近三届更早）。
+ *
+ * 阈值取自**当前年份**而不是卷池：谓词逐行判定，拿不到「这一屏里有哪些年份」；
+ * 若按卷池推导，同一份卷会在卷池变化时改变归属，「更早以前」就不再是一个稳定档位。
+ * 空年份（没有年份的卷）不算 —— 与其它可缺省维度同一口径：缺省值不命中任何档。
+ */
+export function isEarlierYear(year: string | undefined): boolean {
+  if (!year) return false
+  return Number(year) < new Date().getFullYear() - RECENT_YEAR_COUNT + 1
+}
 
 export interface OrgPaper {
   id: number
@@ -666,6 +715,18 @@ export interface OrgPaper {
   parallelLabel?: string
   /** 随卷保存的参考资料（组卷车里的图片 / 视频 / 小程序），见 PaperAttachment */
   attachments?: PaperAttachment[]
+  /**
+   * 卷面附加区块（表格 / 四线格 / 横线），见 PaperExtra。数组顺序即卷面顺序。
+   */
+  extras?: PaperExtra[]
+  /**
+   * 卷首「注意事项」的自定义条目，一条一行。
+   *
+   * 存 `string[]` 而不是一整段文本：卷面上本来就是逐条缩进排的，拆好的条目在导出 Word / PDF
+   * 时也能各自成段。空数组 = 老师把注意事项整段删了（卷面就不印这一块），
+   * 与「没配过」（`undefined`，印内置默认稿）是两种状态，不要合并。
+   */
+  notices?: string[]
   sharedSquare: boolean
   aiChecks?: AiCheckResult[]
   aiSuspects?: string[]
@@ -674,24 +735,87 @@ export interface OrgPaper {
   dynamics?: Array<{ time: string; actor: string; action: string }>
 }
 
+/**
+ * 智能组卷的输入参数（前端 → mock）。
+ *
+ * 前六个字段是「三步」里的选择；`knowledge` 与其余四维的口径不同，见各自的注释。
+ */
+export interface AiComposeParams {
+  name: string
+  subject: string
+  grade: string
+  /**
+   * 知识点 tag，与题目 `knowledge` 同值域（取自知识点树叶子）。
+   *
+   * **硬条件**：命中其一的题一律排在未命中的之前（见 org-store 的抽题打分）。
+   * 其余四维只是「优先」，题量不足时低分题会自动补上。
+   */
+  knowledge: string[]
+  examType: string
+  difficulty: string
+  /** 优先地区。`'全国'` 是「不分地区」的哨兵，不去偏袒任何地区 */
+  region: string
+  /**
+   * 优先年份，取值域与试卷筛选一致（可能是 `EARLIER_YEAR` 哨兵）。
+   *
+   * 题目本身**没有年份字段**，所以判据是「这道题被哪些已入库的卷用过、那些卷是哪一年的」。
+   */
+  year: string
+  /** 卷面结构。只有题型与题量 —— 单题分值由 mock 按题型给默认值（老师不配分值） */
+  structure: Array<{ type: string; count: number }>
+  /** 试卷在「我的文件」中的存储位置；必填，漏传 mock 会拒绝 */
+  folderId?: number
+}
+
+/**
+ * 智能组卷的「我的模板」：一套组卷参数的存档。
+ *
+ * 不是用户手动「保存为模板」存下来的，而是**每次组卷成功后自动记一条** ——
+ * 老师第二次想用同一套参数时通常已经忘了当初勾了哪些知识点，让系统替他记着比让他自己存可靠。
+ * 因此列表的语义是「最近用过的组卷方案」，不是「收藏夹」（见 org-store 的 recordAiTemplate）。
+ *
+ * 只存档**输入参数**（去掉 folderId —— 那是每次出卷临时选的），不存产出的试卷：
+ * 那份卷在「我的文件」里，有自己的 id。
+ */
+export interface AiComposeTemplate extends Omit<AiComposeParams, 'folderId'> {
+  id: number
+  /** 归属人。列表只展示、也只允许删除自己的（口径同全仓 owner，取自 mock 的 CURRENT.name） */
+  owner: string
+  /** 这套参数被用来组卷的次数：首次落库即 1，复用同参数再组卷 +1（复用动作本身不加） */
+  useCount: number
+  updatedAt: string
+}
+
 /* ================ 协同组卷（FR-PP-004 ~ 007 / 017 ~ 021） ================ */
 
-/** 任务状态：收题中 → 待审校 → 已完成 */
-export type CollabTaskStatus = 'collecting' | 'reviewing' | 'done'
+/**
+ * 任务状态：收题中 → 待验收 → 待送审 → 已送审 → 已完成 / 已驳回。
+ *
+ * 「待验收」与「待送审」必须分开：前者是「还差组长逐个点头」，后者是「点头完了，只等组长按提交」。
+ * 合成一个「待审校」的话，收尾阶段界面上没有任何东西变化，组长看不出自己还能做什么。
+ *
+ * 送审之后的状态由 `reviewPaper()` 回写（见 org-store）—— 审核中心那几个动作是通用入口，
+ * 不能让协同任务自己再维护一套审核状态，否则同一张卷会在两处显示成两种结果。
+ */
+export type CollabTaskStatus = 'collecting' | 'reviewing' | 'ready' | 'submitted' | 'done' | 'rejected'
 
 export const COLLAB_STATUS_TEXT: Record<CollabTaskStatus, string> = {
   collecting: '收题中',
-  reviewing: '待审校',
+  reviewing: '待验收',
+  ready: '待送审',
+  submitted: '已送审',
   done: '已完成',
+  rejected: '已驳回',
 }
 
-/** 任务处理人的状态 */
-export type CollabMemberStatus = 'invited' | 'working' | 'submitted'
+/** 任务处理人的状态；`accepted` 是终态，被组长验收通过后不再回到组卷中 */
+export type CollabMemberStatus = 'invited' | 'working' | 'submitted' | 'accepted'
 
 export const COLLAB_MEMBER_TEXT: Record<CollabMemberStatus, string> = {
   invited: '待接受',
   working: '组卷中',
   submitted: '已提交',
+  accepted: '已验收',
 }
 
 /**
@@ -711,6 +835,12 @@ export interface CollabMember {
   status: CollabMemberStatus
   online: boolean
   lastActiveAt: string
+  /**
+   * 组长「退回整改」的意见；只在被退回后存在，重新提交时清空。
+   * 落在成员上而不是任务上：退回是**针对某个人**的（另一个人可能已经验收通过了），
+   * 记到任务上会让所有人都看到一条与自己无关的整改意见。
+   */
+  reviewNote?: string
 }
 
 /**

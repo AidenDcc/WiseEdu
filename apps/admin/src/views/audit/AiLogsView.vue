@@ -19,6 +19,17 @@ const FILTER_ROWS: FilterRowDef[] = [
 ]
 
 const filters = reactive<Record<string, string[]>>({ scene: [], model: [], result: [] })
+
+/* AppFilterPanel 回传整份筛选值（覆盖式回写），逐 key 写回这份 reactive 对象本身。
+   不能交给 `v-model`：它会替换掉整个对象，而替换引用不是一次响应式写入 ——
+   下面的 `watch(filters, load)` 就永远不会触发，点了 chip 既不重查也不亮选中态。
+   机构端 CollabView 里有同款说明。 */
+function onFiltersChange(next: Record<string, string[]>) {
+  filters.scene = next.scene ?? []
+  filters.model = next.model ?? []
+  filters.result = next.result ?? []
+}
+
 const keyword = ref('')
 const list = ref<AiCallLog[]>([])
 const stats = ref<AiLogStats>({ total: 0, successRate: 0, totalTokens: 0, totalCost: 0 })
@@ -94,7 +105,7 @@ onMounted(load)
     </div>
 
     <div class="panel">
-      <AppFilterPanel v-model="filters" :rows="FILTER_ROWS">
+      <AppFilterPanel :rows="FILTER_ROWS" :model-value="filters" @update:model-value="onFiltersChange">
         <template #extra>
           <AppSearchInput v-model="keyword" placeholder="机构（脱敏名）" :width="200" />
         </template>
