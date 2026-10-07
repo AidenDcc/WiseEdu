@@ -10,9 +10,6 @@ const auth = useAuthStore()
 
 const DEMO = { account: 'orgadmin', password: 'org123456' }
 
-/** 平台演示总入口地址（可经 VITE_PORTAL_URL 覆盖） */
-const portalUrl = import.meta.env.VITE_PORTAL_URL ?? 'http://localhost:5172'
-
 const form = reactive({ account: '', password: '', remember: true })
 const errors = reactive({ account: '', password: '' })
 const showPassword = ref(false)
@@ -144,10 +141,6 @@ function onPending(name: string) {
           <span>演示账号：{{ DEMO.account }} / {{ DEMO.password }}</span>
           <button type="button" class="fill" @click="fillDemo">一键填充</button>
         </div>
-
-        <p class="back-home">
-          <a :href="portalUrl">← 返回平台演示入口</a>
-        </p>
       </div>
     </main>
   </div>
@@ -331,14 +324,6 @@ function onPending(name: string) {
   font-size: 12.5px;
 }
 .fill:hover { text-decoration: underline; }
-
-.back-home {
-  text-align: center;
-  margin-top: 26px;
-  font-size: 12.5px;
-}
-.back-home a { color: var(--sub); }
-.back-home a:hover { color: var(--brand); }
 
 @media (max-width: 860px) {
   .brand-pane { display: none; }

@@ -31,6 +31,13 @@ export interface AdminOverview {
   }>
 }
 
+/**
+ * 用户ID。真实后端返回的是 sys_user 的雪花ID（19 位），超出 JS Number.MAX_SAFE_INTEGER，
+ * 只能当字符串传；Mock 模式仍是数字。凡是要与登录用户 id 做等值比较的字段都用这个类型，
+ * 比较前记得 String() 归一化。
+ */
+export type UserId = string | number
+
 /** 机构端工作台概览（FR-WS-001 ~ 004） */
 export interface TenantOverview {
   stats: {
@@ -500,7 +507,7 @@ export interface OrgQuestion {
   status: QuestionStatus
   library: QuestionLibrary
   categoryId: number
-  ownerId: number
+  ownerId: UserId
   owner: string
   options: string[]
   answer: string
@@ -588,7 +595,7 @@ export interface OrgCategory {
   name: string
   library: QuestionLibrary
   parentId: number | null
-  ownerId: number
+  ownerId: UserId
 }
 
 export interface PaperSection {
@@ -1728,7 +1735,7 @@ export interface RecycleItem {
   deletedBy: string
   deletedAt: string
   remainDays: number
-  ownerId: number
+  ownerId: UserId
 }
 
 export interface OrgMessage {

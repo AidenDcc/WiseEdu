@@ -15,6 +15,7 @@ export const mockUsers: MockUser[] = [
     roleName: '超级管理员',
     orgName: 'AI教学云平台',
     avatarHue: 232,
+    tenantId: 0,
   },
   {
     id: 101,
@@ -26,6 +27,7 @@ export const mockUsers: MockUser[] = [
     roleName: '机构管理员',
     orgName: '星辰实验中学',
     avatarHue: 172,
+    tenantId: 1000,
   },
   {
     id: 102,
@@ -37,6 +39,7 @@ export const mockUsers: MockUser[] = [
     roleName: '审核员',
     orgName: '星辰实验中学',
     avatarHue: 200,
+    tenantId: 1000,
   },
   {
     id: 103,
@@ -48,6 +51,7 @@ export const mockUsers: MockUser[] = [
     roleName: '老师',
     orgName: '星辰实验中学',
     avatarHue: 30,
+    tenantId: 1000,
   },
 ]
 

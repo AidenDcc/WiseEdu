@@ -1,5 +1,5 @@
 import { request } from '../request/client'
-import { getTokenKey, getUserKey } from '../config'
+import { getTenantKey, getTokenKey, getUserKey } from '../config'
 import type { SessionUser } from '../mock/types'
 
 export interface LoginPayload {
@@ -33,6 +33,13 @@ export function getToken(): string | null {
 export function setSession(token: string, user: SessionUser): void {
   localStorage.setItem(getTokenKey(), token)
   localStorage.setItem(getUserKey(), JSON.stringify(user))
+  // 单独存一份供请求层读取（原因见 config.getTenantKey）。
+  // tenantId 为 0（平台侧）是有效值，要用 != null 判断而不是真值判断
+  if (user.tenantId != null) {
+    localStorage.setItem(getTenantKey(), String(user.tenantId))
+  } else {
+    localStorage.removeItem(getTenantKey())
+  }
 }
 
 export function getCacheUser(): SessionUser | null {
@@ -45,7 +52,19 @@ export function getCacheUser(): SessionUser | null {
   }
 }
 
+/**
+ * 当前登录租户ID；平台侧为 0，未登录为 null。
+ * 需要判断「是否有租户」时用 `getTenantId()` 真值判断（0 是平台侧，不是无租户）。
+ */
+export function getTenantId(): number | null {
+  const raw = localStorage.getItem(getTenantKey())
+  if (raw === null || raw === '') return null
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
 export function clearSession(): void {
   localStorage.removeItem(getTokenKey())
   localStorage.removeItem(getUserKey())
+  localStorage.removeItem(getTenantKey())
 }

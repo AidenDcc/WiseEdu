@@ -74,12 +74,15 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/vision/, process.env.VITE_VISION_PROXY_PREFIX || '/compatible-mode/v1'),
       },
-      // 后端服务就绪后，取消以下注释并将 VITE_USE_MOCK 置为 false 即可切换到真实后端
-      // '/api': {
-      //   target: 'http://localhost:8080',
-      //   changeOrigin: true,
-      //   rewrite: (path) => path.replace(/^\/api/, ''),
-      // },
+      /* 教学云后端。target 指向网关(9999)：机构端 /tenant/** 由 edu-tenant 微服务承接。
+         与上面两个代理不冲突 —— 前缀不同，'/api' 不会吞掉 '/deepseek'、'/vision'。
+         灰度进度由 VITE_REMOTE_SERVICES 控制，VITE_USE_MOCK 保持 true，
+         未列入的服务前缀仍走 Mock。 */
+      '/api': {
+        target: 'http://localhost:9999',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
     },
   },
 })
