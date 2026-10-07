@@ -49,6 +49,7 @@ import type {
   OrgRole,
   OrgSearchResult,
   PaperAnalysis,
+  PaperComment,
   PaperSection,
   PaperVersion,
   PlanDetail,
@@ -3892,6 +3893,17 @@ export function savePaper(input: Partial<OrgPaper> & { name: string; submit?: bo
   const isEdit = input.id != null
   const item = isEdit ? papers.find((row) => row.id === input.id) : undefined
   if (isEdit && !item) throw new Error('试卷不存在')
+  /* 协同卷的两条护栏 —— 协同入口之外不许越权改这份卷子：
+     1. 任务过了收题/验收阶段，整卷就该定稿（与 collabUpdateSection 同一口径）；
+     2. 送审只能走协同的 `collabSubmitReview`：那里会校验全员已验收，
+        从这里直接 `submit` 会把一张谁都没验收的卷子塞进审核中心。
+     注意成员即使绕过界面调到这里也拦不住整卷覆盖（mock 里没有角色上下文），
+     所以成员端根本不提供保存入口，卷面改动一律走 collabUpdateSection —— 见 PaperEditView。 */
+  const collabTask = item ? collabTasks.find((row) => row.paperId === item.id) : undefined
+  if (collabTask) {
+    assertPaperEditable(collabTask, '修改卷面')
+    if (input.submit) throw new Error('协同组卷的试卷请走「提交审核」流程，不要在编辑页直接送审')
+  }
   const target = (item ?? seedPaper({ id: ++paperSeq, name: input.name, owner: CURRENT.name })) as OrgPaper
   Object.assign(target, {
     name: input.name.trim(),
@@ -3993,7 +4005,9 @@ export function reviewPaper(id: number, pass: boolean, opinion: string): OrgPape
     title: `试卷审核${pass ? '通过' : '驳回'}：《${item.name}》`,
     summary: pass ? '已入机构公开试卷库' : `驳回意见：${opinion}`,
     module: '试卷审核',
-    link: task ? `/paper/collab/task?id=${task.id}` : '/paper/list',
+    /* 协同卷与普通卷都落到同一个工作台：审核结论要连卷面一起看，
+       而协同的分工、进度、评价现在也都在编辑卷面里 */
+    link: `/paper/edit?id=${item.id}`,
   })
   return item
 }
@@ -4244,6 +4258,9 @@ export function deleteAiComposeTemplate(id: number): void {
 export function swapPaperQuestion(paperId: number, questionId: number): { paper: OrgPaper; newId: number } {
   const paper = papers.find((row) => row.id === paperId)
   if (!paper) throw new Error('试卷不存在')
+  /* 协同卷换题也要卡阶段：换题改的是卷面内容，任务定了稿就不该再被换掉一道题 */
+  const collabTask = collabTasks.find((row) => row.paperId === paper.id)
+  if (collabTask) assertPaperEditable(collabTask, '更换题目')
   const current = questions.find((row) => row.id === questionId)
   if (!current) throw new Error('原题不存在')
   consumeQuota(1)
@@ -4450,6 +4467,8 @@ export const collabTasks: OrgCollabTask[] = [
         collabMemberOf({ name: '李文博', questionTypes: ['单选'], perms: ['选题', '改分值'], status: 'accepted', online: true, lastActiveAt: nowStr(-30) }, requirement),
         collabMemberOf({ name: '孙悦', questionTypes: ['填空'], perms: ['选题', '改分值'], status: 'accepted', lastActiveAt: nowStr(-28) }, requirement),
       ],
+      /* 已完成的公开卷：不限制查看（空数组 = 机构内谁都能看） */
+      viewers: [],
       versions: [],
       status: 'done',
       createdAt: nowStr(-52),
@@ -4523,6 +4542,8 @@ export const collabTasks: OrgCollabTask[] = [
         collabMemberOf({ name: '李文博', questionTypes: ['填空'], perms: ['选题', '改分值'], status: 'working', online: true, lastActiveAt: nowStr(-6) }, requirement),
         collabMemberOf({ name: '孙悦', questionTypes: ['解答'], perms: ['选题', '改分值'], status: 'working', lastActiveAt: nowStr(-15) }, requirement),
       ],
+      /* 月考卷提前泄题最要命：发起人圈了名单，只有审核员沈丽华能额外查看 */
+      viewers: ['沈丽华'],
       versions: [],
       status: 'collecting',
       createdAt: nowStr(-50),
@@ -4603,6 +4624,8 @@ export const collabTasks: OrgCollabTask[] = [
         collabMemberOf({ name: '李文博', questionTypes: ['填空'], perms: ['选题', '改分值'], status: 'submitted', online: true, lastActiveAt: nowStr(-8) }, requirement),
         collabMemberOf({ name: '孙悦', questionTypes: ['解答'], perms: ['选题', '改分值'], status: 'submitted', lastActiveAt: nowStr(-4) }, requirement),
       ],
+      /* 期中模拟卷：不限制查看 */
+      viewers: [],
       versions: [],
       status: 'reviewing',
       createdAt: nowStr(-30),
@@ -4654,16 +4677,133 @@ export function collabTaskDetail(id: number): { task: OrgCollabTask; paper: OrgP
   return { task, paper: paperOfTask(task) }
 }
 
+/* ===================== 卷面评论（协同组卷的评审批注） ===================== */
+
+export const paperComments: PaperComment[] = []
+let commentSeq = 0
+
+/* 这里**刻意不播种子**：评论是老师之间就某道题说的话，预置几条别人的批注会让
+   「这道题有人评过」这件事看起来像系统自带的噪声，而不是同事留的话。
+   想验证入口，自己评一条就全通了：题目操作条的「评论」按钮 / 画布右缘的角标 /
+   目录里的卷头行与题型行 / 提交一次题目纠错（会自动生成一条）。 */
+
+/**
+ * 某份试卷的评论，按时间正序。
+ *
+ * **返回前要过滤掉目标已经不存在的评论**：题目被移出卷面后，挂在它上面的评论若不滤掉，
+ * 画布右缘的角标与目录行上的条数就会指向一个点不开的条目。存的东西不删，
+ * 只是不再展示 —— 题目被重新加回卷面时，原来的讨论还能回来。
+ *
+ * 卷头评论（`target === 'head'`）**没有大题可挂**，必须在按 `sectionId` 查表之前放行：
+ * 它的 `sectionId` 是 undefined，下面的 `sectionById.get(undefined)` 查不到东西，
+ * 会被当成「大题已删」静默滤掉 —— 评了却看不见，是最难查的那种 bug。
+ */
+export function listPaperComments(paperId: number): PaperComment[] {
+  const paper = papers.find((row) => row.id === paperId)
+  if (!paper) return []
+  const sectionById = new Map(paper.sections.map((row) => [row.id, row]))
+  const inPaper = new Set(paper.sections.flatMap((row) => row.questions.map((q) => q.questionId)))
+  return paperComments
+    .filter((row) => row.paperId === paperId)
+    .filter((row) => {
+      if (row.target === 'head') return true
+      const section = row.sectionId == null ? undefined : sectionById.get(row.sectionId)
+      if (!section) return false
+      return row.target === 'section' ? true : row.questionId != null && inPaper.has(row.questionId)
+    })
+    .slice()
+    .sort((a, b) => a.id - b.id)
+}
+
+/**
+ * 新增一条评论。作者取**会话用户**而不是 `CURRENT`：编辑页上有「组卷身份」切换器，
+ * `CURRENT` 可能已经被切到别的成员，拿它当作者会把别人的名字签在这条评论上。
+ */
+export function addPaperComment(input: {
+  paperId: number
+  target: 'head' | 'section' | 'question'
+  /** 卷头评论没有大题可挂，不填 */
+  sectionId?: number
+  questionId?: number
+  body: string
+  source?: 'manual' | 'ai' | 'correct'
+}): PaperComment {
+  const paper = papers.find((row) => row.id === input.paperId)
+  if (!paper) throw new Error('试卷不存在或已删除')
+  const body = input.body.trim()
+  if (!body) throw new Error('评论内容不能为空')
+  /* 卷头评论止步于此：它不属于任何大题，下面那两级校验对它都不适用 */
+  if (input.target === 'head') {
+    const row: PaperComment = {
+      id: ++commentSeq,
+      paperId: paper.id,
+      target: 'head',
+      author: getCacheUser()?.name ?? CURRENT.name,
+      at: nowStr(),
+      body,
+      source: input.source ?? 'manual',
+    }
+    paperComments.push(row)
+    return row
+  }
+  if (input.sectionId == null) throw new Error('评论缺少大题 id')
+  const section = paper.sections.find((row) => row.id === input.sectionId)
+  if (!section) throw new Error('评论的大题已不在卷面上')
+  if (input.target === 'question') {
+    if (input.questionId == null) throw new Error('题目评论缺少题目 id')
+    if (!section.questions.some((row) => row.questionId === input.questionId)) {
+      throw new Error('评论的题目已不在该大题中')
+    }
+  }
+  const row: PaperComment = {
+    id: ++commentSeq,
+    paperId: paper.id,
+    target: input.target,
+    sectionId: section.id,
+    ...(input.target === 'question' ? { questionId: input.questionId } : {}),
+    author: getCacheUser()?.name ?? CURRENT.name,
+    at: nowStr(),
+    body,
+    source: input.source ?? 'manual',
+  }
+  paperComments.push(row)
+  return row
+}
+
+/** 删除评论：只有作者本人能删自己的 */
+export function deletePaperComment(id: number): void {
+  const index = paperComments.findIndex((row) => row.id === id)
+  if (index < 0) throw new Error('评论不存在或已删除')
+  const me = getCacheUser()?.name ?? CURRENT.name
+  if (paperComments[index].author !== me) throw new Error('只能删除自己发表的评论')
+  paperComments.splice(index, 1)
+}
+
 /**
  * 新建 / 更新协同组卷任务。
- * 卷头（名称 / 学科 / 年级 / 时长）写在 paper 上，题型要求写在 requirement 上，
+ * 卷头（名称 / 学科 / 年级 / 时长 / 考试类型）写在 paper 上，题型要求写在 requirement 上，
  * 二者必须一起落库 —— 只有结构没有卷头的任务，处理人看到的卷面是残缺的。
+ *
+ * 考试类型是**卷头字段而不是 requirement 字段**：它本来就说的是「这是张什么卷」（字典 examType，
+ * 试卷库的考试类型列与试卷类型树读的都是它），发起人指定它只是替试卷先填上这一项而已。
  */
 export function saveCollabTask(input: {
   id?: number
   name: string
   requirement: Partial<CollabRequirement> & { subject: string; grade: string }
   members: Array<Partial<CollabMember> & { name: string }>
+  /**
+   * 查看者（机构员工姓名）：除处理人之外额外能看的人；**空数组 / 不传 = 不限制**。
+   * 与其它字段一样是覆盖式写入 —— 改要求时把名单删空，就是「改回不限制」，
+   * 沿用旧值会让用户找不到取消限制的入口。
+   */
+  viewers?: string[]
+  /**
+   * 考试类型（字典表 examType），写进试卷卷头。
+   * 只在传了值时才覆盖 —— `seedPaper` 会把显式传入的字段整个盖掉默认值，
+   * 无条件透传一个 undefined 会让种子规则算出的考试类型（见 seedPaperMeta）反而被抹平。
+   */
+  examType?: string
   /** 卷面来源：把这份已有试卷的卷面复制过来当起始卷（「试卷编辑 → 协同组卷」时带过来） */
   sourcePaperId?: number
   /** 新建任务的试卷存「我的文件」所选文件夹 */
@@ -4695,6 +4835,7 @@ export function saveCollabTask(input: {
       grade: requirement.grade,
       duration: requirement.duration,
       status: 'draft',
+      ...(input.examType ? { examType: input.examType } : {}),
       sections: source
         ? (JSON.parse(JSON.stringify(source.sections)) as PaperSection[]).map((row) => ({
             ...row,
@@ -4717,6 +4858,7 @@ export function saveCollabTask(input: {
       name: paper.name,
       requirement,
       members: input.members.map((row) => collabMemberOf(row, requirement)),
+      viewers: [...(input.viewers ?? [])],
       versions: [],
       status: 'collecting',
       createdAt: nowStr(),
@@ -4729,7 +4871,7 @@ export function saveCollabTask(input: {
       title: `协同组卷任务《${paper.name}》已创建`,
       summary: `已邀请 ${created.members.map((row) => row.name).join('、')}，按题型分工组卷`,
       module: '协同组卷',
-      link: `/paper/collab/task?id=${created.id}`,
+      link: `/paper/edit?id=${paper.id}`,
     })
     return { task: created, paper }
   }
@@ -4747,6 +4889,7 @@ export function saveCollabTask(input: {
       const before = task.members.find((m) => m.name === row.name)
       return collabMemberOf({ ...row, status: row.status ?? before?.status ?? 'invited' }, requirement)
     }),
+    viewers: [...(input.viewers ?? [])],
   })
   Object.assign(paper, {
     name: task.name,
@@ -4754,6 +4897,7 @@ export function saveCollabTask(input: {
     grade: requirement.grade,
     duration: requirement.duration,
     updatedAt: nowStr(),
+    ...(input.examType ? { examType: input.examType } : {}),
   })
   /* 题型要求变化时补建缺失的大题，保证「结构里有的题型，卷面上都有位置放」 */
   requirement.structure.forEach((row) => {
@@ -4862,6 +5006,80 @@ export function collabRemoveQuestion(input: { taskId: number; memberName: string
   paper.updatedAt = nowStr()
   task.versions.push(snapVersion(paper, input.memberName, `${input.memberName} 移除 1 道${question.type}`))
   return paper
+}
+
+/**
+ * 按**大题**增量改写卷面：改分值、调顺序、删题、换题都走这一个口子。
+ *
+ * 为什么不能复用 `savePaper` 整卷覆盖：编辑页上的 `sections` 是打开页面那一刻的快照，
+ * 而协同卷是几个人同时在改的。整卷覆盖 = 谁后保存谁把别人这段时间加的题全冲掉，
+ * 而且冲掉之后**没有任何痕迹**（版本快照记的是覆盖后的结果）。
+ * 只重建被改的那一个大题，别人的大题一个字都不动，冲突面就从整卷缩到一段。
+ *
+ * 权限：发起人可以改任意大题；成员只能改自己 `questionTypes` 里的大题（与入卷同一口径）。
+ * 另外要求 `questions` 的 questionId 必须是该大题**原有 id 的一个排列** ——
+ * 这个口子只负责改分值与顺序，增删题另有 `collabAddQuestions` / `collabRemoveQuestion`，
+ * 不在这里开口子，越权的题就塞不进来。
+ */
+export function collabUpdateSection(input: {
+  taskId: number
+  memberName: string
+  sectionId: number
+  questions: Array<{ questionId: number; score: number }>
+}): { paper: OrgPaper } {
+  const task = taskOf(input.taskId)
+  const paper = paperOfTask(task)
+  const isOwner = task.owner === input.memberName
+  const member = task.members.find((row) => row.name === input.memberName)
+  if (!isOwner && !member) throw new Error('当前用户不在该任务的处理人名单中')
+  if (!isOwner && member && member.perms.includes('只读') && member.perms.length === 1) {
+    throw new Error('该任务对你是只读权限，无法修改卷面')
+  }
+  assertPaperEditable(task, '修改卷面')
+
+  const section = paper.sections.find((row) => row.id === input.sectionId)
+  if (!section) throw new Error('大题不存在或已被删除')
+  /* 大题归谁：按**题目的题型**判，而不是从标题里猜题型名。
+     标题是老师随手改的自由文本（「二、填空题」/「二、基础填空」都能出现），
+     靠它认题型要么认不出、要么认错；题目自带的 type 才是权威。
+     判据取「本大题出现的题型**全部**在成员名下」而不是「命中一个就算」——
+     否则别人混进同一段的一道题，也能被这个成员顺手改掉分值。 */
+  if (!isOwner) {
+    const owned = new Set(member?.questionTypes ?? [])
+    const types = section.questions
+      .map((row) => questions.find((q) => q.id === row.questionId)?.type)
+      .filter((type): type is string => !!type)
+    if (!types.length) throw new Error(`「${section.title}」还没有题目，请先加入题目`)
+    const foreign = types.find((type) => !owned.has(type))
+    if (foreign) throw new Error(`「${section.title}」含有「${foreign}」题，由其他成员负责，你无权修改`)
+  }
+
+  const before = section.questions.map((row) => row.questionId)
+  const after = input.questions.map((row) => row.questionId)
+  const sameSet = before.length === after.length && before.every((id) => after.includes(id))
+  if (!sameSet) {
+    /* 说得具体一点：判卷面的老师要知道是「多了」还是「少了」，而不是一句「参数不合法」 */
+    throw new Error('本接口只能调整已有题目的顺序与分值；增删题目请走「加入题目 / 移除题目」')
+  }
+  input.questions.forEach((row) => {
+    if (!Number.isFinite(row.score) || row.score < 0.5 || row.score > 100) {
+      throw new Error('单题分值须在 0.5 - 100 之间')
+    }
+  })
+  const dup = after.find((id, i) => after.indexOf(id) !== i)
+  if (dup != null) throw new Error('同一道题在同一大题里不能出现两次')
+
+  section.questions = input.questions.map((row) => ({ questionId: row.questionId, score: row.score }))
+  paper.updatedAt = nowStr()
+  if (member) {
+    member.status = 'working'
+    member.online = true
+    member.lastActiveAt = nowStr()
+  }
+  task.versions.push(
+    snapVersion(paper, input.memberName, `${input.memberName} 调整了「${section.title}」的题目与分值`),
+  )
+  return { paper }
 }
 
 /**
@@ -5005,7 +5223,7 @@ export function collabSubmitMember(input: { taskId: number; memberName: string }
     title: `${input.memberName} 提交了《${task.name}》的分工内容`,
     summary: `负责题型：${member.questionTypes.join('、')} · 共 ${done} 题`,
     module: '协同组卷',
-    link: `/paper/collab/task?id=${task.id}`,
+    link: `/paper/edit?id=${paper.id}`,
   })
   return task
 }
@@ -5081,7 +5299,7 @@ export function collabRejectMember(input: { taskId: number; memberName: string; 
     title: `《${task.name}》中有内容被退回整改`,
     summary: `${member.name}：${opinion}`,
     module: '协同组卷',
-    link: `/paper/collab/task?id=${task.id}`,
+    link: `/paper/edit?id=${paper.id}`,
   })
   return task
 }
@@ -6866,15 +7084,18 @@ export function deleteStaff(id: number): void {
  * 加菜单不加这里 = 新菜单对所有角色都可见（未收录的模块按放行处理），不会把人锁在门外。
  *
  * `ops` 只列该模块真正有意义的动作：「查看」是**准入位**，没有它整个模块的菜单都不显示；
- * 其余 op 用于更细的准入判断（如审核中心的页面要求「审核」，协同组卷的「新建任务」按钮要求
- * 「发起协同组卷」）。不要为了整齐给每个模块都凑满六个 op —— 界面上会多出一排永远不会被读到的勾。
+ * 其余 op 用于更细的准入判断（如审核中心的页面要求「审核」）。不要为了整齐给每个模块都凑满
+ * 六个 op —— 界面上会多出一排永远不会被读到的勾。
+ *
+ * **协同组卷不设 op**：发起协同组卷是**人人都有**的动作（一位老师临时要跨班合出一张卷，
+ * 也得能自己拉人），能进试卷管理就能发起。曾经有过一个「发起协同组卷」权限位，已按此口径撤掉 ——
+ * 权限矩阵里留着一个管不住任何入口的勾，比没有它更让人误会。
  */
 export const PERM_MODULES: Array<{ key: string; title: string; ops: string[] }> = [
   { key: 'dashboard', title: '工作台', ops: ['查看'] },
   { key: 'file', title: '我的文件', ops: ['查看', '上传', '删除'] },
   { key: 'question', title: '题目管理', ops: ['查看', '新增', '编辑', '删除', '审核', '导出'] },
-  /* 「发起协同组卷」与「查看」分开：参与组卷的老师要能进协同组卷页，但不能自己发起任务 */
-  { key: 'paper', title: '试卷管理', ops: ['查看', '新增', '编辑', '删除', '审核', '导出', '发起协同组卷'] },
+  { key: 'paper', title: '试卷管理', ops: ['查看', '新增', '编辑', '删除', '审核', '导出'] },
   { key: 'teach', title: '备课中心', ops: ['查看', '新增', '编辑', '删除'] },
   { key: 'exam', title: '考试阅卷', ops: ['查看', '新建考试', '阅卷', '分析'] },
   { key: 'student', title: '班级学生', ops: ['查看', '编辑', '导入'] },
@@ -6894,12 +7115,12 @@ const FULL = (ops: string[]) => ops
 
 /* 五个预置角色的口径：
    - 管理员 = 全模块全权限（`locked` 不可改，否则一次误操作就能把所有人锁在系统外）；
-   - 审核员 = 题目 / 试卷的审核链路 + 只读的辅助模块，没有「发起协同组卷」；
+   - 审核员 = 题目 / 试卷的审核链路 + 只读的辅助模块；
    - 老师 = 机构端的「参与组卷老师」：只保留组卷闭环要用的四个模块（工作台 / 我的文件 /
-     题目管理 / 试卷管理），没有审核入口、也不能自己发起协同任务。演示时菜单差异一眼可见；
+     题目管理 / 试卷管理），没有审核入口。协同组卷**谁都能发起**，老师在这四个模块内一样能拉人组卷；
    - 出题专员 = 只做题不发布；
    - 年级学科组长 = 除机构管理与班级学生之外的全量业务菜单，但没有「审核」——
-     审核是审核员与管理员的事，组长负责的是发起协同组卷与验收，两者不该由同一人把关。
+     审核是审核员与管理员的事，组长在本角色里主要做的是逐人验收与送审，两者不该由同一人把关。
    **顺序即界面上角色的排列顺序**，年级学科组长追加在末尾：StaffView 用下标取默认角色
    （`roleNames[2]`），插在中间会让「新增员工」的默认角色跟着变。 */
 export const orgRoles: OrgRole[] = [
@@ -6958,7 +7179,7 @@ export const orgRoles: OrgRole[] = [
       dashboard: ['查看'],
       file: ['查看', '上传', '删除'],
       question: ['查看', '新增', '编辑', '导出'],
-      paper: ['查看', '新增', '编辑', '导出', '发起协同组卷'],
+      paper: ['查看', '新增', '编辑', '导出'],
       teach: ['查看', '新增', '编辑'],
       exam: ['查看', '阅卷', '分析'],
       'ai-center': ['查看'],
@@ -8709,4 +8930,174 @@ export function deleteHomework(id: number): void {
   homeworks.splice(index, 1)
   const rest = submissions.filter((row) => row.homeworkId !== id)
   submissions.splice(0, submissions.length, ...rest)
+}
+
+/* ================= 跨标签页持久化（机制见 mock/persist.ts） ================= */
+
+/**
+ * 快照结构版本。改动下面任一张表（集合清单 / 单例清单 / id 序列清单），或给已收录的集合增删
+ * 改字段，都要 +1：不 +1 的话本机已有的旧快照会继续生效，新字段永远读不到值，现象是
+ * 「代码改了、页面却没变」—— 最费时间的一类假 bug。
+ *
+ * 只想清掉本机上已存的演示数据而不改结构时，不必动它：调用 `resetMockState()`（已由
+ * `@aiteach/shared` 导出）或清掉 localStorage 里的 `aiteach:mock:org` 即可。
+ */
+export const ORG_STATE_VERSION = 1
+
+/**
+ * 会被写操作改动的集合 —— 只有它们会在两个标签页之间分叉，纯只读的种子数据不必搬运
+ * （搬了反而多一份可能与代码里种子对不上的副本）。
+ *
+ * 收录口径：文件里存在对它的写操作 —— `push / unshift / splice`、`.length = 0`、以及
+ * `find(...)` 之后的元素赋值。按这个口径**不含**：`textbookMatrix`（教材矩阵）、
+ * `standardFormulas` / `platformPrompts`（平台预置）、`notifyMatrix`（通知矩阵）、
+ * `orgOperationLogs` / `orgLoginLogs`（演示用的只读流水）、`squareResources`（资源广场，
+ * 只读展示），以及各类 `*_TEXT` 文案表（`PAPER_STATUS_TEXT` 之类）。
+ *
+ * 新增可变集合时切记补进这张表：漏掉的后果是它的改动只在当前标签页可见，新标签页静默退回
+ * 种子数据 —— 不报错，只是「刚建的东西不见了」，属于最难查的一类。
+ */
+const MUTABLE_COLLECTIONS: Record<string, unknown[]> = {
+  categories,
+  questions,
+  questionCorrections,
+  photoTasks,
+  papers,
+  aiComposeTemplates,
+  collabTasks,
+  paperComments,
+  teachDocs,
+  materials,
+  mediaResources,
+  folders,
+  orgFiles,
+  orgFormulas,
+  orgPrompts,
+  staff,
+  orgRoles,
+  campuses,
+  orgMenuTree,
+  orgMessages,
+  examSessions,
+  examAnswers,
+  mistakes,
+  prepTasks,
+  approvals,
+  videoClips,
+  homeworks,
+  submissions,
+  recycleBin,
+}
+
+/**
+ * 会被原地改写的单例。整对象覆盖即可，落地时用 `Object.assign` 保住对象身份。
+ *
+ * - `CURRENT`：演示身份切换改的就是它（见 `setMockCurrent`），而 `owner / actor / createdBy`
+ *   有约 50 处取自它 —— 不带着走，切到「组长」后在新标签页建的卷发起人又变回机构管理员。
+ * - 不含 `aiQuota` / `QUOTA_TEXT`：后者是模块求值期从前者抄的一份展示值，`/tenant/quota`
+ *   直接返回它；两个都收会自相矛盾，只收一个又没有任何界面能看出差别，索性都留给种子。
+ * - 不含 `storageUsage` / `STAFF_QUOTA.current`：未被写过（前者）或由 `staff.length` 现算
+ *   （后者），没有界面读它们，还原与否都看不出来。
+ */
+const MUTABLE_OBJECTS: Record<string, object> = { CURRENT }
+
+/**
+ * id 序列水位：还原集合后必须把序列抬到快照时的位置，否则新标签页里新建实体会**撞上**刚还原
+ * 回来的 id。写成表而不是在各处赋值，是为了「新增序列时不容易漏」—— 漏一个就是随机撞号，
+ * 而且多半只在建了足够多数据之后才复现。
+ *
+ * 收录的是全文件所有 `*Seq`，包括 `squareSeq` 这类当前只读集合的序列：多算一次 max 没有代价，
+ * 漏掉一个却要排查半天。
+ */
+const SEQ_CELLS: Array<[string, () => number, (value: number) => void]> = [
+  ['categorySeq', () => categorySeq, (value) => (categorySeq = value)],
+  ['questionSeq', () => questionSeq, (value) => (questionSeq = value)],
+  ['recycleSeq', () => recycleSeq, (value) => (recycleSeq = value)],
+  ['correctionSeq', () => correctionSeq, (value) => (correctionSeq = value)],
+  ['photoSeq', () => photoSeq, (value) => (photoSeq = value)],
+  ['paperSeq', () => paperSeq, (value) => (paperSeq = value)],
+  ['sectionSeq', () => sectionSeq, (value) => (sectionSeq = value)],
+  ['aiTemplateSeq', () => aiTemplateSeq, (value) => (aiTemplateSeq = value)],
+  ['collabSeq', () => collabSeq, (value) => (collabSeq = value)],
+  ['versionSeq', () => versionSeq, (value) => (versionSeq = value)],
+  ['commentSeq', () => commentSeq, (value) => (commentSeq = value)],
+  ['teachSeq', () => teachSeq, (value) => (teachSeq = value)],
+  ['lectureBlockSeq', () => lectureBlockSeq, (value) => (lectureBlockSeq = value)],
+  ['slideSeq', () => slideSeq, (value) => (slideSeq = value)],
+  ['planStepSeq', () => planStepSeq, (value) => (planStepSeq = value)],
+  ['materialSeq', () => materialSeq, (value) => (materialSeq = value)],
+  ['chapterSeq', () => chapterSeq, (value) => (chapterSeq = value)],
+  ['exampleSeq', () => exampleSeq, (value) => (exampleSeq = value)],
+  ['mediaSeq', () => mediaSeq, (value) => (mediaSeq = value)],
+  ['folderSeq', () => folderSeq, (value) => (folderSeq = value)],
+  ['fileSeq', () => fileSeq, (value) => (fileSeq = value)],
+  ['formulaSeq', () => formulaSeq, (value) => (formulaSeq = value)],
+  ['orgPromptSeq', () => orgPromptSeq, (value) => (orgPromptSeq = value)],
+  ['squareSeq', () => squareSeq, (value) => (squareSeq = value)],
+  ['staffSeq', () => staffSeq, (value) => (staffSeq = value)],
+  ['roleSeq', () => roleSeq, (value) => (roleSeq = value)],
+  ['campusSeq', () => campusSeq, (value) => (campusSeq = value)],
+  ['messageSeq', () => messageSeq, (value) => (messageSeq = value)],
+  ['sessionSeq', () => sessionSeq, (value) => (sessionSeq = value)],
+  ['dutySeq', () => dutySeq, (value) => (dutySeq = value)],
+  ['answerSeq', () => answerSeq, (value) => (answerSeq = value)],
+  ['mistakeSeq', () => mistakeSeq, (value) => (mistakeSeq = value)],
+  ['prepSeq', () => prepSeq, (value) => (prepSeq = value)],
+  ['prepCommentSeq', () => prepCommentSeq, (value) => (prepCommentSeq = value)],
+  ['prepVersionSeq', () => prepVersionSeq, (value) => (prepVersionSeq = value)],
+  ['approvalSeq', () => approvalSeq, (value) => (approvalSeq = value)],
+  ['clipSeq', () => clipSeq, (value) => (clipSeq = value)],
+  ['homeworkSeq', () => homeworkSeq, (value) => (homeworkSeq = value)],
+  ['submissionSeq', () => submissionSeq, (value) => (submissionSeq = value)],
+]
+
+/**
+ * 取出当前内存态。
+ *
+ * 返回的是**活引用**，序列化交给 persist.ts 在写入时同步做 —— 这里不深拷贝：每来一次写请求
+ * 就把几百 KB 的题库深拷一遍只为立刻 JSON 掉，纯属白花时间。
+ *
+ * 快照**不含** `mediaBlobs`（上传字节的会话级 Map）：那张表存的是 data URL 本体，落 localStorage
+ * 会把配额吃满，且它本就设计成会话级（见其声明处注释）。后果只有一个 —— 在新标签页里刷新后，
+ * 当前会话**上传**的图片显示不出来（种子 SVG 每次都按 id 重新生成，不受影响）。
+ */
+export function captureOrgState(): Record<string, unknown> {
+  const seqs: Record<string, number> = {}
+  for (const [name, read] of SEQ_CELLS) seqs[name] = read()
+  return { collections: MUTABLE_COLLECTIONS, objects: MUTABLE_OBJECTS, seqs }
+}
+
+/**
+ * 把快照灌回内存态。只认自己写出去的结构，缺哪块就跳过哪块（快照来自旧版本时也能尽量还原）。
+ *
+ * 集合一律**原地替换**（`splice` 而不是重新赋值）：它们是 `export const`，换数组的话别处
+ * `import { papers }` 拿到的仍是旧数组 —— 改了数据却哪都刷不出来。
+ */
+export function restoreOrgState(data: Record<string, unknown>): void {
+  const collections = data.collections as Record<string, unknown[]> | undefined
+  if (collections) {
+    for (const [name, rows] of Object.entries(collections)) {
+      const target = MUTABLE_COLLECTIONS[name]
+      if (!target || !Array.isArray(rows)) continue
+      target.splice(0, target.length, ...rows)
+    }
+  }
+
+  const objects = data.objects as Record<string, object> | undefined
+  if (objects) {
+    for (const [name, value] of Object.entries(objects)) {
+      const target = MUTABLE_OBJECTS[name]
+      /* 原地 assign 而不是换对象：CURRENT 被各处按引用持有，换掉它那些引用还停在旧对象上 */
+      if (target && value && typeof value === 'object') Object.assign(target, value)
+    }
+  }
+
+  const seqs = data.seqs as Record<string, number> | undefined
+  if (seqs) {
+    for (const [name, read, write] of SEQ_CELLS) {
+      const saved = seqs[name]
+      /* 取 max 而不是直接赋值：种子里若新增了 id 更大的数据，以水位高的那个为准 */
+      if (typeof saved === 'number') write(Math.max(read(), saved))
+    }
+  }
 }

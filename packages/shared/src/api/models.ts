@@ -843,7 +843,7 @@ export interface CollabMember {
   online: boolean
   lastActiveAt: string
   /**
-   * 组长「退回整改」的意见；只在被退回后存在，重新提交时清空。
+   * 发起人「退回整改」的意见；只在被退回后存在，重新提交时清空。
    * 落在成员上而不是任务上：退回是**针对某个人**的（另一个人可能已经验收通过了），
    * 记到任务上会让所有人都看到一条与自己无关的整改意见。
    */
@@ -893,11 +893,50 @@ export interface OrgCollabTask {
   name: string
   requirement: CollabRequirement
   members: CollabMember[]
+  /**
+   * 查看者（机构员工姓名）：除处理人之外，额外允许查看本任务与试卷内容的人。
+   *
+   * **空数组 = 不限制**（本机构所有成员都能看），不是「谁都不能看」——
+   * 组卷任务默认是开放的，只有担心题目提前泄露的发起人才会来这里圈一份名单，
+   * 把空值理解成「零人可见」会让所有没设过的老任务一夜之间变成谁都打不开。
+   */
+  viewers: string[]
   versions: PaperVersion[]
   status: CollabTaskStatus
   createdAt: string
   /** 发起人 */
   owner: string
+}
+
+/**
+ * 卷面评论：挂在**卷头**、**某个大题**或**某道题**上的一条评论。
+ *
+ * 为什么要 `target` + `questionId` 两个字段而不是统一挂 questionId：题型级评论说的是
+ * 「这个题型的整体难度/覆盖面对不对」，题目级说的是「这道题的答案有没有问题」——
+ * 前者没有对应的 questionId 可挂（大题不是题）。分开记还让目录行上的评论数不必去重。
+ *
+ * `head` 是第三个粒度：卷面的名称 / 分值 / 密封线这类版头信息也该能被说一句，
+ * 它**不属于任何大题**，所以 `sectionId` 对它是空的（这也是 `sectionId` 可选的原因）。
+ *
+ * 一道题允许多人评论（同一 target 可以有多条），这也是没有用「一人一条」结构的原因。
+ */
+export interface PaperComment {
+  id: number
+  paperId: number
+  target: 'head' | 'section' | 'question'
+  /** 所在大题 id。题型级评论只能靠它定位到是哪一段（评论本身没有题目可挂）；`head` 不填 */
+  sectionId?: number
+  /** target === 'question' 时为题目 id；题型级与卷头级评论不填 */
+  questionId?: number
+  /** 评论人姓名 */
+  author: string
+  at: string
+  body: string
+  /**
+   * 手动输入 / AI 检测生成 / 提交纠错时自动生成 —— 展示上要能区分：
+   * AI 的要看得出是机器结论，纠错自动生成的那条不是谁敲进去的话。
+   */
+  source: 'manual' | 'ai' | 'correct'
 }
 
 export interface MaterialExample {

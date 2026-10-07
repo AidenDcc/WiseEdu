@@ -110,6 +110,8 @@ const orgRoutes: MockRoute[] = [
   { method: 'POST', path: '/tenant/collab/tasks/delete', handler: ({ body }) => guard(() => { org.deleteCollabTask(Number(body.id)); return null }) },
   { method: 'POST', path: '/tenant/collab/questions/add', handler: ({ body }) => guard(() => org.collabAddQuestions(body as never)) },
   { method: 'POST', path: '/tenant/collab/questions/remove', handler: ({ body }) => guard(() => org.collabRemoveQuestion(body as never)) },
+  /* 按大题增量改写卷面（改分值 / 调顺序）—— 编辑页上「改完即存」，不走整卷保存 */
+  { method: 'POST', path: '/tenant/collab/section/update', handler: ({ body }) => guard(() => org.collabUpdateSection(body as never)) },
   { method: 'POST', path: '/tenant/collab/ai-compose', handler: ({ body }) => guard(() => org.collabAiCompose(body as never)) },
   { method: 'POST', path: '/tenant/collab/member/submit', handler: ({ body }) => guard(() => org.collabSubmitMember(body as never)) },
   { method: 'POST', path: '/tenant/collab/member/reopen', handler: ({ body }) => guard(() => org.collabReopenMember(body as never)) },
@@ -123,6 +125,10 @@ const orgRoutes: MockRoute[] = [
   { method: 'GET', path: '/tenant/collab/versions', handler: ({ query }) => guard(() => org.listPaperVersions(Number(query.paperId))) },
   { method: 'POST', path: '/tenant/collab/versions/restore', handler: ({ body }) => guard(() => org.restorePaperVersion(body as never)) },
   { method: 'POST', path: '/tenant/collab/versions/replace', handler: ({ body }) => guard(() => org.replacePaperVersion(body as never)) },
+  /* 卷面评论：挂在卷头 / 大题 / 题目上的批注，可手动写，也可由 AI 检测、纠错提交生成 */
+  { method: 'GET', path: '/tenant/papers/comments', handler: ({ query }) => guard(() => org.listPaperComments(Number(query.paperId))) },
+  { method: 'POST', path: '/tenant/papers/comments/add', handler: ({ body }) => guard(() => org.addPaperComment(body as never)) },
+  { method: 'POST', path: '/tenant/papers/comments/delete', handler: ({ body }) => guard(() => { org.deletePaperComment(Number(body.id)); return null }) },
 
   // 讲义课件（FR-JC-005 ~ 012）
   { method: 'GET', path: '/tenant/teach/docs', handler: ({ query }) => guard(() => org.listTeachDocs(query.kind ? String(query.kind) : undefined)) },

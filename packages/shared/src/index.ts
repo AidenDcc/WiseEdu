@@ -168,6 +168,7 @@ export type {
   PaperVersion,
   CollabRequirement,
   OrgCollabTask,
+  PaperComment,
   TeachDocKind,
   LectureBlockKind,
   GuideBlockKind,
@@ -267,6 +268,10 @@ export {
   setMockCurrent,
 } from './mock/org-store'
 export type { MockRole } from './mock/org-store'
+
+/* Mock 内存态的跨标签页快照：机构端业务数据默认在标签页之间共享（试卷编辑页一律新标签页开，
+   不共享就看不到刚建的卷 —— 见 mock/persist.ts）。清掉即回到种子数据。 */
+export { resetMockState } from './mock/persist'
 /* 这几个字典定义在 models 里（与类型同源），值需单独导出给前端 */
 export {
   QUESTION_CORRECTION_TYPES,

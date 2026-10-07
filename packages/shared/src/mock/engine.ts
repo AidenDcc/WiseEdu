@@ -1,4 +1,5 @@
 import type { HttpMethod } from '../request/types'
+import { persistMockState } from './persist'
 
 export interface MockContext {
   /** 请求体 */
@@ -63,6 +64,9 @@ export async function dispatchMock<T>(
     query,
     path: path.split('?')[0],
   })
+  /* 写请求成功即落一份快照（见 persist.ts）。同步写、且紧跟在 handler 之后：机构端拿到结果就
+     开新标签页打开试卷编辑页，晚一步落盘，新标签页读到的还是种子数据。GET 不改内存态，跳过。 */
+  if (route.method !== 'GET') persistMockState()
   return detach(result) as T
 }
 
