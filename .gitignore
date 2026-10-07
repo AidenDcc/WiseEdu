@@ -12,3 +12,16 @@ doc/_build/*
 # Office 临时锁文件
 ~$*
 .~*
+
+# ===== Java / Maven 后端（由原 Service/.gitignore 合并）=====
+**/target
+**/logs
+*.iml
+*.iws
+*.ipr
+out/
+rebel.xml
+derby.log
+**/.classpath
+**/.project
+**/.settings/

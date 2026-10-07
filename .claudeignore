@@ -1,0 +1,46 @@
+# Claude 工具忽略规则
+# 由原 Service/.claudeignore 与 Service/.ignore 合并而来。
+# 注意：后端原有的裸路径规则（doc/、docs/、*.zip 等）已加上 Service/ 前缀限定作用域，
+# 否则会连带隐藏仓库根目录自己的 doc/ 需求文档目录。
+
+# ===== 通用 =====
+.git/
+.gitmodules
+.DS_Store
+Thumbs.db
+desktop.ini
+.cursor/
+.history/
+
+# ===== IDE =====
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+.classpath
+.project
+.settings/
+.vscode/
+
+# ===== 构建产物 =====
+target/
+build/
+*.class
+!.mvn/wrapper/maven-wrapper.jar
+node_modules/
+dist/
+
+# ===== 日志 =====
+*.log
+logs/
+
+# ===== 后端目录内（作用域限定 Service/）=====
+Service/**/*.qqy
+Service/**/代码修改.log
+Service/**/代码修改日志
+Service/**/*.zip
+Service/**/backup/
+Service/**/doc/
+Service/**/docs/
+Service/docker/data/
