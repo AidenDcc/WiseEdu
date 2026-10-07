@@ -349,3 +349,29 @@ div.empty-row { padding: 30px 0 !important; margin: 0; }
   border-radius: 2px;
   background: var(--brand-grad);
 }
+
+/* ===== 编号分段标题 =====
+   智能组卷的三步与协同组卷新建弹窗的四段共用这一对：圆底序号 + 标题。
+   序号在说「按顺序往下填」，两处的序号又是同一套流程语言（组卷设置 = 2、试题设置 = 3 前后对得上），
+   所以样式放全局，不在两个视图里各抄一份 —— 抄两份迟早长歪成两种样子 */
+.step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 12px;
+}
+.step-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--brand);
+  color: #fff;
+  font-size: 12px;
+}

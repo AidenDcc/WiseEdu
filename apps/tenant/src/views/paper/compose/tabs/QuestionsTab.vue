@@ -200,8 +200,11 @@ function hasSubmittedCorrection(id: number): boolean {
   return correctedSet.value.has(id)
 }
 
-/** 提交成功就地补上，不用重拉列表（子组件的 `submitted` 只在成功时发） */
-function onCorrectionSubmitted(questionId: number) {
+/**
+ * 提交成功就地补上，不用重拉列表（子组件的 `submitted` 只在成功时发）。
+ * 载荷里带的是整条纠错内容（组卷编辑页拿它生成卷面评论），这里只用得上题号。
+ */
+function onCorrectionSubmitted({ questionId }: { questionId: number; types: string[]; description: string }) {
   if (!correctedSet.value.has(questionId)) correctedIds.value = [...correctedIds.value, questionId]
 }
 

@@ -79,7 +79,7 @@ export const DEMO_IDENTITIES: DemoIdentity[] = [
     name: '王静',
     roleName: '年级学科组长',
     avatarHue: 268,
-    desc: '发起协同组卷、逐人验收、提交审核',
+    desc: '可发起协同组卷，负责逐人验收与提交审核',
     /* orgRoles[4]「年级学科组长」：除机构管理与班级学生外的全量业务菜单，但没有审核权 */
     permRoleId: 5,
     phone: '139****0004',
@@ -92,8 +92,9 @@ export const DEMO_IDENTITIES: DemoIdentity[] = [
     name: '李文博',
     roleName: '老师',
     avatarHue: 30,
-    desc: '在被分配的题型内筛选题目并提交',
-    /* orgRoles[2]「老师」：只保留组卷闭环要用的四个模块 */
+    desc: '可发起协同组卷，在被分配的题型内筛选题目并提交',
+    /* orgRoles[2]「老师」：只保留组卷闭环要用的四个模块。四个模块内**没有**任何 op 能拦住
+       发起协同组卷 —— 发起是人人都有的动作，见 org-store 的 PERM_MODULES 注释 */
     permRoleId: 3,
     phone: '139****0003',
     email: 'wenbo@xingchen.edu.cn',

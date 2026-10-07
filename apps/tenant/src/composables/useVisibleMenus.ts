@@ -11,7 +11,7 @@
  * 任一为否即隐藏。
  *
  * **面包屑不在这里**：`buildBreadcrumb` 用菜单树做前缀匹配，靠全量菜单才能把
- * `/paper/collab/task` 这种深层页显示成「试卷管理 / 协同组卷 / …」。面包屑是描述性的，
+ * `/material/media/video` 这种深层页显示成「素材管理 / 媒体库 / …」。面包屑是描述性的，
  * 不参与裁剪 —— 换成裁剪后的菜单，被隐藏分组的子页会退化成单层标题。
  */
 import { computed, ref } from 'vue'
@@ -147,7 +147,7 @@ const EXTRA_PATH_MODULES: Array<{ prefix: string; module: string; op?: string }>
 
 /**
  * 判断某个具体路径是否可见（路由守卫用）。
- * 按最长前缀匹配叶子：`/paper/collab/task` 归到 `/paper/collab`。
+ * 按最长前缀匹配叶子：`/material/media/video` 归到 `/material/media`。
  * 匹配不到任何叶子（如 `/profile`、`/login` 这类不在侧边栏里的页面）→ 放行。
  */
 export function pathVisible(

@@ -43,6 +43,7 @@ import type {
   OrgRole,
   OrgSearchResult,
   PaperAnalysis,
+  PaperComment,
   PaperVersion,
   PrepTask,
   RecycleItem,
@@ -262,6 +263,10 @@ export function saveCollabTask(data: {
   name: string
   requirement: CollabRequirement
   members: Array<Pick<CollabMember, 'name' | 'questionTypes' | 'perms'>>
+  /** 查看者（机构员工姓名）：除处理人外额外能看的人；空数组 = 不限制（机构内都可查看） */
+  viewers?: string[]
+  /** 考试类型（字典 examType）：卷头字段，落在这份任务的试卷上（试卷库的考试类型列读它） */
+  examType?: string
   /** 卷面来源：把这份已有试卷的卷面复制过来当起始卷（从「试卷编辑 → 协同组卷」进来时带） */
   sourcePaperId?: number
   /** 新建任务的试卷存「我的文件」所选文件夹 */
@@ -281,6 +286,15 @@ export function collabAddQuestions(data: {
 }
 export function collabRemoveQuestion(data: { taskId: number; memberName: string; questionId: number }) {
   return request<OrgPaper>('/tenant/collab/questions/remove', { method: 'POST', data })
+}
+/** 按大题增量改写卷面：只传这一段改了之后的题目与分值，返回权威整卷 */
+export function collabUpdateSection(data: {
+  taskId: number
+  memberName: string
+  sectionId: number
+  questions: Array<{ questionId: number; score: number }>
+}) {
+  return request<{ paper: OrgPaper }>('/tenant/collab/section/update', { method: 'POST', data })
 }
 export function collabAiCompose(data: {
   taskId: number
@@ -333,6 +347,25 @@ export function replacePaperVersion(data: { paperId: number; versionId: number; 
     method: 'POST',
     data,
   })
+}
+
+/* ===== 卷面评论：挂在卷头 / 题型 / 题目上的批注，可手动写，也可由 AI 检测或纠错生成 ===== */
+export function fetchPaperComments(paperId: number) {
+  return request<PaperComment[]>(withQuery('/tenant/papers/comments', { paperId }))
+}
+export function addPaperComment(data: {
+  paperId: number
+  target: 'head' | 'section' | 'question'
+  /** 所在大题 id（题型与题目评论靠它定位；卷头评论没有大题可挂，不填） */
+  sectionId?: number
+  questionId?: number
+  body: string
+  source?: 'manual' | 'ai' | 'correct'
+}) {
+  return request<PaperComment>('/tenant/papers/comments/add', { method: 'POST', data })
+}
+export function deletePaperComment(id: number) {
+  return request<null>('/tenant/papers/comments/delete', { method: 'POST', data: { id } })
 }
 
 /* ===== 讲义课件（FR-JC-005 ~ 012） ===== */

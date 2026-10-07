@@ -547,27 +547,7 @@ onBeforeUnmount(clearTimer)
 
 /* ===== 三步 ===== */
 .step { padding: 16px 18px; flex-shrink: 0; }
-.step-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--ink);
-  margin-bottom: 12px;
-}
-.step-no {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  background: var(--brand);
-  color: #fff;
-  font-size: 12px;
-}
+/* `.step-head` / `.step-no`（编号标题与圆底序号）在 main.css 里 —— 协同组卷的新建弹窗也用同一对 */
 /* 标题行右侧的动作（第三步的「添加题型」）：推到行尾，且不吃标题的字号与字重 */
 .step-action { margin-left: auto; flex-shrink: 0; font-weight: 600; }
 .step-body { display: flex; flex-direction: column; gap: 12px; }

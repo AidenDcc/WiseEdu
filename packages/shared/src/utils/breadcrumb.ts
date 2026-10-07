@@ -6,7 +6,7 @@
  *
  * 匹配规则：
  *   1. 先按路径**精确**命中菜单叶子；
- *   2. 命中不到则取**最长前缀**命中的叶子（覆盖 `/paper/collab/task` 这类三级子页）；
+ *   2. 命中不到则取**最长前缀**命中的叶子（覆盖 `/material/media/video` 这类三级子页）；
  *   3. 命中的叶子若在分组下，前面补上分组标题；
  *   4. 若当前路径比命中的叶子更深，末尾追加路由自己的标题（`route.meta.title`）；
  *   5. 完全命中不到（如 `/profile`）只显示路由标题。
@@ -50,7 +50,7 @@ export function buildBreadcrumb(
   const leaves = flatten(menus)
 
   const exact = leaves.find((entry) => entry.item.path === path)
-  // 最长前缀命中：`/question/bank` 命中 `/question/bank`；`/paper/collab/task` 命中 `/paper/collab`
+  // 最长前缀命中：`/question/bank` 命中 `/question/bank`；`/material/media/video` 命中 `/material/media`
   const prefix =
     exact ??
     leaves

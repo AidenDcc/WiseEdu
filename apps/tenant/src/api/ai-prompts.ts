@@ -219,6 +219,109 @@ export function buildCheckUserPrompt(input: {
   ].join('\n')
 }
 
+/* ==================== AI 协同组卷合规检测提示词（提交前把关） ==================== */
+
+/**
+ * 与 CHECK_SYSTEM_PROMPT 的分工：那条审的是**一道题的质量**（答案对不对、解析全不全）；
+ * 这条审的是**一份卷子符不符合协同任务的基本要求**（题数、题型配比、难度分布、知识点覆盖、
+ * 题库入库状态）。所以输入是结构摘要而不是整题正文 —— 一次要喂几十道题，
+ * 每题的题干也只给开头一小段，够判断「这题是不是跑题的」就行。
+ *
+ * 关键立场：**只判「与要求是否相符」，不重判单题对错**。模型很容易顺手点评题目质量、
+ * 甚至自作主张改分值，那属于上一档的活，混进来只会让结论长到没人看。
+ */
+export const COLLAB_CHECK_SYSTEM_PROMPT = `你是一名 K12 命题组组长，负责在一位组员交卷前，核对他负责的那部分是否符合本次协同组卷的基本要求。
+
+# 任务
+用户会提交：本次组卷的基本要求（学科/年级/时长/题型题数与分值/难度配比/考查知识点/命题说明）、当前组员负责的题型、以及整卷的结构摘要（各大题的题型、题数、分值、每题的精简画像）。你需要逐项核对：
+
+1. 分工范围内交齐没有：该组员负责的每个题型，卷面里的题数是否达到要求题数。不足必须点名「哪个题型还差几题」。
+2. 题型与分值：各题型单题分值是否与要求一致；同一题型内分值是否整齐。
+3. 难度配比：卷面实际难度分布与要求的占比是否明显偏离（偏差在 10 个百分点以内视为相符，不必苛求）。
+4. 知识点覆盖：要求里的考查知识点有哪些在卷面中始终没有出现。
+5. 内容相符：抽查题干开头，判断题目是否落在本次要求的学科、年级与知识点范围内（跑题、明显超纲要点出来）。
+6. 入库与完整度：标为「未入库」的题（含 AI 新生成的待审题）提交后会被审核退回，必须提示；缺答案或缺解析的题也要点名。
+
+# 判定口径
+- 你只判「是否符合本次要求」，不重判单题的答案对错、不重写题目、不建议调分值方案。
+- 要求里没写的维度（如要求未给知识点）不要凭空立标准，直接说明「要求未限定，跳过」。
+- 分寸：结构性缺漏（题数不够、题型不符、题未入库）是 error；配比偏差、覆盖不全、个别题缺解析是 warn；都相符是 ok。
+
+# 输出格式（硬性要求，只输出一个合法 JSON 对象，不输出任何其他文字）
+{
+  "overall": "pass | warn | fail",
+  "items": [
+    { "aspect": "题数与分工 | 题型与分值 | 难度配比 | 知识点覆盖 | 内容相符 | 入库与完整度", "level": "ok | warn | error", "message": "一句话结论 + 具体到题型/题号" }
+  ]
+}
+- overall：无 error 且无 warn → pass；有 warn 无 error → warn；有 error → fail。
+- items：每个 aspect 各给一条，没问题的也给出 level=ok 与简短肯定语（写清依据，例如「单选 8/8 已交齐」）。
+- message 里带上具体数字（「解答题 2/3，还差 1 题」），不要只说「基本符合」这类空话。`
+
+/** 协同合规检测的用户提示词：喂要求 + 结构摘要，不喂整题正文 */
+export function buildCollabCheckUserPrompt(input: {
+  requirement: {
+    subject: string
+    grade: string
+    duration: number
+    structure: Array<{ type: string; count: number; score: number }>
+    difficulty: Array<{ level: string; ratio: number }>
+    knowledge: string[]
+    remark: string
+  }
+  /** 本次以谁的名义交卷 */
+  memberName: string
+  /** 该成员负责的题型；为空表示发起人视角（看整卷） */
+  myTypes: string[]
+  totalCount: number
+  totalScore: number
+  sections: Array<{ title: string; count: number; score: number; types: string[] }>
+  /** 难度档 → 卷面实际题数 */
+  difficultySpread: Array<{ level: string; count: number }>
+  /** 要求里未被卷面覆盖的知识点 */
+  missingKnowledge: string[]
+  /** 未入库（含 AI 新生成的待审题）的题号 */
+  unapproved: number[]
+  /** 缺答案 / 缺解析的题号 */
+  incomplete: Array<{ no: number; missing: string }>
+  /** 每题精简画像：题型 / 难度 / 知识点 / 题干开头 */
+  questions: Array<{ no: number; type: string; difficulty: string; knowledge: string[]; stem: string }>
+}): string {
+  const { requirement: req } = input
+  const lines = [
+    `【基本要求】`,
+    `- 学科 / 年级：${req.subject} · ${req.grade}`,
+    `- 考试时长：${req.duration} 分钟`,
+    `- 题型要求：${req.structure.map((row) => `${row.type} ${row.count} 题 / 每题 ${row.score} 分`).join('；') || '（未限定）'}`,
+    `- 难度配比：${req.difficulty.map((row) => `${row.level} ${row.ratio}%`).join('；') || '（未限定）'}`,
+    `- 考查知识点：${req.knowledge.join('、') || '（未限定）'}`,
+    `- 命题说明：${req.remark || '（无）'}`,
+    '',
+    `【本次交卷人】${input.memberName}${input.myTypes.length ? `，负责题型：${input.myTypes.join('、')}` : '（发起人，看整卷）'}`,
+    '',
+    `【卷面结构】共 ${input.totalCount} 题 / ${input.totalScore} 分`,
+  ]
+  input.sections.forEach((row) => {
+    lines.push(`- ${row.title}：${row.count} 题 · 共 ${row.score} 分（题型：${row.types.join('、') || '—'}）`)
+  })
+  lines.push(
+    '',
+    `【难度分布】${input.difficultySpread.map((row) => `${row.level} ${row.count} 题`).join('；') || '（无题）'}`,
+    `【未覆盖的考纲知识点】${input.missingKnowledge.join('、') || '（全部覆盖）'}`,
+    `【未入库题目】${input.unapproved.length ? input.unapproved.map((no) => `第 ${no} 题`).join('、') : '（无）'}`,
+    `【缺答案 / 缺解析】${
+      input.incomplete.length ? input.incomplete.map((row) => `第 ${row.no} 题缺${row.missing}`).join('、') : '（无）'
+    }`,
+    '',
+    '【题目清单】（题干只给开头，用于判断是否落在要求范围内）',
+  )
+  input.questions.forEach((q) => {
+    lines.push(`- 第 ${q.no} 题｜${q.type}｜${q.difficulty}｜知识点：${q.knowledge.join('、') || '未标注'}｜${q.stem}`)
+  })
+  lines.push('', '请按系统要求输出 JSON，逐 aspect 给出核对结论，message 里带上具体数字。')
+  return lines.join('\n')
+}
+
 /* ==================== AI 批量质检提示词（生成/识别结果的检查轮次） ==================== */
 
 export const VERIFY_SYSTEM_PROMPT = `你是一名资深 K12 学科质检专家，负责对 AI 生成/识别的试题做交付前复核，重点把守「答案正确」「解析完整」与「答案解析一致」三道关。

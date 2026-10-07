@@ -23,8 +23,15 @@ const props = defineProps<{
   /** 遮罩层级，透传给 AppModal：从试卷预览（130）里打开时要传 140 才压得住 */
   zIndex?: number
 }>()
-/** `submitted` 只在提交成功后发（取消 / 失败不发），带上题号，父级据此就地更新按钮态 */
-const emit = defineEmits<{ close: []; submitted: [questionId: number] }>()
+/**
+ * `submitted` 只在提交成功后发（取消 / 失败不发），带上**这次纠错的全部内容**而不是只有题号：
+ * 父级除了把按钮翻成「已提交纠错」，还要把这条反馈记进卷面评论（组卷编辑页），
+ * 只有题号写不出一条有内容的评论。
+ */
+const emit = defineEmits<{
+  close: []
+  submitted: [payload: { questionId: number; types: string[]; description: string }]
+}>()
 
 /** 纠错类型是只读元组，摊平成新数组给 AppFilterChips 的 `string[]` */
 const TYPE_OPTIONS = [...QUESTION_CORRECTION_TYPES]
@@ -65,7 +72,7 @@ async function submit() {
       description: description.value,
     })
     showToast('纠错已提交，感谢反馈', 'success')
-    emit('submitted', props.question.id)
+    emit('submitted', { questionId: props.question.id, types: [...types.value], description: description.value })
     emit('close')
   } catch (error) {
     showToast(error instanceof Error ? error.message : '提交失败', 'error')

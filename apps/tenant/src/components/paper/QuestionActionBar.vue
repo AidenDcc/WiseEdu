@@ -1,11 +1,14 @@
 <script setup lang="ts">
 /**
- * 试卷预览里每道题的悬浮操作条（阅读模式专用）。
+ * 每道题的悬浮操作条（试卷预览与试卷编辑画布共用，由 `QuestionActionBarHost` 定位）。
  *
- * 六个动作与「试题」页签详细卡片的 `.qc-ops` 完全一致（文案、配色、按钮态照抄，
+ * 前六个动作与「试题」页签详细卡片的 `.qc-ops` 完全一致（文案、配色、按钮态照抄，
  * 见 `views/paper/compose/tabs/QuestionsTab.vue`）：预览 / 解析 / 收藏 / 纠错 / 相似 /
- * 加入组卷车。本组件只负责「画 + 开自己的解析浮层」；收藏与组卷车的状态由父级（试卷预览）
- * 从两个模块级单例里读进来传下来 —— 在不在车、收藏没收藏父级本来就知道，不必在这里再取一次。
+ * 加入组卷车。本组件只负责「画 + 开自己的解析浮层」；收藏与组卷车的状态由定位壳
+ * 从两个模块级单例里读进来传下来 —— 在不在车、收藏没收藏它本来就知道，不必在这里再取一次。
+ *
+ * 第七个动作「评论」只在能评论的宿主里出现（编辑画布传 `commentCount`，试卷预览不传）：
+ * 预览是「读一份卷」，评论文挂在卷上的某道题；编辑页才是老师之间讨论这道题的地方。
  *
  * **解析为什么是浮层，而不是纸面上的内联展开**：纸面按真实纸张分版，块高决定分页
  * （隐藏测量层量高 → paginateBlocks），往某道题里插一段答案解析会改块高、触发重新分版 ——
@@ -29,6 +32,11 @@ const props = withDefaults(
      * （操作条被翻到题目上方时，或贴着视口下沿时，浮层都必须朝上开，否则会顶出屏幕）。
      */
     popoverUp?: boolean
+    /**
+     * 本题已有评论条数。**不传（undefined / null）就是「这个宿主不评卷」**，按钮不出现 ——
+     * 传 0 是有效的：「能评论，只是还没人评」。
+     */
+    commentCount?: number | null
   }>(),
   { popoverUp: false },
 )
@@ -38,9 +46,13 @@ const emit = defineEmits<{
   correct: []
   similar: []
   basket: []
+  comment: []
 }>()
 
 const analysisOpen = ref(false)
+
+/** `!= null` 同时挡掉 undefined 与 null：只传了数字（含 0）才算这个宿主能评论 */
+const commentable = computed(() => props.commentCount != null)
 
 /** 客观题答案是字母、无选项判断题是「对 / 错」，都用纯文本；问答题答案是富文本（含公式 / 插图） */
 const answerIsPlain = computed(() => props.item.options.length > 0 || isJudgeNoOptions(props.item))
@@ -50,7 +62,7 @@ const answerText = computed(() =>
 </script>
 
 <template>
-  <!-- 鼠标进出的续命 / 收起由父级的定位壳（`.pp-qbar`）负责：本组件是它的子节点，
+  <!-- 鼠标进出的续命 / 收起由定位壳（`QuestionActionBarHost`）负责：本组件是它的子节点，
        指针从操作条移到解析浮层上时不会触发壳的 mouseleave -->
   <div class="qab" :class="{ 'is-up': popoverUp }">
     <div class="qab-row">
@@ -84,6 +96,16 @@ const answerText = computed(() =>
       >
         {{ inBasket ? '移出组卷车' : '加入组卷车' }}
       </button>
+      <button
+        v-if="commentable"
+        class="mini-btn cmt"
+        :class="{ on: !!commentCount }"
+        type="button"
+        :title="commentCount ? `这道题有 ${commentCount} 条评论，点击查看` : '对这道题发表评论'"
+        @click="emit('comment')"
+      >
+        {{ commentCount ? `评论 ${commentCount}` : '评论' }}
+      </button>
     </div>
 
     <!-- 解析浮层：默认贴操作条下沿展开；父级判断下方放不下时加 .is-up 改成朝上（它会同时把
@@ -104,7 +126,7 @@ const answerText = computed(() =>
 </template>
 
 <style scoped>
-/* 卡片本体：left / top 与外层层级由父级给（父级把它 Teleport 到 body 再算位置） */
+/* 卡片本体：left / top 与外层层级由定位壳给（`QuestionActionBarHost` 把它 Teleport 到 body 再算位置） */
 .qab {
   position: relative;
   background: #fff;
@@ -115,8 +137,9 @@ const answerText = computed(() =>
 .qab-row { display: flex; align-items: center; gap: 2px; padding: 3px 4px; }
 .qab-row .mini-btn { padding: 4px 7px; font-size: 12.5px; }
 .qab-row .mini-btn.fav.on { color: #b7791f; background: #fdf6e6; }
+.qab-row .mini-btn.cmt.on { color: var(--brand-deep); background: var(--brand-soft); }
 
-/* 宽 420 是 `PaperPreviewModal` 判断「从左展开会不会顶出屏幕」的依据（那边的 POPOVER_W），改这里要一起改 */
+/* 宽 420 是 `QuestionActionBarHost` 判断「从左展开会不会顶出屏幕」的依据（那边的 POPOVER_W），改这里要一起改 */
 .qab-analysis {
   position: absolute;
   top: calc(100% + 6px);

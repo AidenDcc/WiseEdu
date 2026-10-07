@@ -28,7 +28,6 @@ import {
   onMounted,
   ref,
   watch,
-  type CSSProperties,
 } from 'vue'
 import { AppIcon, AppModal, enterOverlay, exitOverlay, isTopOverlay, paperQuestionCount, showToast } from '@aiteach/shared'
 import type { MediaKind, OrgPaper, OrgQuestion, QuestionCorrection } from '@aiteach/shared'
@@ -40,12 +39,10 @@ import PaperBlock from './PaperBlock.vue'
 const PaperAnalysisModal = defineAsyncComponent(() => import('./PaperAnalysisModal.vue'))
 import PaperShareDialog from './PaperShareDialog.vue'
 import ParallelPaperDialog from './ParallelPaperDialog.vue'
-import QuestionActionBar from './QuestionActionBar.vue'
+import QuestionActionBarHost from './QuestionActionBarHost.vue'
 import QuestionPreviewDrawer from '@/components/question/QuestionPreviewDrawer.vue'
 import QuestionCorrectionDialog from '@/components/question/QuestionCorrectionDialog.vue'
 import SimilarQuestionsModal from '@/components/compose/SimilarQuestionsModal.vue'
-import { useComposeBasket } from '@/composables/useComposeBasket'
-import { useQuestionFavorites } from '@/composables/useQuestionFavorites'
 import { fetchQuestionCorrections } from '@/api/org'
 import { difficultyClass } from '@/utils/question-card'
 import { distributionOf } from './paper-stats'
@@ -112,8 +109,6 @@ const emit = defineEmits<{
 const maskZ = computed(() => props.zIndex ?? 130)
 /** 子弹窗（导出 / 分享 / 平行组卷 / 分析 / 题目预览 / 纠错 / 相似题） */
 const childZ = computed(() => maskZ.value + 10)
-/** 悬停操作条：夹在遮罩与子弹窗之间 */
-const barZ = computed(() => maskZ.value + 1)
 
 /**
  * 随卷参考资料（组卷车里的图片 / 视频 / 小程序）。
@@ -527,20 +522,18 @@ watch(
 
 /* ===== 浏览现成卷时每题的悬停操作条（`browse` 才开） =====
  *
- * **为什么操作条不在纸面里**：纸面 `.pp-sheet` 既 `overflow: hidden` 又 `transform: scale()`，
- * 块高还决定分版（隐藏测量层量高 → paginateBlocks），而「打印版式」打的就是这份 DOM。
- * 把操作条放进纸面会三处同时出问题：每页最后一题被裁掉、插入节点改变分版、打印件上多出按钮。
- * 所以纸面里只做**区块描边**（`.pp-slot.is-live`，纯 outline，不参与布局），操作条本身 Teleport 到
- * body 上做 fixed 定位 —— 顺便也绕开了 `.pp-mask` 的 backdrop-filter（它会让 fixed 后代
- * 以遮罩为包含块，那样坐标就全错了）。
- *
- * 位置每次都是从题块元素的 `getBoundingClientRect()` 现算的：rect 已含 scale，
- * 所以缩放到 50% 时按钮仍是原尺寸；画布滚动时用 rAF 重算，跟着题目走。
- * 横向**右对齐题块右沿**（见 `placeBar`），不是左对齐 —— 鼠标在题目上时按钮就在右手边。
+ * 操作条本体与定位都在 `QuestionActionBarHost` 里（与试卷编辑画布共用一份 —— 需求要的
+ * 「编辑页的按钮样式与预览一致」就是靠这个，不是靠两边各画一遍）。本组件只剩三件事：
+ * 给题块挂 `data-qbar` 让壳认得出锚点、给题块描边（`.pp-slot.is-live`）、
+ * 接住壳抛上来的三个动作去开对应的子弹窗。
  */
 
-const basket = useComposeBasket()
-const favorites = useQuestionFavorites()
+/** 操作条壳。重新分版 / 换卷 / 开子弹窗时都要叫它收起来：前两者让锚点失效（甚至脱离文档），
+    后者是「弹窗盖在纸面上时不该还有一条悬停条」。 */
+const barHost = ref<InstanceType<typeof QuestionActionBarHost> | null>(null)
+function hideBar() {
+  barHost.value?.hide()
+}
 
 /** 从操作条打开的子弹窗：非空即打开（与试题页签同一套开关方式） */
 const previewTarget = ref<OrgQuestion | null>(null)
@@ -557,7 +550,10 @@ const correctedSet = computed(() => new Set(corrections.value.map((row) => row.q
 function correctionsOf(questionId: number): QuestionCorrection[] {
   return corrections.value.filter((row) => row.questionId === questionId)
 }
-function onCorrectionSubmitted(questionId: number) {
+/**
+ * 载荷里带的是整条纠错内容（组卷编辑页拿它生成卷面评论），本页没有评论能力，只用得上题号。
+ */
+function onCorrectionSubmitted({ questionId }: { questionId: number; types: string[]; description: string }) {
   if (correctedSet.value.has(questionId)) return
   /* 只补一个 id：列表里其它字段（类型 / 描述）是预览抽屉才要的，提交后没必要重拉全量 */
   corrections.value = [
@@ -566,151 +562,24 @@ function onCorrectionSubmitted(questionId: number) {
   ]
 }
 
-const barItem = ref<OrgQuestion | null>(null)
-/** 解析浮层朝上开（操作条被翻到题目上方时，或贴着视口下沿时） */
-const barPopUp = ref(false)
-/** 解析浮层改右对齐（操作条贴视口右边、浮层比操作条宽、从左展开会顶出屏幕时） */
-const barFlipX = ref(false)
-/** 首帧还没量到尺寸时先藏起来，免得在旧位置闪一下 */
-const barReady = ref(false)
-const barPos = ref({ left: 0, top: 0 })
-const barEl = ref<HTMLElement | null>(null)
-/** 悬停的题块元素：不放进 ref —— DOM 节点被响应式代理包一层没有好处 */
-let barAnchor: HTMLElement | null = null
-let barCloseTimer = 0
-let barFollowFrame = 0
-
-/** 操作条与题块之间的间隙 */
-const BAR_GAP = 8
-/** 从题目挪到操作条上的宽限时间（两者是不同的 DOM 子树，离开题目会先触发一次 mouseleave） */
-const BAR_CLOSE_DELAY = 140
-/** 解析浮层的估算高度：只用来判断它该朝上还是朝下开，估小了顶多偶尔贴到屏幕边 */
-const POPOVER_MIN_H = 150
-/** 解析浮层的宽度（与 `QuestionActionBar` 里 `.qab-analysis` 的 width 一致），判断左右翻边用 */
-const POPOVER_W = 420
-
-/* 显式标注 CSSProperties：`visibility` 的三态字面量否则会被推断成宽泛的 string */
-const barStyle = computed<CSSProperties>(() => ({
-  left: `${barPos.value.left}px`,
-  top: `${barPos.value.top}px`,
-  zIndex: barZ.value,
-  visibility: barReady.value ? 'visible' : 'hidden',
-}))
-
-function placeBar() {
-  const anchor = barAnchor
-  /* 重新分版会把纸面整个换掉：老锚点脱离文档，操作条没有可依附的题，收掉 */
-  if (!anchor || !anchor.isConnected) {
-    hideBar()
-    return
-  }
-  const rect = anchor.getBoundingClientRect()
-  const width = barEl.value?.offsetWidth ?? 0
-  const height = barEl.value?.offsetHeight ?? 0
-  /* 操作条**右**对齐题块（`rect.right - width`），不是左对齐：鼠标停在题目上时按钮就在手边，
-     不必先横穿整道题去找左边那条。两端仍要夹进视口；题块比操作条还窄时右对齐会越过左沿，
-     夹完自然退化成左对齐 —— 好过顶出屏幕 */
-  const left = Math.min(Math.max(rect.right - width, 8), Math.max(8, window.innerWidth - width - 8))
-  /* 默认贴题块下沿；下方放不下且上方有空位就翻到题块上面 */
-  const below = rect.bottom + BAR_GAP
-  const above = below + height > window.innerHeight - 8 && rect.top - BAR_GAP - height > 8
-  const top = above ? rect.top - BAR_GAP - height : below
-  /* 解析浮层默认也朝下开；下面既要放得下操作条、也要放得下浮层（约 150px），否则改朝上 */
-  barPopUp.value = above || top + height + BAR_GAP + POPOVER_MIN_H > window.innerHeight - 8
-  /* 浮层比操作条宽，操作条贴右边时从左展开会顶出屏幕：改用它自己的右边对齐操作条右边 */
-  barFlipX.value = left + POPOVER_W > window.innerWidth - 8
-  barPos.value = { left, top }
-  barReady.value = true
-}
-
-/** 画布滚动 / 内容变化时操作条要跟着题目走：一帧最多重算一次 */
-function scheduleBarPlace() {
-  if (barFollowFrame) return
-  barFollowFrame = requestAnimationFrame(() => {
-    barFollowFrame = 0
-    if (barItem.value) placeBar()
-  })
-}
-
-function cancelBarClose() {
-  window.clearTimeout(barCloseTimer)
-}
-
-function startBarClose() {
-  cancelBarClose()
-  barCloseTimer = window.setTimeout(hideBar, BAR_CLOSE_DELAY)
-}
-
-function hideBar() {
-  cancelBarClose()
-  barItem.value = null
-  barAnchor = null
-  barReady.value = false
-}
-
-/**
- * 鼠标进入某个题块。
- *
- * 事件挂在 `PaperBlock` 上由它落到根元素（`@mouseenter` / `:class` 的透传），因此
- * `currentTarget` 就是那道题的根元素 —— 纸面里没有多包一层 div，分版量到多少画出来还是多少。
- */
-async function onBlockEnter(event: Event, block: PaperBlockModel) {
-  if (!props.browse || block.kind !== 'question') return
-  cancelBarClose()
-  /* 题源缺失的块不给操作条：六个动作里除收藏外都要真实题目，只留一个收藏按钮没有意义 */
-  const item = props.questions.find((row) => row.id === block.questionId)
-  if (!item) {
-    hideBar()
-    return
-  }
-  /* 同一道题（双栏里指针从一栏挪到另一栏）只续命，不重新定位 —— 免得在题内移动时闪 */
-  if (barItem.value?.id === item.id) return
-  barItem.value = item
-  barAnchor = event.currentTarget as HTMLElement
-  barReady.value = false
-  await nextTick()
-  placeBar()
-}
-
 /** 可逐题取用的题块描边类（打印无 hover，纸上不会落痕；`browse` 关闭时不出现） */
 function slotClass(block: PaperBlockModel): string {
   return props.browse && block.kind === 'question' ? 'is-live' : ''
+}
+
+/**
+ * 操作条锚点：只有题目块才挂 `data-qbar`（卷首 / 材料 / 附加区块没有可操作的对象）。
+ * 返回 null 时 Vue 会把属性整个去掉，不会留下 `data-qbar=""` 这种假锚点把操作条勾出来。
+ */
+function barAnchorOf(block: PaperBlockModel): number | null {
+  return block.kind === 'question' ? block.questionId : null
 }
 
 /* 缩放 / 切内容 / 重新分版 / 开子弹窗：全都直接收掉操作条。
    前三种会让锚点位置失效（甚至脱离文档），后者是「弹窗盖在预览上时不该还有一条悬停条」。 */
 watch([zoom, mode, heights, previewTarget, correctTarget, similarTarget], hideBar)
 
-/* ===== 操作条上的六个动作 ===== */
-
-function onPreviewBar() {
-  if (barItem.value) previewTarget.value = barItem.value
-}
-function onCorrectBar() {
-  if (barItem.value) correctTarget.value = barItem.value
-}
-function onSimilarBar() {
-  if (barItem.value) similarTarget.value = barItem.value
-}
-function onFavoriteBar() {
-  if (barItem.value) favorites.toggle(barItem.value.id)
-}
-
-/** 与「试题」页签同一条入库校验：未入库的题不能进车（FR-PP-003），拦下并说清原因 */
-function onBasketBar() {
-  const item = barItem.value
-  if (!item) return
-  if (basket.has(item.id)) {
-    basket.remove(item.id)
-    return
-  }
-  if (item.status !== 'approved') {
-    showToast('该题还未入库（待审 / 驳回），不能加入组卷车', 'error')
-    return
-  }
-  /* 来源记 `paper`：这题是从整卷预览里取的，组卷车按来源分组时要说得清 */
-  basket.add(item, 'paper')
-}
+/* ===== 操作条抛上来的三个动作（收藏与组卷车在壳里自己处理） ===== */
 
 /** 预览里没有筛选面板可切：说清去哪儿切，好过按钮点了没反应 */
 function onSimilarFilter() {
@@ -841,9 +710,6 @@ onMounted(async () => {
   }
   /* 开了「适应宽度」就按画布实宽定比例（用户手动调过缩放的话 applyZoom 已把它关掉） */
   if (autoFit.value) zoom.value = fitZoom()
-  /* 操作条跟着纸面滚动走（`browse` 才有操作条，但监听挂在这儿最省事） */
-  canvas.value?.addEventListener('scroll', scheduleBarPlace, { passive: true })
-  window.addEventListener('resize', hideBar)
   if (props.browse) {
     /* 纠错记录拉不到就退化成「按钮一律显示纠错」，不该因此白屏，故吞掉异常 */
     fetchQuestionCorrections()
@@ -866,10 +732,6 @@ onBeforeUnmount(() => {
   document.body.classList.remove('pp-preview-open')
   resizeObserver?.disconnect()
   canvasObserver?.disconnect()
-  canvas.value?.removeEventListener('scroll', scheduleBarPlace)
-  window.removeEventListener('resize', hideBar)
-  cancelBarClose()
-  if (barFollowFrame) cancelAnimationFrame(barFollowFrame)
   if (frame) cancelAnimationFrame(frame)
 })
 </script>
@@ -1136,8 +998,7 @@ onBeforeUnmount(() => {
                             <div
                               class="pp-slot"
                               :class="slotClass(row.block)"
-                              @mouseenter="onBlockEnter($event, row.block)"
-                              @mouseleave="startBarClose"
+                              :data-qbar="barAnchorOf(row.block)"
                             >
                               <PaperBlock
                                 :block="row.block"
@@ -1155,8 +1016,7 @@ onBeforeUnmount(() => {
                                 :key="block.key"
                                 class="pp-slot"
                                 :class="slotClass(block)"
-                                @mouseenter="onBlockEnter($event, block)"
-                                @mouseleave="startBarClose"
+                                :data-qbar="barAnchorOf(block)"
                               >
                                 <PaperBlock
                                   :block="block"
@@ -1267,33 +1127,20 @@ onBeforeUnmount(() => {
     </div>
   </Teleport>
 
-  <!-- 每题操作条：单独一个 Teleport 直接挂到 body（不能放进 .pp-mask —— 它的 backdrop-filter
-       会成为 fixed 后代的包含块，坐标会整体偏掉）。层级是 barZ（遮罩 +1，夹在遮罩与子弹窗之间）。
-       打印时它作为 body 的直接子元素被 `body.pp-preview-open > *:not(.pp-mask)` 隐藏。 -->
-  <Teleport to="body">
-    <div
-      v-if="barItem"
-      ref="barEl"
-      class="pp-qbar"
-      :class="{ 'is-flip-x': barFlipX }"
-      :style="barStyle"
-      @mouseenter="cancelBarClose"
-      @mouseleave="startBarClose"
-    >
-      <QuestionActionBar
-        :item="barItem"
-        :popover-up="barPopUp"
-        :favorited="favorites.has(barItem.id)"
-        :in-basket="basket.has(barItem.id)"
-        :corrected="correctedSet.has(barItem.id)"
-        @preview="onPreviewBar"
-        @favorite="onFavoriteBar"
-        @correct="onCorrectBar"
-        @similar="onSimilarBar"
-        @basket="onBasketBar"
-      />
-    </div>
-  </Teleport>
+  <!-- 每题操作条：壳自己 Teleport 到 body（见 `QuestionActionBarHost`）。
+       层级是 maskZ + 1（夹在遮罩与子弹窗之间）；打印时它作为 body 的直接子元素被
+       `body.pp-preview-open > *:not(.pp-mask)` 隐藏。 -->
+  <QuestionActionBarHost
+    ref="barHost"
+    :questions="questions"
+    :enabled="browse"
+    :corrected="correctedSet"
+    :scroll-host="canvas"
+    :z-index="maskZ + 1"
+    @preview="previewTarget = $event"
+    @correct="correctTarget = $event"
+    @similar="similarTarget = $event"
+  />
 </template>
 
 <style scoped>
@@ -1608,15 +1455,6 @@ onBeforeUnmount(() => {
    壳本身不给任何样式：它只是 PaperBlock 的容器（分版靠量 PaperBlock，不量壳） */
 .pp-slot.is-live:hover { outline: 2px solid var(--brand); outline-offset: 4px; border-radius: 2px; }
 
-/* 悬停操作条：fixed 在视口坐标上（位置由脚本算，右对齐题块右沿），层级夹在预览遮罩与子弹窗之间 */
-.pp-qbar {
-  position: fixed;
-  animation: fade-in 0.12s ease;
-}
-/* 操作条贴视口右边时，解析浮层（420px，比操作条宽）改成右对齐，否则会顶出屏幕。
-   浮层在子组件的作用域里，故用 :deep() 穿透 */
-.pp-qbar.is-flip-x :deep(.qab-analysis) { left: auto; right: 0; }
-
 .pp-seal {
   position: absolute;
   top: 0;
@@ -1699,7 +1537,7 @@ onBeforeUnmount(() => {
   .pp-bar,
   .pp-side,
   .pp-page-tag,
-  .pp-qbar,
+  .qbar-host,
   .pp-measure { display: none !important; }
 
   .pp-main { display: block !important; }

@@ -8,7 +8,7 @@
  * 只放纯函数：`showToast`、操作日志、id 自增计数器等副作用一律留在各自视图层，
  * 否则共享函数的签名会被两边的 UI 细节绑死。
  */
-import type { OrgQuestion, PaperSection } from '@aiteach/shared'
+import type { CollabRequirement, OrgQuestion, PaperSection } from '@aiteach/shared'
 
 /**
  * 组装大题所需的最小题目描述（组卷车的条目结构上兼容它）。
@@ -185,6 +185,37 @@ export function scoreOfSections(sections: PaperSection[]): number {
     (total, section) => total + section.questions.reduce((sum, q) => sum + (Number(q.score) || 0), 0),
     0,
   )
+}
+
+/**
+ * 按协同要求算出某人「每个题型该交几道 / 已经交了几道」。
+ *
+ * **口径必须与 mock 的 `collabSubmitMember` 逐字一致**（org-store.ts 里那段 `done` 的算法），
+ * 否则提交前的自检会说「已交齐」、真提交时却被后端一句「还差 N 道题未完成」打回。
+ * 那条算法有两个不能想当然的地方，这里照抄：
+ * 1. 只数**标题命中该题型大题名**的大题（`sectionLabelOf('单选')` = 「单项选择题」→ 去掉尾部「题」），
+ *    一道单选被人工挪进「解答题」大题，后端是不认的；
+ * 2. 按题型逐项取 `min(要求, 已有)` 再求和 —— 多交的部分不抵别的题型的缺口。
+ *
+ * `typeOfId` 由调用方给（题目 id → 题型）：本模块只认 `PaperSection` 那点结构，
+ * 不认识题目表，硬塞一个 `OrgQuestion[]` 进来会让组卷车那条路也拖上整个题型表。
+ */
+export function memberQuotaOf(
+  sections: PaperSection[],
+  typeOfId: (questionId: number) => string | undefined,
+  requirement: CollabRequirement,
+  questionTypes: string[],
+): Array<{ type: string; want: number; have: number }> {
+  const scoped = questionTypes.length
+    ? requirement.structure.filter((row) => questionTypes.includes(row.type))
+    : requirement.structure
+  return scoped.map((row) => {
+    const label = sectionLabelOf(row.type).replace(/题$/, '')
+    const have = sections
+      .filter((section) => section.title.includes(label))
+      .reduce((count, section) => count + section.questions.filter((q) => typeOfId(q.questionId) === row.type).length, 0)
+    return { type: row.type, want: row.count, have }
+  })
 }
 
 /** 客观题（单选/多选/判断）分值合计 */
