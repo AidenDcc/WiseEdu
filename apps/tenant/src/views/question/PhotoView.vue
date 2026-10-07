@@ -6,7 +6,7 @@ import QuestionOptions from '@/components/question/QuestionOptions.vue'
 import QuestionEditorModal from '@/components/question/QuestionEditorModal.vue'
 import type { MetaRowKey } from '@/components/question/QuestionEditor.vue'
 import { decidePhoto, fetchKnowledgeTree, fetchPhotoTasks, recognizePhoto, registerPhotoTask, uploadPhotos } from '@/api/org'
-import { alignKnowledgeToPool, persistEmbeddedImages, photoEngine, photoModelName, recognizePhotoFile } from '@/api/ai-photo'
+import { alignKnowledgeToPool, persistEmbeddedImages, photoEngine, recognizePhotoFile } from '@/api/ai-photo'
 import { getCheckRounds, setCheckRounds, verifyQuestionsByAi, type VerifyIssue } from '@/api/ai-verify'
 import { collectTags } from '@/composables/useKnowledgePool'
 import { useBaseData } from '@/composables/useBaseData'
@@ -36,8 +36,9 @@ const stage = ref<Stage>('upload')
 
 /** 识别引擎：已配置视觉模型走真实多模态识别，否则本地演示数据 */
 const engine = ref<'vision' | 'mock'>(photoEngine())
+/* 标识只区分「真实识别 / 本地演示」，不回显底层模型名 */
 const engineLabel = computed(() =>
-  engine.value === 'vision' ? `多模态识别（${photoModelName()}）` : '本地演示数据（未配置视觉模型）',
+  engine.value === 'vision' ? '多模态识别' : '本地演示数据（未配置视觉模型）',
 )
 
 /**

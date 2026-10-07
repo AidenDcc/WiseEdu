@@ -11,7 +11,7 @@
  * 与 AI 出题共用公式/SVG 净化逻辑，解析失败自动重试一次。
  */
 import type { PhotoTask } from '@aiteach/shared'
-import { isVisionConfigured, visionChat, visionModel } from './deepseek'
+import { isVisionConfigured, visionChat } from './deepseek'
 import { buildPhotoUserPrompt, PHOTO_SYSTEM_PROMPT } from './ai-prompts'
 import { normalizeQuestionList } from './ai-normalize'
 import { uploadMedia } from './org'
@@ -21,11 +21,6 @@ export type PhotoEngine = 'vision' | 'mock'
 /** 当前拍照识题引擎（页面用来展示「真实 AI / 本地演示」标识） */
 export function photoEngine(): PhotoEngine {
   return isVisionConfigured() ? 'vision' : 'mock'
-}
-
-/** 当前视觉模型名（真实引擎时展示） */
-export function photoModelName(): string {
-  return visionModel()
 }
 
 /** 单张图片识别出的结果题数上限（防御模型无限拆题） */

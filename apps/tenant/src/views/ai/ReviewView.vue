@@ -81,7 +81,6 @@ onMounted(load)
               <th>产物</th>
               <th>类型</th>
               <th>场景</th>
-              <th>生成模型</th>
               <th>AI 标识</th>
               <th>自动质检</th>
               <th>复核状态</th>
@@ -91,10 +90,10 @@ onMounted(load)
           </thead>
           <tbody>
             <tr v-if="loading">
-              <td colspan="9" class="empty-row">加载中…</td>
+              <td colspan="8" class="empty-row">加载中…</td>
             </tr>
             <tr v-else-if="artifacts.length === 0">
-              <td colspan="9" class="empty-row">暂无复核条目</td>
+              <td colspan="8" class="empty-row">暂无复核条目</td>
             </tr>
             <template v-else>
               <tr v-for="row in artifacts" :key="row.id">
@@ -104,7 +103,6 @@ onMounted(load)
                 </td>
                 <td><span class="tag tag-blue">{{ row.kind }}</span></td>
                 <td>{{ row.scene }}</td>
-                <td class="mono">{{ row.model }}</td>
                 <td>
                   <span class="tag" :class="row.aiLabeled ? 'tag-blue' : 'tag-red'">{{ row.aiLabeled ? '已标识' : '缺失' }}</span>
                 </td>

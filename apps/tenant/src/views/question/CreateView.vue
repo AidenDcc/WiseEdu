@@ -744,7 +744,7 @@ onMounted(load)
           <span class="ai-title">AI 智能出题</span>
           <span class="f-hint" style="margin: 0">多智能体协作：出题 → 查重 → 纠错 → 校标，产出即达「待人工终审」</span>
           <span class="tag" :class="engine === 'deepseek' ? 'tag-green' : 'tag-gray'" style="margin-left: auto">
-            {{ engine === 'deepseek' ? 'Deepseek 真实生成' : '本地演示数据（未配置 Key）' }}
+            {{ engine === 'deepseek' ? 'AI 真实生成' : '本地演示数据（未配置 Key）' }}
           </span>
         </div>
 
@@ -840,7 +840,7 @@ onMounted(load)
           <h3>
             生成完成（{{ results.length }} 题）· 已采纳 {{ adoptedIds.size }} 题
             <span v-if="engine === 'deepseek' && lastTokens" class="f-hint" style="font-weight: 400">
-              · Deepseek 消耗 {{ lastTokens }} tokens
+              · 消耗 {{ lastTokens }} tokens
             </span>
           </h3>
           <div class="op-group">
