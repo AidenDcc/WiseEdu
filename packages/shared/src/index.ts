@@ -5,6 +5,7 @@ export { request } from './request/client'
 export { ApiError } from './request/api-error'
 export { resolveApiMode } from './request/mock-switch'
 export type { ApiMode } from './request/mock-switch'
+export { BACKEND_READY_PATHS, isBackendReady } from './request/backend-ready'
 export type { ApiResponse, RequestOptions, HttpMethod } from './request/types'
 
 export {

@@ -7,8 +7,9 @@ import '../mock' // 注册全部 Mock 路由（副作用导入）
 
 /**
  * 统一请求入口：管理端 / 机构端所有 API 均经由此函数发出。
- * 请求先经过 resolveApiMode 判定走 Mock 引擎还是真实后端，
- * 因此后端就绪后仅需调整环境变量即可统一切换或按服务逐步切换，业务代码零改动。
+ * 请求先经过 resolveApiMode 判定走 Mock 引擎还是真实后端：统一开关 VITE_USE_MOCK
+ * 关闭时全部走 Mock，打开时只有 backend-ready.ts 已登记的接口走真实后端、其余回退 Mock。
+ * 业务代码不感知该判定，接入后端时零改动。
  */
 export async function request<T>(url: string, options: RequestOptions = {}): Promise<T> {
   const method = options.method ?? 'GET'

@@ -6,7 +6,7 @@
 
 当前版本处于 **Demo / 原型阶段**：前端页面、路由、交互和 Mock 数据已搭建完成；后端已引入 JeecgBoot 3.9.5 基础框架，并落地「教学云业务接入 Wave 1」——平台端数据概览、机构端题库分类、登录会话与租户隔离建表。
 
-前端正处于**按服务灰度接入真实后端**的过程中：超级管理端的 `/auth/*`（登录会话）与 `/admin/*`（平台端业务）已走真实网关，其余服务前缀与机构端整体仍由 `@aiteach/shared` 的 Mock 引擎提供数据，部分菜单以“正在开发中”占位页展示。
+前后端对接由一个**统一开关**控制：关闭时全部走 Mock（与接入后端之前完全一致），打开时只有后端**已实现**的接口走真实网关，其余接口自动回退 Mock。后端目前完成 Wave 1（登录会话、平台端概览、机构端题库分类，共 7 个接口端点），其余业务仍由 `@aiteach/shared` 的 Mock 引擎提供数据，部分菜单以“正在开发中”占位页展示。
 
 ## 项目预览
 
@@ -20,7 +20,7 @@
 
 启动后访问 <http://localhost:5173/login>（超级管理端）或 <http://localhost:5174/login>（机构端）。
 
-> 两个业务端的登录与会话接口（`/auth/*`）走同一套教学云后端实现；当前仅超级管理端在开发环境开启了灰度接入，机构端仍为纯 Mock，详见[前后端联调](#前后端联调)。
+> 是否走后端由统一开关 `VITE_USE_MOCK` 控制，两个端共用同一份「后端已实现接口清单」（[backend-ready.ts](packages/shared/src/request/backend-ready.ts)）。开发环境当前开关为**关闭**（全部走 Mock），要连本地后端再打开，详见 [Mock 与真实后端切换](#mock-与真实后端切换)。
 
 ## 功能范围
 
@@ -149,75 +149,75 @@ pnpm dev:tenant   # 仅启动机构端
 
 ### 登录账号
 
-登录接口（`/auth/login`）在超级管理端已接入真实后端，因此**两个端可用的账号不同**，请按下表取用。
+能用的账号取决于 `VITE_USE_MOCK` 开关。开发环境**默认关闭**（全 Mock），直接用下面的演示账号即可。
 
-超级管理端（真实后端 `sys_user`，即 JeecgBoot 内置账号）：
+**开关关闭（默认，全 Mock）** —— 账号由 Mock 数据提供，仅用于本地演示，请勿用于生产环境：
+
+| 端 | 账号 | 密码 | 角色 |
+| --- | --- | --- | --- |
+| 超级管理端 | `admin` | `admin123` | 超级管理员 |
+| 机构端 | `orgadmin` | `org123456` | 机构管理员 |
+| 机构端 | `auditor` | `aud123456` | 审核员 |
+| 机构端 | `teacher` | `tea123456` | 老师 |
+
+登录页提供“一键填充”功能，直接可用。
+
+**开关打开（`VITE_USE_MOCK=false`，走真实后端）** —— `/auth/*` 已登记在清单里，**两个端**的登录都会请求后端 `sys_user`，上面的演示账号不再有效：
 
 | 账号 | 密码 | 说明 |
 | --- | --- | --- |
-| `admin` | `123456` | 框架内置超级管理员，请在正式环境立即修改 |
+| `admin` | `123456` | JeecgBoot 内置超级管理员，请在正式环境立即修改 |
 
-机构端（仍是 Mock 数据，仅用于本地演示，请勿用于生产环境）：
+此时登录页的“一键填充”填的是 Mock 账号，无法通过后端校验，需手动输入。
 
-| 账号 | 密码 | 角色 |
-| --- | --- | --- |
-| `orgadmin` | `org123456` | 机构管理员 |
-| `auditor` | `aud123456` | 审核员 |
-| `teacher` | `tea123456` | 老师 |
-
-> 登录页的“一键填充”按钮填的是 Mock 演示账号。在超级管理端（已接真机）下该账号无法通过后端校验，需手动输入 `admin / 123456`；把 `VITE_REMOTE_SERVICES` 清空即可回到纯 Mock 演示。
->
 > 教学云初始化数据基于框架自带的租户 `1000`、`1001`（见 `V3.9.6_3__edu_initial_data.sql`），租户侧账号需在 sys_user 中自行创建并关联租户。
 
 ## Mock 与真实后端切换
 
-所有业务请求统一经过 `@aiteach/shared` 的请求层，由 `resolveApiMode()` 决定请求走向：
+所有业务请求统一经过 `@aiteach/shared` 的请求层，由 `resolveApiMode()` 决定请求走向。**只有一个开关 `VITE_USE_MOCK`**：
 
 ```text
 请求
- └─ VITE_REMOTE_SERVICES 命中服务前缀？── 是 → 真实后端
-                                      └─ 否
- └─ VITE_USE_MOCK=false？────────────── 是 → 真实后端
-                                      └─ 否 → Mock 引擎
+ └─ VITE_USE_MOCK=false（开关已打开）？
+      ├─ 否 → Mock 引擎（与接入后端之前完全一致）
+      └─ 是 → 该接口已在 backend-ready.ts 清单中？
+                ├─ 是 → 真实后端
+                └─ 否 → Mock 引擎（后端尚未实现，自动回退）
 ```
 
-开发环境配置位于：
+**「打开开关」不等于「所有请求都打后端」**：教学云后端的接口是分批落地的，只有清单里登记过的接口才走真实后端，未登记的继续由 Mock 承接 —— 这样打开开关也不会把还没有后端的页面弄坏。
 
-- `apps/admin/.env.development`
-- `apps/tenant/.env.development`
+### 后端已实现接口清单
 
-生产/联调配置模板位于：
+清单维护在 [packages/shared/src/request/backend-ready.ts](packages/shared/src/request/backend-ready.ts)，**前缀匹配**，两个端共用同一份：
 
-- `apps/admin/.env.production.example`
-- `apps/tenant/.env.production.example`
+| 已登记路径 | 对应后端 |
+| --- | --- |
+| `/auth/login`、`/auth/me`、`/auth/logout` | `EduAuthController` |
+| `/admin/dashboard/overview` | `AdminDashboardController` |
+| `/tenant/categories` | `EduQuestionCategoryController`（同时覆盖其 `/save`、`/delete`） |
 
-主要变量如下：
+后端每补齐一个接口，在这个文件里登记一次即可（`/tenant/categories` 这类前缀条目会连带覆盖其子路径）。
+
+### 环境变量
+
+开发环境配置位于 `apps/admin/.env.development`、`apps/tenant/.env.development`；生产/联调模板为对应的 `.env.production.example`。
 
 | 变量 | 说明 |
 | --- | --- |
-| `VITE_USE_MOCK` | `true` 时默认使用 Mock；`false` 时全部请求走真实后端 |
+| `VITE_USE_MOCK` | **统一开关**。`true`（默认，含未配置）全部走 Mock；`false` 时清单内接口走真实后端，其余回退 Mock |
 | `VITE_API_BASE_URL` | 真实后端 API 网关前缀，默认可使用 `/api` |
-| `VITE_REMOTE_SERVICES` | 逗号分隔的服务前缀；命中前缀的请求强制走真实后端，其余仍走 Mock（见下方「当前灰度进度」） |
 | `VITE_DEEPSEEK_API_KEY` | Deepseek Key，写入 `.env.local`（已被 `.gitignore` 排除）启用真实 AI 出题；未配置时回退本地演示数据 |
 | `VITE_DEEPSEEK_BASE_URL` | Deepseek 网关地址，默认 `/deepseek`（开发环境经 `apps/tenant/vite.config.ts` 代理转发，规避 CORS）；生产环境指向自建网关 |
 | `VITE_DEEPSEEK_MODEL` | 模型名，默认 `deepseek-chat` |
 
-### 当前灰度进度
-
-两个开发环境配置的取值与含义：
-
-| 应用 | `VITE_USE_MOCK` | `VITE_REMOTE_SERVICES` | 实际效果 |
-| --- | --- | --- | --- |
-| `apps/admin` | `true` | `auth,admin` | 登录会话与平台端业务走真实后端，其余走 Mock |
-| `apps/tenant` | `true` | *（空）* | 全部走 Mock |
-
-`VITE_USE_MOCK` 保持 `true` 是为了让未列入 `VITE_REMOTE_SERVICES` 的服务前缀继续由 Mock 兜底；清空 `VITE_REMOTE_SERVICES` 即可一次性回退到全 Mock（Mock 数据与真实库互不影响）。
+> AI 服务（Deepseek 出题、拍照识题、文档识别）不经过教学云后端，由 `VITE_DEEPSEEK_*` 独立控制，**不受 `VITE_USE_MOCK` 影响**。
 
 接入后端时：
 
-1. 复制对应的 `.env.production.example` 为 `.env.production`，按部署环境修改配置。
-2. 两个应用的 `vite.config.ts` 中 `/api` 代理**已启用**，开发环境 target 指向网关 `http://localhost:9999`（而非单体后端 8080）——网关按 `/admin/**`、`/tenant/**`、`/auth/**` 转发到对应服务。生产环境改为指向实际网关地址。
-3. 选择全量切换（`VITE_USE_MOCK=false`）或按服务切换（配置 `VITE_REMOTE_SERVICES`）。
+1. 启动后端并确认接口可用（单体 8080 或 微服务 + 网关 9999，见[后端服务](#后端服务service)章节）。
+2. 确认 `vite.config.ts` 的 `/api` 代理 target 指向实际网关地址（开发环境已指向 `http://localhost:9999`，网关按 `/admin/**`、`/tenant/**`、`/auth/**` 转发到对应服务）。
+3. 把该应用的 `VITE_USE_MOCK` 置为 `false`。清单里没登记的接口仍会走 Mock，不会因为后端还没实现而报错。
 4. 请求头由请求层统一处理：鉴权用 `X-Access-Token`（JeecgBoot 约定，不是 `Authorization: Bearer`），租户上下文用 `X-Tenant-Id`。
 5. 保持统一响应格式 `{ code, message, data }`，其中 `code=0` 表示成功；框架自身的鉴权/全局异常返回 `{ success, code, message, result }`。
 
@@ -306,7 +306,7 @@ cd Service/jeecg-module-system/jeecg-system-start && mvn spring-boot:run
 
 ### 微服务模式（灰度联调需要）
 
-前端的 `/admin/**`、`/tenant/**` 由网关按服务名分发，因此**灰度接入真实后端时前端必须连网关**，而不是单体 8080：
+前端的 `/admin/**`、`/tenant/**` 由网关按服务名分发，因此**打开开关、真正连后端时前端必须连网关**，而不是单体 8080：
 
 ```bash
 # 1. 构建（根 pom 的 SpringCloud profile 默认激活，会连同微服务栈一并构建）
@@ -325,16 +325,13 @@ cd Service/jeecg-server-cloud/jeecg-edu-tenant-cloud-start   && mvn spring-boot:
 
 ### 前后端联调
 
-两个应用的 `/api` 代理**已启用**并把开发环境 target 指向网关 `http://localhost:9999`，因此联调时只需确保对应的后端服务在跑，再控制灰度范围：
+两个应用的 `/api` 代理**已启用**并把开发环境 target 指向网关 `http://localhost:9999`，因此联调时只需确保后端在跑，再把开关打开：
 
 1. 启动微服务模式（Nacos → 网关 → edu 微服务，见上一节）。
-2. 调整该应用的 `VITE_REMOTE_SERVICES`：
-   - 只接某个服务：如 `auth`、`auth,admin`、`auth,tenant`；
-   - 全量接入：改 `VITE_USE_MOCK=false`（此时 `VITE_REMOTE_SERVICES` 不再起作用）；
-   - 回退到纯 Mock：清空 `VITE_REMOTE_SERVICES` 且保持 `VITE_USE_MOCK=true`。
+2. 把该应用的 `VITE_USE_MOCK` 置为 `false`；要回退到纯 Mock 就改回 `true`。
 3. 登录后请求会自带 `X-Access-Token` 与 `X-Tenant-Id`，由网关按前缀转发到对应微服务。
 
-> 灰度是**按请求 URL 前缀**生效的，与路由/页面无关。例如 `VITE_REMOTE_SERVICES=auth,admin` 时，超级管理端的登录页与平台端业务页走真机，而题库、内容运营等页面依旧读取 Mock 数据。
+> 走真机与否取决于**请求 URL 是否在已实现清单里**，与路由/页面无关。打开开关后，登录与会话、平台端工作台概览走真机，而租户管理、内容运营、题库等页面依旧读取 Mock 数据 —— 因为后端还没实现这些接口。
 
 ## 构建、检查与预览
 
@@ -383,7 +380,7 @@ pnpm typecheck && pnpm build
 
 当前限制：
 
-- 后端教学云业务仅完成 Wave 1（登录会话、平台端概览、机构端题库分类），绝大部分业务接口尚未落地；前端只有超级管理端的 `/auth/*`、`/admin/*` 走真机，机构端整体与其余业务模块仍为 Mock。
+- 后端教学云业务仅完成 Wave 1（登录会话、平台端概览、机构端题库分类），绝大部分业务接口尚未落地；即使打开开关，也只有已登记的这几个接口走真机，其余仍为 Mock。
 - 部分导航菜单使用“正在开发中”占位页。
 - 内容运营、AI 治理、班级学生和学情画像等模块同样为前端演示实现，规则与数据均来自 Mock。
 - Mock 演示账号和前端权限模型不适合生产环境。
@@ -391,7 +388,7 @@ pnpm typecheck && pnpm build
 
 后续计划：
 
-1. 按 Wave 分期在 `Service/` 中继续落地教学云业务模块（Wave 2 起含全局字典 `edu_dict_item_ext` 等），逐步替换前端 Mock 并扩大 `VITE_REMOTE_SERVICES` 灰度范围。
+1. 按 Wave 分期在 `Service/` 中继续落地教学云业务模块（Wave 2 起含全局字典 `edu_dict_item_ext` 等），每完成一批接口即在 `backend-ready.ts` 登记，逐步替换前端 Mock。
 2. 按需求规格说明书接入 Element Plus、ECharts、KaTeX 等正式 UI 与渲染能力。
 3. 接入真实认证、图形验证码、手机验证码、账号锁定和安全审计。
 4. 完善租户隔离、RBAC 权限和按角色裁剪菜单，并把学生档案、知情同意等数据接入教务系统。

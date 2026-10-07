@@ -14,8 +14,8 @@ export default defineConfig({
     strictPort: true,
     host: true,
     // target 指向网关(9999)，不是单体后端(8080)：平台端 /admin/** 由 edu-platform 微服务承接，
-    // 由网关按 sys_gateway_route 里的路由规则转发。灰度进度由 VITE_REMOTE_SERVICES 控制，
-    // VITE_USE_MOCK 保持 true —— 未列入的服务前缀仍走 Mock。
+    // 由网关按 sys_gateway_route 里的路由规则转发。具体哪些请求走后端由统一开关
+    // VITE_USE_MOCK 决定，且仅限 backend-ready.ts 已登记的接口 —— 未实现的仍走 Mock。
     proxy: {
       '/api': {
         target: 'http://localhost:9999',

@@ -7,22 +7,15 @@ declare module '*.vue' {
 }
 
 interface ImportMetaEnv {
-  readonly VITE_USE_MOCK?: string
-  readonly VITE_API_BASE_URL?: string
-  readonly VITE_REMOTE_SERVICES?: string
-}
-
-interface ImportMeta {
-  readonly env: ImportMetaEnv
-}
-
-interface ImportMetaEnv {
-  /** 全局 Mock 开关：'false' 时全部请求走真实后端，默认（未配置）为开启 Mock */
+  /**
+   * 统一的 Mock / 后端开关：
+   * - 'true'（默认，含未配置）→ 全部走 Mock，与接入后端之前完全一致
+   * - 'false' → 后端已实现的接口走真实后端，未实现的仍回退 Mock
+   *             （已实现清单见 request/backend-ready.ts）
+   */
   readonly VITE_USE_MOCK?: string
   /** 真实后端 API 地址（网关前缀），默认 '/api' */
   readonly VITE_API_BASE_URL?: string
-  /** 指定走真实后端的服务前缀（逗号分隔），如 'auth,user' —— 用于逐服务灰度切换 */
-  readonly VITE_REMOTE_SERVICES?: string
 }
 
 interface ImportMeta {

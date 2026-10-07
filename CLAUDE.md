@@ -20,7 +20,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 前端当前处于 **Demo / 原型阶段**，业务数据默认由 `@aiteach/shared` 的 Mock 引擎提供。后端为 JeecgBoot 3.9.5 基础框架，已落地「教学云业务接入 Wave 1」（登录会话、平台端概览、机构端题库分类、租户隔离建表）。
 
-前端正按服务灰度接入真实后端：超级管理端 `VITE_REMOTE_SERVICES=auth,admin`（登录会话与平台端业务走真机），机构端仍为纯 Mock。灰度按请求 URL 前缀生效，与页面无关。
+前后端对接由**统一开关** `VITE_USE_MOCK` 控制：关闭时全部走 Mock（与接入后端之前完全一致），打开时只有后端已实现、且登记在 `packages/shared/src/request/backend-ready.ts` 里的接口走真机，其余自动回退 Mock。当前后端只完成了 Wave 1 的 7 个接口端点，因此打开开关也只会有登录会话、平台端概览、机构端题库分类走真机。开发环境默认关闭。
 
 ---
 
@@ -47,21 +47,23 @@ pnpm build          # 构建全部应用，产物在 apps/*/dist
 
 ### Mock 与真实后端切换
 
-所有业务请求统一经过 `@aiteach/shared` 的请求层，由 `resolveApiMode()` 决定走向：
+所有业务请求统一经过 `@aiteach/shared` 的请求层（`packages/shared/src/request/client.ts` 的 `request()`），由 `resolveApiMode()` 决定走向。**只有一个开关**：
 
 ```text
 请求
- └─ VITE_REMOTE_SERVICES 命中服务前缀？── 是 → 真实后端
-                                      └─ 否
- └─ VITE_USE_MOCK=false？────────────── 是 → 真实后端
-                                      └─ 否 → Mock 引擎
+ └─ VITE_USE_MOCK=false（开关已打开）？
+      ├─ 否 → Mock 引擎（与接入后端之前完全一致）
+      └─ 是 → 该接口已在 backend-ready.ts 清单中？
+                ├─ 是 → 真实后端
+                └─ 否 → Mock 引擎（后端尚未实现，自动回退）
 ```
 
 - 环境变量见 `apps/admin/.env.development`、`apps/tenant/.env.development`。
+- **后端已实现接口清单**在 `packages/shared/src/request/backend-ready.ts`（前缀匹配，两端共用）。后端补齐接口后在此登记一次即可 —— 不要用「服务前缀」这类粗粒度判断：`/admin` 前缀下有 77 个前端接口而后端只实现了 1 个，按前缀切会把未实现的接口一起打到后端变成 404。
 - 新增 Mock 接口在 `packages/shared/src/mock/routes.ts` 按 `{ method, path, handler }` 注册。
 - 接入真实后端的统一响应格式为 `{ code, message, data }`，`code=0` 表示成功；框架自身的鉴权/全局异常返回 `{ success, code, message, result }`，请求层两种都认。
 - 请求头：鉴权用 `X-Access-Token`（JeecgBoot 约定，**不是** `Authorization: Bearer`），租户上下文用 `X-Tenant-Id`。
-- **当前灰度：** `apps/admin` 为 `auth,admin`（登录会话与平台端业务走真机），`apps/tenant` 为空（纯 Mock）。灰度按请求 URL 前缀生效，与页面/路由无关；`VITE_USE_MOCK` 保持 `true` 以便未列入前缀的请求继续走 Mock。
+- AI 服务（Deepseek 出题 / 拍照识题 / 文档识别）不经过教学云后端，由 `VITE_DEEPSEEK_*` 独立控制，**不受 `VITE_USE_MOCK` 影响**。
 - 两个应用的 `vite.config.ts` 中 `/api` 代理已启用，开发环境 target 指向网关 `http://localhost:9999`（不是单体 8080）。
 
 ---
