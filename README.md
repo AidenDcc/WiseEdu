@@ -1,29 +1,28 @@
 # AI 教学云平台
 
-> 面向学校与培训机构的 SaaS 多租户 AI 教学平台前端 Demo。
+> 面向学校与培训机构的 SaaS 多租户 AI 教学平台。
 
-本项目基于《AI 教学云平台（SaaS 多租户）软件需求规格说明书 V1.0》搭建，采用 pnpm workspace 管理多个独立前端应用，覆盖平台运营管理、机构教学业务和演示入口。
+本项目基于《AI 教学云平台（SaaS 多租户）软件需求规格说明书 V1.0》搭建，采用 pnpm workspace 管理前端应用，覆盖平台运营管理（超级管理端）与机构教学业务（机构端）两个端；后端服务位于 `Service/` 目录。
 
-当前版本处于 **Demo / 原型阶段**：前端页面、路由、交互和 Mock 数据已搭建完成；后端服务尚未接入，默认 API 请求由共享 Mock 引擎处理，部分菜单仍以“正在开发中”占位页展示。
+当前版本处于 **Demo / 原型阶段**：前端页面、路由、交互和 Mock 数据已搭建完成；后端已引入 JeecgBoot 3.9.5 基础框架，并落地「教学云业务接入 Wave 1」——平台端数据概览、机构端题库分类、登录会话与租户隔离建表。
+
+前端正处于**按服务灰度接入真实后端**的过程中：超级管理端的 `/auth/*`（登录会话）与 `/admin/*`（平台端业务）已走真实网关，其余服务前缀与机构端整体仍由 `@aiteach/shared` 的 Mock 引擎提供数据，部分菜单以“正在开发中”占位页展示。
 
 ## 项目预览
 
-项目包含三个可独立启动和构建的应用：
+项目包含两个可独立启动和构建的前端应用，以及一个后端服务：
 
 | 应用 | 默认端口 | 说明 |
 | --- | ---: | --- |
-| `portal` | `5172` | 演示总入口，可跳转至超级管理端和机构端 |
-| `admin` | `5173` | 超级管理端：租户、套餐、内容运营、AI 服务配置与治理、基础字典、审计和系统配置 |
-| `tenant` | `5174` | 机构端：题库、试卷、备课、考试、班级学生、AI 能力中心和资源管理 |
+| `apps/admin` | `5173` | 超级管理端：租户、套餐、内容运营、AI 服务配置与治理、基础字典、审计和系统配置 |
+| `apps/tenant` | `5174` | 机构端：题库、试卷、备课、考试、班级学生、AI 能力中心和资源管理 |
+| `Service` | `8080` | 后端服务（JeecgBoot 3.9.5 单体），context-path 为 `/jeecg-boot`；微服务模式下经网关 `9999` 访问 |
 
-启动后访问 <http://localhost:5172>，在演示入口选择要查看的端。
+启动后访问 <http://localhost:5173/login>（超级管理端）或 <http://localhost:5174/login>（机构端）。
+
+> 两个业务端的登录与会话接口（`/auth/*`）走同一套教学云后端实现；当前仅超级管理端在开发环境开启了灰度接入，机构端仍为纯 Mock，详见[前后端联调](#前后端联调)。
 
 ## 功能范围
-
-### 演示总入口
-
-- 统一展示项目定位和两个业务端入口。
-- 提供超级管理端、机构端的本地跳转。
 
 ### 超级管理端
 
@@ -76,18 +75,26 @@
 - Vue Router
 - pnpm workspace monorepo
 
-正式版规划按需求规格说明书接入 Element Plus、ECharts、KaTeX 以及真实后端服务；Demo 阶段使用轻量自定义组件和 Mock 数据，以便快速演示完整业务导航与交互流程。
+正式版规划按需求规格说明书接入 Element Plus、ECharts、KaTeX，并持续推进真实后端接入；Demo 阶段使用轻量自定义组件和 Mock 数据，以便快速演示完整业务导航与交互流程。
 
 ## 目录结构
 
 ```text
 教学云AI/
 ├── apps/
-│   ├── portal/              # 演示总入口，静态页，可独立部署
 │   ├── admin/               # 超级管理端，可独立构建部署
 │   └── tenant/              # 机构端，可独立构建部署
 ├── packages/
 │   └── shared/              # 共享请求层、Mock 引擎、会话和通用组件
+├── Service/                 # 后端服务（JeecgBoot 3.9.5），直接作为 Maven 根
+│   ├── pom.xml
+│   ├── jeecg-boot-base-core/        # 内核：鉴权、MyBatis-Plus、工具类、AOP
+│   ├── jeecg-module-system/         # 系统管理：用户、角色、权限、字典、菜单
+│   ├── jeecg-boot-module/           # 业务模块：教学云 edu-platform / edu-tenant、示例与 AI/RAG
+│   ├── jeecg-server-cloud/          # 可选微服务栈（仅 -P SpringCloud 构建），含 edu 微服务启动模块
+│   ├── db/                          # 数据库初始化与增量脚本
+│   └── docker-compose.yml           # MySQL / Redis / pgvector 本地编排
+├── doc/                     # 需求规格说明书与功能大纲
 ├── package.json             # 根级脚本与 workspace 命令
 ├── pnpm-workspace.yaml      # workspace 配置
 └── README.md
@@ -97,15 +104,25 @@
 
 ## 环境要求
 
+前端：
+
 - Node.js `>= 18.0.0`
-- pnpm 8+（推荐使用当前稳定版）
+- pnpm 11+（根 `package.json` 的 `packageManager` 字段锁定 `pnpm@11.13.0`，建议与之一致）
 - macOS、Linux 或 Windows
+
+后端（仅在需要启动 `Service/` 时要求）：
+
+- JDK 17 及以上（同时支持 21、24）
+- Maven 3.9+
+- MySQL 8.0+ 与 Redis（**均为必需**）
 
 可使用以下命令确认版本：
 
 ```bash
 node --version
 pnpm --version
+java -version
+mvn -version
 ```
 
 ## 快速开始
@@ -114,36 +131,43 @@ pnpm --version
 # 1. 安装依赖
 pnpm install
 
-# 2. 同时启动三个前端应用
+# 2. 同时启动两个前端应用
 pnpm dev
 ```
 
 启动后访问：
 
-- 演示入口：<http://localhost:5172>
 - 超级管理端：<http://localhost:5173/login>
 - 机构端：<http://localhost:5174/login>
 
 也可以只启动一个应用：
 
 ```bash
-pnpm dev:portal   # 仅启动演示入口
 pnpm dev:admin    # 仅启动超级管理端
 pnpm dev:tenant   # 仅启动机构端
 ```
 
-### Demo 账号
+### 登录账号
 
-当前账号由 Mock 数据提供，仅用于本地演示，请勿用于生产环境：
+登录接口（`/auth/login`）在超级管理端已接入真实后端，因此**两个端可用的账号不同**，请按下表取用。
 
-| 端 | 账号 | 密码 | 角色 |
-| --- | --- | --- | --- |
-| 超级管理端 | `admin` | `admin123` | 超级管理员 |
-| 机构端 | `orgadmin` | `org123456` | 机构管理员 |
-| 机构端 | `auditor` | `aud123456` | 审核员 |
-| 机构端 | `teacher` | `tea123456` | 老师 |
+超级管理端（真实后端 `sys_user`，即 JeecgBoot 内置账号）：
 
-登录页提供“一键填充”功能。部分角色权限和业务模块仍处于 Demo 展示阶段。
+| 账号 | 密码 | 说明 |
+| --- | --- | --- |
+| `admin` | `123456` | 框架内置超级管理员，请在正式环境立即修改 |
+
+机构端（仍是 Mock 数据，仅用于本地演示，请勿用于生产环境）：
+
+| 账号 | 密码 | 角色 |
+| --- | --- | --- |
+| `orgadmin` | `org123456` | 机构管理员 |
+| `auditor` | `aud123456` | 审核员 |
+| `teacher` | `tea123456` | 老师 |
+
+> 登录页的“一键填充”按钮填的是 Mock 演示账号。在超级管理端（已接真机）下该账号无法通过后端校验，需手动输入 `admin / 123456`；把 `VITE_REMOTE_SERVICES` 清空即可回到纯 Mock 演示。
+>
+> 教学云初始化数据基于框架自带的租户 `1000`、`1001`（见 `V3.9.6_3__edu_initial_data.sql`），租户侧账号需在 sys_user 中自行创建并关联租户。
 
 ## Mock 与真实后端切换
 
@@ -173,22 +197,144 @@ pnpm dev:tenant   # 仅启动机构端
 | --- | --- |
 | `VITE_USE_MOCK` | `true` 时默认使用 Mock；`false` 时全部请求走真实后端 |
 | `VITE_API_BASE_URL` | 真实后端 API 网关前缀，默认可使用 `/api` |
-| `VITE_REMOTE_SERVICES` | 逗号分隔的服务前缀；用于在 Mock 模式下按服务灰度接入真实后端 |
-| `VITE_PORTAL_URL` | 业务端返回演示入口时使用的地址，默认 `http://localhost:5172` |
+| `VITE_REMOTE_SERVICES` | 逗号分隔的服务前缀；命中前缀的请求强制走真实后端，其余仍走 Mock（见下方「当前灰度进度」） |
 | `VITE_DEEPSEEK_API_KEY` | Deepseek Key，写入 `.env.local`（已被 `.gitignore` 排除）启用真实 AI 出题；未配置时回退本地演示数据 |
 | `VITE_DEEPSEEK_BASE_URL` | Deepseek 网关地址，默认 `/deepseek`（开发环境经 `apps/tenant/vite.config.ts` 代理转发，规避 CORS）；生产环境指向自建网关 |
 | `VITE_DEEPSEEK_MODEL` | 模型名，默认 `deepseek-chat` |
 
+### 当前灰度进度
+
+两个开发环境配置的取值与含义：
+
+| 应用 | `VITE_USE_MOCK` | `VITE_REMOTE_SERVICES` | 实际效果 |
+| --- | --- | --- | --- |
+| `apps/admin` | `true` | `auth,admin` | 登录会话与平台端业务走真实后端，其余走 Mock |
+| `apps/tenant` | `true` | *（空）* | 全部走 Mock |
+
+`VITE_USE_MOCK` 保持 `true` 是为了让未列入 `VITE_REMOTE_SERVICES` 的服务前缀继续由 Mock 兜底；清空 `VITE_REMOTE_SERVICES` 即可一次性回退到全 Mock（Mock 数据与真实库互不影响）。
+
 接入后端时：
 
 1. 复制对应的 `.env.production.example` 为 `.env.production`，按部署环境修改配置。
-2. 在对应的 `vite.config.ts` 中配置开发代理，指向后端网关。
+2. 两个应用的 `vite.config.ts` 中 `/api` 代理**已启用**，开发环境 target 指向网关 `http://localhost:9999`（而非单体后端 8080）——网关按 `/admin/**`、`/tenant/**`、`/auth/**` 转发到对应服务。生产环境改为指向实际网关地址。
 3. 选择全量切换（`VITE_USE_MOCK=false`）或按服务切换（配置 `VITE_REMOTE_SERVICES`）。
-4. 保持统一响应格式 `{ code, message, data }`，其中 `code=0` 表示成功。
+4. 请求头由请求层统一处理：鉴权用 `X-Access-Token`（JeecgBoot 约定，不是 `Authorization: Bearer`），租户上下文用 `X-Tenant-Id`。
+5. 保持统一响应格式 `{ code, message, data }`，其中 `code=0` 表示成功；框架自身的鉴权/全局异常返回 `{ success, code, message, result }`。
 
 > **安全提示：** `.env.development`、`.env.production` 等环境文件可能包含本地地址或敏感配置。不要提交真实密钥、Token、证书和生产环境配置；生产环境请通过部署平台注入环境变量。
 
 新增 Mock 接口时，在 `packages/shared/src/mock/routes.ts` 中按 `{ method, path, handler }` 注册，并补充对应的 Mock 状态或类型。
+
+## 后端服务（Service/）
+
+后端位于 `Service/` 目录，采用 **JeecgBoot 3.9.5** 基础框架。既支持单体运行，也支持可选的微服务模式；教学云业务代码以独立模块形式落地，前端通过网关灰度接入。
+
+### 教学云业务模块现状
+
+已完成「教学云业务接入 Wave 1」，覆盖从登录鉴权到租户隔离的第一条完整链路：
+
+| 模块 | 职责 | 已实现接口 |
+| --- | --- | --- |
+| `jeecg-system-biz` | 登录与会话（`EduAuthController`） | `/auth/login`、`/auth/me`、`/auth/logout` |
+| `jeecg-module-edu-platform` | 平台端业务 | `/admin/dashboard`（平台数据概览：租户数、到期预警、待审申请） |
+| `jeecg-module-edu-tenant` | 机构端业务 | `/tenant/categories`（题库分类的增删改查，含租户隔离样板） |
+
+数据层由 Flyway 脚本 `V3.9.6_0` ~ `V3.9.6_3` 建立，位于 `Service/jeecg-module-system/jeecg-system-start/src/main/resources/flyway/sql/mysql/`：
+
+- `V3.9.6_0__edu_platform_ddl.sql` — 教学云建表（`edu_package`、`edu_tenant_ext`、`edu_tenant_apply`、`edu_question_category`）。
+- `V3.9.6_1__edu_gateway_routes.sql` — 网关路由：`/admin/**` → `edu-platform`，`/tenant/**` → `edu-tenant`，`/auth/**` 并入 `jeecg-system`。
+- `V3.9.6_2__edu_menu_permissions.sql` — 教学云菜单与按钮权限。
+- `V3.9.6_3__edu_initial_data.sql` — 初始化数据。
+
+> **业务表约定：** 教学云业务表统一 `edu_` 前缀；机构端业务表必须带 `tenant_id`（行级隔离列，由 `TenantLineInnerInterceptor` 自动注入条件）；「引用某个租户」的外键列一律命名 `org_tenant_id`，避免被租户插件误改写。
+
+### 技术栈
+
+| 层 | 技术 |
+| --- | --- |
+| 框架 | Spring Boot 4.1.0 / Java 17（同时支持 21、24），全量使用 `jakarta` 命名空间 |
+| ORM | MyBatis-Plus 3.5.16 |
+| 鉴权 | Apache Shiro + JWT，基于 Redis 的会话 |
+| 连接池 | Druid，支持动态数据源 |
+| 数据库迁移 | Flyway（脚本位于 `Service/jeecg-module-system/jeecg-system-start/src/main/resources/flyway/sql/mysql/`） |
+| JSON / Excel | FastJSON 2 / AutoPoi |
+| 接口文档 | Knife4j（OpenAPI v3） |
+| 定时任务 | Quartz（JDBC 存储，支持集群） |
+| 微服务 | Spring Cloud 2025.1.0.0 + Alibaba（Nacos、Gateway、Sentinel），可选 |
+
+### 模块结构
+
+```text
+Service/                         # Maven 根（jeecg-boot-parent）
+├── jeecg-boot-base-core         # 内核：鉴权、MyBatis-Plus 配置、工具类、AOP、基础 Controller
+├── jeecg-module-system          # 系统管理
+│   ├── jeecg-system-api         #   API 接口（local-api 单体直调 / cloud-api Feign）
+│   ├── jeecg-system-biz         #   业务逻辑、实体、Mapper、Service
+│   └── jeecg-system-start       #   启动入口（JeecgSystemApplication）与全部配置
+├── jeecg-boot-module            # 业务模块
+│   ├── jeecg-module-edu-platform #  教学云平台端业务（/admin/**，微服务名 edu-platform）
+│   ├── jeecg-module-edu-tenant  #   教学云机构端业务（/tenant/**，微服务名 edu-tenant）
+│   ├── jeecg-module-demo        #   官方示例代码（后续可直接移除）
+│   └── jeecg-boot-module-airag  #   AI / RAG 集成
+└── jeecg-server-cloud           # 可选微服务栈
+    ├── jeecg-cloud-gateway      #   网关(9999)，教学云路由的入口
+    ├── jeecg-cloud-nacos        #   Nacos(8848 / 控制台 18080)
+    ├── jeecg-edu-platform-cloud-start # edu-platform 微服务启动模块(7003)
+    ├── jeecg-edu-tenant-cloud-start   # edu-tenant 微服务启动模块(7004)
+    └── jeecg-visual             #   监控、Sentinel、XXL-Job
+```
+
+### 本地启动
+
+```bash
+# 1. 拉起依赖服务（MySQL 映射到 13306；Redis / PostgreSQL+pgvector 默认仅在容器网络内）
+cd Service && docker compose up -d
+
+# 2. 初始化数据库：导入基础 schema（增量变更由 Flyway 负责）
+#    Service/db/jeecgboot-mysql-5.7.sql
+
+# 3. 构建
+cd Service && mvn clean package
+
+# 4. 启动单体应用
+cd Service/jeecg-module-system/jeecg-system-start && mvn spring-boot:run
+```
+
+启动后服务地址为 <http://localhost:8080/jeecg-boot>，接口文档经 Knife4j 访问。默认管理账号为 `admin / 123456`（框架内置，请在正式环境立即修改）。
+
+> 本地裸跑后端时若连不上 Redis，检查 `application-dev.yml` 中的 `spring.data.redis` 配置——`docker-compose.yml` 里的 Redis 端口默认是注释状态，需要按需放开映射。
+
+### 微服务模式（灰度联调需要）
+
+前端的 `/admin/**`、`/tenant/**` 由网关按服务名分发，因此**灰度接入真实后端时前端必须连网关**，而不是单体 8080：
+
+```bash
+# 1. 构建（根 pom 的 SpringCloud profile 默认激活，会连同微服务栈一并构建）
+cd Service && mvn clean package
+
+# 2. 依次启动 Nacos → 网关 → edu 微服务（各启动模块的 application.yml 已配好端口）
+cd Service/jeecg-server-cloud/jeecg-cloud-nacos            && mvn spring-boot:run  # 8848 / 控制台 18080
+cd Service/jeecg-server-cloud/jeecg-cloud-gateway          && mvn spring-boot:run  # 9999
+cd Service/jeecg-server-cloud/jeecg-edu-platform-cloud-start && mvn spring-boot:run # 7003
+cd Service/jeecg-server-cloud/jeecg-edu-tenant-cloud-start   && mvn spring-boot:run # 7004
+```
+
+网关路由数据存放在 `sys_gateway_route` 表，由 `V3.9.6_1__edu_gateway_routes.sql` 灌入并在 `jeecg-system` 启动时写入 Redis（key `GATEWAY_ROUTES`）——**改了路由脚本需要重启 `jeecg-system` 才会生效**。
+
+> **注意：** 根 pom 的 `SpringCloud` profile 当前为 `activeByDefault=true`，因此 `mvn package` 默认会连同 `jeecg-server-cloud` 微服务栈一并构建。若只需单体，可用 `-P !SpringCloud` 关闭。
+
+### 前后端联调
+
+两个应用的 `/api` 代理**已启用**并把开发环境 target 指向网关 `http://localhost:9999`，因此联调时只需确保对应的后端服务在跑，再控制灰度范围：
+
+1. 启动微服务模式（Nacos → 网关 → edu 微服务，见上一节）。
+2. 调整该应用的 `VITE_REMOTE_SERVICES`：
+   - 只接某个服务：如 `auth`、`auth,admin`、`auth,tenant`；
+   - 全量接入：改 `VITE_USE_MOCK=false`（此时 `VITE_REMOTE_SERVICES` 不再起作用）；
+   - 回退到纯 Mock：清空 `VITE_REMOTE_SERVICES` 且保持 `VITE_USE_MOCK=true`。
+3. 登录后请求会自带 `X-Access-Token` 与 `X-Tenant-Id`，由网关按前缀转发到对应微服务。
+
+> 灰度是**按请求 URL 前缀**生效的，与路由/页面无关。例如 `VITE_REMOTE_SERVICES=auth,admin` 时，超级管理端的登录页与平台端业务页走真机，而题库、内容运营等页面依旧读取 Mock 数据。
 
 ## 构建、检查与预览
 
@@ -200,7 +346,6 @@ pnpm typecheck
 pnpm build
 
 # 单独构建
-pnpm build:portal
 pnpm build:admin
 pnpm build:tenant
 
@@ -211,7 +356,6 @@ pnpm preview:tenant
 
 构建产物位置：
 
-- `apps/portal/dist`
 - `apps/admin/dist`
 - `apps/tenant/dist`
 
@@ -225,38 +369,41 @@ pnpm typecheck && pnpm build
 
 ## 部署说明
 
-三个应用的产物相互独立，可以分别部署到不同域名或路径，使用 Nginx、对象存储静态网站托管或其他静态 Web 服务即可。
+两个前端应用的产物相互独立，可以分别部署到不同域名或路径，使用 Nginx、对象存储静态网站托管或其他静态 Web 服务即可。
 
 部署时请注意：
 
 - 为 Vue Router 配置 history fallback，将未知路径回退到对应应用的 `index.html`。
-- 确保业务端中的 `VITE_PORTAL_URL` 指向实际的演示入口地址，或根据部署方式调整跳转逻辑。
 - 如果使用真实 API，配置网关代理、跨域策略和生产环境变量。
 - 不要将 `.env.production`、密钥和后端凭证打包进公开仓库。
+- 后端部署涉及数据库连接、Redis、上传存储等配置，见 `Service/jeecg-module-system/jeecg-system-start/src/main/resources/application-{profile}.yml`（`dev` / `test` / `prod` / `docker`）与 `Service/docker-compose.yml`。
+- 微服务部署还需 Nacos 配置中心与 `sys_gateway_route` 路由数据，网关端口为 `9999`。
 
 ## 当前限制与后续计划
 
 当前限制：
 
-- 后端服务尚未接入，业务数据和登录均为 Mock。
+- 后端教学云业务仅完成 Wave 1（登录会话、平台端概览、机构端题库分类），绝大部分业务接口尚未落地；前端只有超级管理端的 `/auth/*`、`/admin/*` 走真机，机构端整体与其余业务模块仍为 Mock。
 - 部分导航菜单使用“正在开发中”占位页。
-- 新增的内容运营、AI 治理、班级学生和学情画像等模块同样为前端演示实现，规则与数据均来自 Mock。
-- Demo 账号和前端权限模型不适合生产环境。
+- 内容运营、AI 治理、班级学生和学情画像等模块同样为前端演示实现，规则与数据均来自 Mock。
+- Mock 演示账号和前端权限模型不适合生产环境。
 - 暂未提供完整的单元测试、E2E 测试和 CI 流程。
 
 后续计划：
 
-1. 按需求规格说明书接入 Element Plus、ECharts、KaTeX 等正式 UI 与渲染能力。
-2. 接入真实认证、图形验证码、手机验证码、账号锁定和安全审计。
-3. 完善租户隔离、RBAC 权限和按角色裁剪菜单，并把学生档案、知情同意等数据接入教务系统。
-4. 将题库、试卷、教辅、AI 质量流水线、内容运营与 AI 治理等业务模块从 Demo 扩展为完整生产功能。
-5. 增加单元测试、端到端测试、CI 构建和部署流水线。
-6. 规划机构端移动端（uni-app）与后端微服务体系。
+1. 按 Wave 分期在 `Service/` 中继续落地教学云业务模块（Wave 2 起含全局字典 `edu_dict_item_ext` 等），逐步替换前端 Mock 并扩大 `VITE_REMOTE_SERVICES` 灰度范围。
+2. 按需求规格说明书接入 Element Plus、ECharts、KaTeX 等正式 UI 与渲染能力。
+3. 接入真实认证、图形验证码、手机验证码、账号锁定和安全审计。
+4. 完善租户隔离、RBAC 权限和按角色裁剪菜单，并把学生档案、知情同意等数据接入教务系统。
+5. 将题库、试卷、教辅、AI 质量流水线、内容运营与 AI 治理等业务模块从 Demo 扩展为完整生产功能。
+6. 增加单元测试、端到端测试、CI 构建和部署流水线。
+7. 规划机构端移动端（uni-app），并完善后端微服务体系（服务治理、配置中心与链路监控）。
 
 ## 许可证
 
-当前仓库尚未声明正式开源许可证。若用于公开分发，请在发布前补充许可证文件和版权信息。
+前端代码当前仓库尚未声明正式开源许可证。`Service/` 下的后端基于 JeecgBoot，遵循其自带的 Apache License 2.0，许可证文件见 `Service/LICENSE`。
 
 ## 相关文档
 
-仓库根目录中的《AI 教学云平台（SaaS 多租户）软件需求规格说明书》用于记录产品需求和功能边界；README 以当前可运行的前端 Demo 为准，实际生产能力以代码、后端接口和正式发布说明为准。
+- 仓库根目录中的《AI 教学云平台（SaaS 多租户）软件需求规格说明书》用于记录产品需求和功能边界；README 以当前可运行的代码为准，实际生产能力以代码、后端接口和正式发布说明为准。
+- 后端框架细节与开发约定见根目录 [CLAUDE.md](CLAUDE.md)；JeecgBoot 上游项目说明见 <https://github.com/jeecgboot/JeecgBoot>。
