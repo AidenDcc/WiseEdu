@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  平台端工作台聚合查询。
+
+  说明：
+    1. sys_tenant 是框架表，没有 tenant_id 列也没进 TENANT_TABLE，不会被 TenantLineInnerInterceptor 改写成
+       “只看当前租户”，这里的统计天然是全局口径 —— 平台端工作台要的正是全局。
+    2. edu_tenant_apply / edu_tenant_ext 是平台侧表，同样刻意未登记进 TENANT_TABLE。
+    3. 到期判定只看 sys_tenant.end_date。现有存量租户 1000/1001 的 end_date 为 NULL，
+       即“不限期”，SQL 里用 IS NOT NULL 显式排除，避免 NULL 参与比较时被静默算成到期。
+    4. 数据库方言按 MySQL 写（Flyway 脚本目录也是 mysql/）。若将来接 PG/Oracle，
+       本文件的 DATE_FORMAT / DATE_ADD / TIMESTAMPDIFF 需要一并改写。
+-->
+<mapper namespace="org.jeecg.modules.edu.platform.dashboard.mapper.EduDashboardMapper">
+
+    <select id="countTenants" resultType="long">
+        SELECT COUNT(1) FROM sys_tenant WHERE del_flag = 0
+    </select>
+
+    <select id="countTenantsBefore" resultType="long">
+        SELECT COUNT(1) FROM sys_tenant
+        WHERE del_flag = 0 AND create_time &lt; #{time}
+    </select>
+
+    <select id="countTenantsCreatedAfter" resultType="long">
+        SELECT COUNT(1) FROM sys_tenant
+        WHERE del_flag = 0 AND create_time &gt;= #{time}
+    </select>
+
+    <select id="listTenantCreateTimes" resultType="java.util.Date">
+        SELECT create_time FROM sys_tenant
+        WHERE del_flag = 0 AND create_time IS NOT NULL
+        ORDER BY create_time
+    </select>
+
+    <select id="countTrialTenants" resultType="long">
+        SELECT COUNT(1) FROM edu_tenant_ext
+        WHERE del_flag = 0 AND biz_status = 1
+    </select>
+
+    <select id="countExpiringTenants" resultType="long">
+        SELECT COUNT(1)
+        FROM sys_tenant t
+        WHERE t.del_flag = 0
+          AND t.status = 1
+          AND t.end_date IS NOT NULL
+          AND t.end_date &gt;= NOW()
+          AND t.end_date &lt; DATE_ADD(NOW(), INTERVAL #{days} DAY)
+    </select>
+
+    <select id="listExpiringTenants"
+            resultType="org.jeecg.modules.edu.platform.dashboard.vo.AdminOverviewVo$ExpiringTenant">
+        SELECT t.name                        AS name,
+               COALESCE(p.name, '未指定套餐')  AS packageName,
+               DATE_FORMAT(t.end_date, '%Y-%m-%d') AS expireTime,
+               DATEDIFF(t.end_date, NOW())   AS daysLeft
+        FROM sys_tenant t
+                 LEFT JOIN edu_tenant_ext e ON e.org_tenant_id = t.id AND e.del_flag = 0
+                 LEFT JOIN edu_package p ON p.id = e.package_id AND p.del_flag = 0
+        WHERE t.del_flag = 0
+          AND t.status = 1
+          AND t.end_date IS NOT NULL
+          AND t.end_date &gt;= NOW()
+          AND t.end_date &lt; DATE_ADD(NOW(), INTERVAL #{days} DAY)
+        ORDER BY t.end_date ASC
+    </select>
+
+    <!-- stages 与 status 原样取出，由 Service 归一化（见 PendingApplyRow 的类注释） -->
+    <select id="listPendingApplies"
+            resultType="org.jeecg.modules.edu.platform.dashboard.vo.PendingApplyRow">
+        SELECT apply_no  AS applyNo,
+               org_name  AS orgName,
+               org_type  AS orgType,
+               stages    AS stages,
+               contact   AS contact,
+               phone     AS phone,
+               submitted_at AS submittedAt
+        FROM edu_tenant_apply
+        WHERE del_flag = 0 AND status = 1
+        ORDER BY submitted_at ASC
+        LIMIT #{limit}
+    </select>
+
+</mapper>
