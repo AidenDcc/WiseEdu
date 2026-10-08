@@ -42,3 +42,16 @@ export function getUserKey(): string {
 export function getTenantKey(): string {
   return `aiteach:${currentConfig.appName}:tenantId`
 }
+
+/**
+ * 会话到期时间戳（毫秒）的 localStorage key。与 tenantId 同理独立存一份，
+ * 让请求层的前置过期判断只依赖 config（见 auth/session.ts）。
+ */
+export function getTokenExpireKey(): string {
+  return `aiteach:${currentConfig.appName}:tokenExpire`
+}
+
+/** 上次登录成功的账号名，用于登录页「记住账号」回填。**只存账号，不存密码** */
+export function getLastAccountKey(): string {
+  return `aiteach:${currentConfig.appName}:last-account`
+}

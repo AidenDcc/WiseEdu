@@ -4,7 +4,10 @@ export interface MockUser {
   /** 归属端：admin=超级管理端，tenant=机构端 */
   appId: 'admin' | 'tenant'
   account: string
-  password: string
+  /**
+   * 这里**没有密码字段**：凭据只存在于 `auth/accounts.ts`（盐 + 哈希），
+   * 本结构只描述登录成功后的用户资料。要加账号请见该文件的说明。
+   */
   name: string
   /**
    * `leader`（年级学科组长）不是登录账号，而是机构端「演示身份」切换出来的一个角色值 ——

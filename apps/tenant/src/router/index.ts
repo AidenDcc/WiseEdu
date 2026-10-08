@@ -1,8 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { watch } from 'vue'
-import { getToken, showToast } from '@aiteach/shared'
+import { clearSession, hasValidSession, isSessionExpired, showToast } from '@aiteach/shared'
 import { useAuthStore } from '@/stores/auth'
+import { clearDemoIdentity } from '@/composables/useDemoRole'
 import { usePermission } from '@/composables/usePermission'
 import { firstAllowedPath, pathVisible } from '@/composables/useVisibleMenus'
 
@@ -388,10 +389,21 @@ watch(role, () => void revalidateRoute(), { flush: 'post' })
 
 router.beforeEach((to) => {
   const auth = useAuthStore()
-  if (to.path !== '/login' && !getToken()) {
+
+  /* 会话过期但 token 还在（token 在 localStorage 里不会自己消失）：先清干净再说去向。
+     不清的话下面第一个分支按「有 token」把人放行、第二个分支又把进登录页的人送回首页，
+     两个分支来回弹。清掉后请求层看到的是「未登录」，不会再弹「登录已失效」。 */
+  if (isSessionExpired()) {
+    clearSession()
+    /* 顺带复位演示身份：换个账号登进来时不该还顶着上一个会话的身份 */
+    clearDemoIdentity()
+  }
+
+  const authed = hasValidSession()
+  if (to.path !== '/login' && !authed) {
     return { path: '/login', query: { redirect: to.fullPath } }
   }
-  if (to.path === '/login' && getToken()) {
+  if (to.path === '/login' && authed) {
     return { path: '/' }
   }
   // 刷新后恢复用户信息

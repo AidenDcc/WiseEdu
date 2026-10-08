@@ -6,7 +6,7 @@ import type { MenuItem } from '@/menu'
 import { footerMenus, menus } from '@/menu'
 import { useAuthStore } from '@/stores/auth'
 import { useScope } from '@/composables/useScope'
-import { useDemoRole, type DemoRole } from '@/composables/useDemoRole'
+import { clearDemoIdentity, restoreDemoIdentity, useDemoRole, type DemoRole } from '@/composables/useDemoRole'
 import { useVisibleMenus } from '@/composables/useVisibleMenus'
 import ScopePicker from '@/components/ui/ScopePicker.vue'
 import GlobalSearchOverlay from '@/components/search/GlobalSearchOverlay.vue'
@@ -142,6 +142,8 @@ const searchOpen = ref(false)
 async function onLogout() {
   if (!(await appConfirm('确定退出登录？', { type: 'info' }))) return
   await auth.logout()
+  /* 复位演示身份：否则下一次登录（哪怕登的是 orgadmin）会被缓存的「王静」贴回来 */
+  clearDemoIdentity()
   showToast('已退出登录', 'success')
   router.push('/login')
 }
@@ -161,8 +163,9 @@ function switchIdentity(role: DemoRole) {
 onMounted(refreshUnread)
 /* 触发字典加载并归一缓存的年级 / 学科（下拉选项与默认值都依赖字典） */
 onMounted(() => void ensureScope())
-/* mock 是内存态，刷新后回到默认身份 —— 挂载时按缓存把身份贴回去（含 CURRENT 与 auth.user） */
-onMounted(() => apply(identity.value.role))
+/* mock 是内存态，刷新后回到默认身份 —— 挂载时按缓存把身份贴回去（含 CURRENT 与 auth.user）。
+   走 restoreDemoIdentity() 而不是 apply(identity.value.role)：缓存要按 setupApp 之后的 appName 读 */
+onMounted(() => restoreDemoIdentity())
 </script>
 
 <template>

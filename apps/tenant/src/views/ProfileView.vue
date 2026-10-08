@@ -5,7 +5,7 @@ import { AppIcon, AppPageHeader, AppTabs, hueColor, showToast, appConfirm } from
 import type { TabDef } from '@aiteach/shared'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import { useAuthStore } from '@/stores/auth'
-import { useDemoRole } from '@/composables/useDemoRole'
+import { clearDemoIdentity, useDemoRole } from '@/composables/useDemoRole'
 import { fetchOrgLoginLogs } from '@/api/org'
 
 const router = useRouter()
@@ -89,6 +89,8 @@ onMounted(async () => {
 async function onLogout() {
   if (!(await appConfirm('确定退出登录？', { type: 'info' }))) return
   await auth.logout()
+  /* 与 AppLayout 的退出保持一致：复位演示身份，免得下次登录被上一个会话的身份贴回来 */
+  clearDemoIdentity()
   showToast('已退出登录', 'success')
   router.push('/login')
 }

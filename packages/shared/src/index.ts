@@ -14,10 +14,28 @@ export {
   logoutApi,
   getToken,
   setSession,
+  /* 与 setSession 的区别：只换用户缓存，不续有效期（机构端「切换演示身份」用） */
+  updateSessionUser,
   getCacheUser,
   clearSession,
+  getLastAccount,
+  rememberAccount,
+  forgetAccount,
 } from './api/auth'
 export type { LoginPayload, LoginResult } from './api/auth'
+/* 会话有效期（固定 30 分钟、不滑动续期）：路由守卫 / 请求层 / 到期看门狗三条强制登出通路共用。
+   账号配置表（AUTH_ACCOUNTS / verifyPassword）刻意不从这里导出 —— 它是 Mock 引擎的内部实现，
+   界面代码不该拿到哈希表。 */
+export {
+  SESSION_TTL_MS,
+  getSessionExpireAt,
+  isSessionExpired,
+  hasValidSession,
+  registerSessionExpiredHandler,
+  notifySessionExpired,
+  armSessionWatch,
+  cancelSessionWatch,
+} from './auth/session'
 export type { AdminOverview, TenantOverview } from './api/models'
 export type {
   PageResult,

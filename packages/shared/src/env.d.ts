@@ -7,6 +7,9 @@ declare module '*.vue' {
 }
 
 interface ImportMetaEnv {
+  /** Vite 内置：开发构建为 true、生产构建为 false。用来包住只该在 dev 跑的自检代码
+      （如 auth/accounts.ts 的 SHA-256 向量），生产构建会被静态剔除 */
+  readonly DEV: boolean
   /**
    * 统一的 Mock / 后端开关：
    * - 'true'（默认，含未配置）→ 全部走 Mock，与接入后端之前完全一致

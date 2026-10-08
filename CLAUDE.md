@@ -35,6 +35,7 @@ pnpm dev:admin      # 仅启动超级管理端
 pnpm dev:tenant     # 仅启动机构端
 pnpm typecheck      # 全 workspace 类型检查
 pnpm build          # 构建全部应用，产物在 apps/*/dist
+pnpm hash-password  # 生成 Mock 登录密码的盐 + 哈希（交互输入，见「登录与会话」）
 ```
 
 项目未配置单元测试脚本，`pnpm typecheck && pnpm build` 是现阶段的基础验证方式。
@@ -65,6 +66,21 @@ pnpm build          # 构建全部应用，产物在 apps/*/dist
 - 请求头：鉴权用 `X-Access-Token`（JeecgBoot 约定，**不是** `Authorization: Bearer`），租户上下文用 `X-Tenant-Id`。
 - AI 服务（Deepseek 出题 / 拍照识题 / 文档识别）不经过教学云后端，由 `VITE_DEEPSEEK_*` 独立控制，**不受 `VITE_USE_MOCK` 影响**。
 - 两个应用的 `vite.config.ts` 中 `/api` 代理已启用，开发环境 target 指向网关 `http://localhost:9999`（不是单体 8080）。
+
+### 登录与会话
+
+**认证机制（Mock 模式）。** 改动登录页、密码或会话时先读这段。
+
+- **账号配置表**：`packages/shared/src/auth/accounts.ts`，按端（`AppName`）分组，只存 `{ account, salt, passwordHash }`。**仓库里不留任何明文口令** —— 登录页、README、注释都不写。比对方式：`sha256Hex(salt + password) === passwordHash`。
+  - 哈希生成：`pnpm hash-password --app <admin|tenant> --account <账号名>`（密码交互输入、不回显），粘贴输出行即可。
+  - 运行期实现是 `packages/shared/src/utils/sha256.ts`（纯 JS，FIPS 180-4，UTF-8），**刻意不用 `crypto.subtle`**：它只在安全上下文（https / localhost）存在，演示常挂在局域网 IP + http 下。改动该文件后 `auth/accounts.ts` 顶部的 dev-only 自检向量必须仍然通过（与 Node `crypto.createHash` 逐字节一致，否则「生成的哈希永远登录失败」）。
+  - 登录**失败原因统一为「账号或密码错误」**（账号不存在与密码错误同一句），不要分开提示。
+  - `ACCOUNTS` 是 Mock 引擎的内部实现，**不从 `@aiteach/shared` 桶文件导出**；接真实后端后凭据来自 `sys_user`，该表不参与。
+- **会话有效期**：`packages/shared/src/auth/session.ts`，**固定 30 分钟、不滑动续期**，到期时间存 `config.getTokenExpireKey()`。`isSessionExpired()` 的语义是「有 token 但已过期 / 无到期时间」（**没 token 返回 false** —— 未登录不是登录过期），登录判断用 `hasValidSession()`。
+- **三条强制登出通路**，都收敛到各端 `main.ts` 里 `registerSessionExpiredHandler` 注册的处理器（清会话 + 机构端复位演示身份 + 跳 `/login?redirect=`），缺一条就有漏网：路由守卫（`isSessionExpired()` 时先清会话再判去向，否则与 `/login` 互相弹）、请求层（`request()` 在 `resolveApiMode` 之前拦，**`/auth/login` 与 `/auth/logout` 豁免**；真实后端只认 **HTTP 401**，403 是无权限不登出）、到期看门狗（`armSessionWatch()`，各端 `main.ts` 在 `router.isReady()` 后启动）。
+- **`setSession` 与 `updateSessionUser` 的区别**（最容易踩的坑）：前者用于登录，会写入新的 30 分钟有效期；后者只换用户缓存、**不碰有效期**。机构端「切换演示身份」必须用前者之外的 `updateSessionUser`，否则切一次身份就续满 30 分钟。
+- 机构端演示身份（`apps/tenant/src/composables/useDemoRole.ts`）的存储 key 必须**懒取**（`storageKey()`）：该模块的 import 早于 `setupApp()`，模块求值时算 key 会落到 `admin` 前缀上。
+- Mock 的 token **不编入过期时间**（真实后端的 JWT 前端也解析不出一致的字段），localStorage 里的到期时间是唯一事实源；本功能上线前的历史会话没有该字段，按已过期处理（需重登一次，有意如此）。
 
 ---
 

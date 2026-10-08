@@ -1,6 +1,7 @@
 import type { MockRoute } from './engine'
 import { mockFail } from './engine'
-import { getAppConfig } from '../config'
+import { getAppConfig, getTokenKey } from '../config'
+import { findAuthAccount, verifyPassword } from '../auth/accounts'
 import { mockUsers, adminOverview, tenantOverview } from './data'
 import * as store from './tenant-store'
 import * as admin from './admin-store'
@@ -10,8 +11,9 @@ import * as content from './content-store'
 import type { DictTypeKey, FeatureSwitches, PackageRecord, PhotoResultEdit, TenantRecord } from '../api/models'
 import type { SessionUser, MockUser } from './types'
 
+/** 资料 → 会话用户（SessionUser 不含密码，也不含只对 Mock 有意义的 appId） */
 function toSessionUser(user: MockUser): SessionUser {
-  const { password: _password, appId: _appId, ...rest } = user
+  const { appId: _appId, ...rest } = user
   return rest
 }
 
@@ -328,12 +330,20 @@ export const mockRoutes: MockRoute[] = [
       const appName = getAppConfig().appName
       const account = String(body.account ?? '').trim()
       const password = String(body.password ?? '')
-      const user = mockUsers.find(
-        (item) => item.appId === appName && item.account === account,
-      )
-      if (!user || user.password !== password) {
+
+      // 凭据比对走账号配置表（auth/accounts.ts）：只存盐 + 哈希，明文不在仓库里。
+      // 账号不存在与密码错误返回同一句，避免泄露某个账号是否存在。
+      const entry = findAuthAccount(appName, account)
+      if (!entry || !verifyPassword(entry, password)) {
         mockFail(1001, '账号或密码错误')
       }
+
+      // 凭据通过后再取用户资料：账号表只管凭据，姓名 / 角色 / 机构仍在 mockUsers
+      const user = mockUsers.find(
+        (item) => item.appId === appName && item.account === entry.account,
+      )
+      if (!user) mockFail(1001, '账号资料缺失，请联系管理员')
+
       return { token: createToken(user), user: toSessionUser(user) }
     },
   },
@@ -341,10 +351,9 @@ export const mockRoutes: MockRoute[] = [
     method: 'GET',
     path: '/auth/me',
     handler: () => {
-      // token 由 Mock 引擎从请求头语义中获取；此处简化为从 localStorage 读取
-      const token = localStorage.getItem(
-        `aiteach:${getAppConfig().appName}:token`,
-      )
+      // token 由 Mock 引擎从请求头语义中获取；此处简化为从 localStorage 读取。
+      // key 走 getTokenKey()：过期时间等新 key 加入后，手写的模板串正是容易漏改的地方
+      const token = localStorage.getItem(getTokenKey())
       const user = userFromToken(token ?? undefined)
       if (!user) mockFail(401, '登录已失效，请重新登录')
       return toSessionUser(user)

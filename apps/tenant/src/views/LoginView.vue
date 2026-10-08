@@ -1,26 +1,24 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppIcon, showToast } from '@aiteach/shared'
+import { AppIcon, forgetAccount, getLastAccount, rememberAccount, showToast } from '@aiteach/shared'
 import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
-const DEMO = { account: 'orgadmin', password: 'org123456' }
-
-const form = reactive({ account: '', password: '', remember: true })
+/* 「记住账号」：只回填账号名，**密码每次手输**（登录页不再显示任何演示账号密码）。
+   账号名只在登录成功后写入，勾选框取消时立刻清掉。 */
+const remembered = getLastAccount()
+const form = reactive({ account: remembered, password: '', remember: Boolean(remembered) })
 const errors = reactive({ account: '', password: '' })
 const showPassword = ref(false)
 const loading = ref(false)
-const failCount = ref(0)
 const loginError = ref('')
 
-function fillDemo() {
-  form.account = DEMO.account
-  form.password = DEMO.password
-  loginError.value = ''
+function onToggleRemember() {
+  if (!form.remember) forgetAccount()
 }
 
 function validate(): boolean {
@@ -35,10 +33,11 @@ async function onSubmit() {
   loading.value = true
   try {
     await auth.login({ account: form.account.trim(), password: form.password })
+    if (form.remember) rememberAccount(form.account)
+    else forgetAccount()
     showToast('登录成功，欢迎回来', 'success')
     router.push((route.query.redirect as string) || '/')
   } catch (error) {
-    failCount.value += 1
     loginError.value = (error as Error).message || '登录失败，请稍后重试'
   } finally {
     loading.value = false
@@ -119,8 +118,8 @@ function onPending(name: string) {
 
           <div class="form-row">
             <label class="remember">
-              <input v-model="form.remember" type="checkbox" />
-              <span>记住我（7 天免登录）</span>
+              <input v-model="form.remember" type="checkbox" @change="onToggleRemember" />
+              <span>记住账号</span>
             </label>
             <a class="forgot" @click="onPending('找回密码')">忘记密码？</a>
           </div>
@@ -128,7 +127,6 @@ function onPending(name: string) {
           <p v-if="loginError" class="login-error">
             <AppIcon name="warning" :size="15" />
             {{ loginError }}
-            <template v-if="failCount >= 3">（连续错误 5 次将锁定账号 15 分钟）</template>
           </p>
 
           <button class="btn btn-primary submit" :disabled="loading">
@@ -136,11 +134,6 @@ function onPending(name: string) {
             {{ loading ? '登录中…' : '登 录' }}
           </button>
         </form>
-
-        <div class="demo-tip">
-          <span>演示账号：{{ DEMO.account }} / {{ DEMO.password }}</span>
-          <button type="button" class="fill" @click="fillDemo">一键填充</button>
-        </div>
       </div>
     </main>
   </div>
@@ -303,27 +296,6 @@ function onPending(name: string) {
 .submit { width: 100%; height: 46px; font-size: 15.5px; letter-spacing: 6px; text-indent: 3px; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-
-.demo-tip {
-  margin-top: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: var(--brand-soft);
-  border: 1px dashed rgba(0, 180, 166, 0.35);
-  color: var(--ink-2);
-  border-radius: 10px;
-  padding: 10px 14px;
-  font-size: 12.5px;
-}
-.fill {
-  border: none;
-  background: none;
-  color: var(--brand);
-  font-weight: 700;
-  font-size: 12.5px;
-}
-.fill:hover { text-decoration: underline; }
 
 @media (max-width: 860px) {
   .brand-pane { display: none; }

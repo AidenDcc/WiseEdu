@@ -13,6 +13,7 @@
     "build:admin": "pnpm --filter @aiteach/admin build",
     "build:tenant": "pnpm --filter @aiteach/tenant build",
     "typecheck": "pnpm -r typecheck",
+    "hash-password": "node scripts/hash-password.mjs",
     "preview:admin": "pnpm --filter @aiteach/admin preview",
     "preview:tenant": "pnpm --filter @aiteach/tenant preview"
   },

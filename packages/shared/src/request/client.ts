@@ -1,4 +1,5 @@
 import { getAppConfig, getTenantKey, getTokenKey } from '../config'
+import { isSessionExpired, notifySessionExpired } from '../auth/session'
 import { ApiError } from './api-error'
 import { resolveApiMode } from './mock-switch'
 import { dispatchMock } from '../mock/engine'
@@ -6,19 +7,41 @@ import type { ApiResponse, RequestOptions } from './types'
 import '../mock' // 注册全部 Mock 路由（副作用导入）
 
 /**
+ * 豁免会话过期检查的接口路径。
+ *
+ * 少了这两个，会话一过期就连「重新登录」都发不出去 —— 登录请求自己会被闸拦下，
+ * 死在登录页；登出同理（过期后点退出，不该再弹「登录已失效」）。
+ */
+const SESSION_EXEMPT_PATHS = ['/auth/login', '/auth/logout']
+
+/**
  * 统一请求入口：管理端 / 机构端所有 API 均经由此函数发出。
  * 请求先经过 resolveApiMode 判定走 Mock 引擎还是真实后端：统一开关 VITE_USE_MOCK
  * 关闭时全部走 Mock，打开时只有 backend-ready.ts 已登记的接口走真实后端、其余回退 Mock。
  * 业务代码不感知该判定，接入后端时零改动。
+ *
+ * 发请求前还有一道**会话过期闸**（放在 resolveApiMode 之前，Mock 与真实后端两条分支共用）：
+ * 会话到期后前端 localStorage 里可能还留着 token，不拦的话请求会带着废 token 打出去、
+ * 各自报一堆看不懂的错，用户也不知道该重新登录。这里统一抛 401 并触发登出流程。
  */
 export async function request<T>(url: string, options: RequestOptions = {}): Promise<T> {
   const method = options.method ?? 'GET'
+
+  if (!isSessionExempt(url) && isSessionExpired()) {
+    notifySessionExpired()
+    throw new ApiError(401, '登录已失效，请重新登录')
+  }
 
   if (resolveApiMode(url) === 'mock') {
     return dispatchMock<T>(method, url, options.data)
   }
 
   return remoteRequest<T>(url, options)
+}
+
+function isSessionExempt(url: string): boolean {
+  const path = url.split('?')[0] ?? url
+  return SESSION_EXEMPT_PATHS.includes(path)
 }
 
 async function remoteRequest<T>(url: string, options: RequestOptions): Promise<T> {
@@ -46,6 +69,10 @@ async function remoteRequest<T>(url: string, options: RequestOptions): Promise<T
   }
 
   if (!response.ok) {
+    // 真实后端的 token 过期只能靠 HTTP 401 兜底（本地到期的情形上面的闸已经拦下）。
+    // **只认 401**：403 是「无权限」，普通越权拒绝不该把用户踢下线。
+    if (response.status === 401) notifySessionExpired()
+
     // 后端鉴权失败走的是 JwtUtil.responseError，HTTP 状态码非 2xx 但 body 里带 message，
     // 直接丢掉的话前端只能显示「请求失败（HTTP 401）」，看不到「登录已失效」这类可行动提示
     throw new ApiError(response.status, await readErrorMessage(response))
