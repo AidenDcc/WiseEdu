@@ -35,7 +35,7 @@ export interface AuthAccount {
 
 export const AUTH_ACCOUNTS: Record<AppName, AuthAccount[]> = {
   admin: [
-    { account: 'admin', salt: 'ff62f81f74391f5afd4e9247c397e1a1', passwordHash: '3deac2b4a03f6da218ac49189d5eb6bd9c31810c0d7bb6efada8a4fc6cb1a0cd' },
+    { account: 'admin', salt: 'b235cf0c6f2acf8a7c7e25d6e19f44f7', passwordHash: '9959015c977c7983e48bd94a30f3348e5eb5d52b4e9a52664761de1b5257c06c' },
   ],
   tenant: [
     { account: 'orgadmin', salt: '63a67271fa9351137f92b946dc3bab22', passwordHash: 'b8da3480c0678fb8771a05bb38cd494efc87eb6937c8015d210a051438355d9d' },
