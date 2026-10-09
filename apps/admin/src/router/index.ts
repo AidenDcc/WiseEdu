@@ -184,6 +184,14 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/system/StorageView.vue'),
         meta: { title: '存储与备份' },
       },
+      /* 个人中心：刻意不进 menu.ts —— 它不是业务模块，入口在顶栏头像下拉里
+         （与机构端 /profile 同一套做法）。面包屑靠 meta.title 兜底。 */
+      {
+        path: 'profile',
+        name: 'profile',
+        component: () => import('@/views/ProfileView.vue'),
+        meta: { title: '个人中心' },
+      },
       // 其余菜单统一注册为「开发中」占位页
       ...flattenMenus(menus)
         .filter(

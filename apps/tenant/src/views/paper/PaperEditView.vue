@@ -17,7 +17,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppIcon, appConfirm, showToast, toPlainText, truncateRich, AppModal, AppDrawer, COLLAB_MEMBER_TEXT, COLLAB_STATUS_TEXT, hueColor } from '@aiteach/shared'
+import { AppAvatar, AppIcon, appConfirm, showToast, toPlainText, truncateRich, AppModal, AppDrawer, COLLAB_MEMBER_TEXT, COLLAB_STATUS_TEXT } from '@aiteach/shared'
 import type {
   CollabMember,
   MediaKind,
@@ -2819,9 +2819,11 @@ function mmOf(px: number): number {
              两处并排看要一样高矮；不带下拉菜单，所以省掉箭头与它的右内边距。 -->
         <span class="v-divider" />
         <div class="pe-user">
-          <span class="avatar" :style="{ background: hueColor(auth.user?.avatarHue ?? 172) }">
-            {{ auth.user?.name?.charAt(0) ?? '师' }}
-          </span>
+          <AppAvatar
+            :name="auth.user?.name"
+            :hue="auth.user?.avatarHue ?? 172"
+            :avatar="auth.user?.avatar"
+          />
           <span class="pe-user-meta">
             <span class="pe-user-name">{{ auth.user?.name ?? '未登录' }}</span>
             <span class="pe-user-role">{{ auth.user?.roleName ?? '' }}</span>
@@ -4241,17 +4243,7 @@ function mmOf(px: number): number {
   padding: 5px 6px;
   border-radius: 12px;
 }
-.pe-user .avatar {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  color: #fff;
-  font-size: 15px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+/* 头像样式交给共享的 AppAvatar（34px / 圆角 10 / 字号 15），这里只管排布 */
 .pe-user-meta { display: flex; flex-direction: column; line-height: 1.25; }
 .pe-user-name { font-size: 13.5px; font-weight: 600; color: var(--ink); }
 .pe-user-role { font-size: 11px; color: var(--sub); }

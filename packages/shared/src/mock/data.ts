@@ -15,6 +15,11 @@ export const mockUsers: MockUser[] = [
     orgName: 'AI教学云平台',
     avatarHue: 232,
     tenantId: 0,
+    /* 个人中心资料：管理端账号固定、无「演示身份」切换，只有这一份。
+       机构端的同名字段**刻意留空** —— 那边跟着演示身份表走，见 types.ts 的说明。 */
+    phone: '138****0000',
+    email: 'platform@aiteach.cn',
+    intro: '负责平台全局配置、租户入驻审核与 AI 服务治理。',
   },
   {
     id: 101,

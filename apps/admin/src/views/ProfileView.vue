@@ -1,16 +1,26 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from 'vue'
+/**
+ * 个人中心（P-08-01）。四个页签与机构端 ProfileView 保持一致：个人资料 / 账号安全 / 消息偏好 / 登录记录。
+ *
+ * 与机构端的唯一结构差异在**资料从哪来**：机构端有「演示身份」切换，联系方式跟着身份表走；
+ * 管理端账号固定，直接取会话用户（`auth.user`）—— 后者由 `/auth/login` 下发，刷新后仍在缓存里。
+ */
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppAvatar, AppIcon, AppPageHeader, AppTabs, fileToSquareDataUrl, showToast, appConfirm } from '@aiteach/shared'
-import type { TabDef } from '@aiteach/shared'
+import { AppAvatar, AppIcon, AppPageHeader, AppTabs, fileToSquareDataUrl, setAvatarOverride, showToast, appConfirm, updateSessionUser } from '@aiteach/shared'
+import type { SessionUser, TabDef } from '@aiteach/shared'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
 import { useAuthStore } from '@/stores/auth'
-import { clearDemoIdentity, setIdentityAvatar, useDemoRole } from '@/composables/useDemoRole'
-import { fetchOrgLoginLogs } from '@/api/org'
+import { fetchLoginLogs } from '@/api/platform'
 
 const router = useRouter()
 const auth = useAuthStore()
-const { identity } = useDemoRole()
+
+/* 会话用户理论上一定在（路由守卫先 restore 再放行），但真为 null 时不该把
+   「undefined · undefined」当说明文字画到页头上 */
+const headerDesc = computed(() =>
+  auth.user ? `${auth.user.orgName} · ${auth.user.roleName}` : '',
+)
 
 type TabKey = 'profile' | 'security' | 'notify' | 'logs'
 const TABS: TabDef[] = [
@@ -26,52 +36,67 @@ function switchTab(value: string) {
   tab.value = value as TabKey
 }
 
-/* ===== 个人资料（FR-GN-021） =====
-   联系方式与简介跟着演示身份走：右上角切成王静，这里还写着「陈明远 · 139****0001」是自相矛盾的。
-   姓名取会话用户（同一个身份的两处投影），其余三项取身份表 —— 表在 useDemoRole 里，只此一份。 */
+/* ===== 个人资料 =====
+   初值取会话用户；会话用户里没有的（历史缓存、真实后端 VO 未下发）用空串兜底，
+   免得页面上出现 `undefined`。 */
 const profile = reactive({
   name: auth.user?.name ?? '',
-  phone: identity.value.phone,
-  email: identity.value.email,
-  intro: identity.value.intro,
+  phone: auth.user?.phone ?? '',
+  email: auth.user?.email ?? '',
+  intro: auth.user?.intro ?? '',
 })
 const editingProfile = ref(false)
-
-/* 切换演示身份后同步刷新。正在编辑时不覆盖 —— 那一刻输入框里的内容是人刚敲的，优先级更高 */
-watch(identity, (next) => {
-  profile.name = auth.user?.name ?? next.name
-  if (editingProfile.value) return
-  profile.phone = next.phone
-  profile.email = next.email
-  profile.intro = next.intro
-})
 
 function saveProfile() {
   if (profile.name.trim().length < 2) {
     showToast('姓名至少 2 个字', 'error')
     return
   }
+  const current = auth.user
+  if (current) {
+    const next: SessionUser = {
+      ...current,
+      name: profile.name.trim(),
+      phone: profile.phone,
+      email: profile.email,
+      intro: profile.intro,
+    }
+    auth.user = next
+    /* 用 updateSessionUser 而不是 setSession：后者会重写到期时间，
+       改一次资料就把 30 分钟固定窗口续满，等于没有有效期（见 shared/api/auth.ts）。 */
+    updateSessionUser(next)
+  }
   editingProfile.value = false
   showToast('资料已保存', 'success')
 }
 
 /* ===== 头像 =====
-   头像存「当前演示身份」名下（见 composables/useDemoRole 的 setIdentityAvatar）：
-   三个身份共用 orgadmin 这一个账号，按账号存会让王静顶着陈明远的照片。
-   上传后立刻生效并落本地存储，不需要「保存」—— 头像只有一个字段，做成两步反而不顺手。 */
+   一处改动要落三处，否则会出现「换完刷新就变回去」：本地覆盖表（跨登出保留）、
+   会话缓存（顶栏/试卷页读它）、Pinia 里的 user（当前页面立即重渲染）。 */
 const avatarInput = ref<HTMLInputElement | null>(null)
 const avatarBusy = ref(false)
+
+/** 同步三处；`null` 为恢复默认字母头像 */
+function applyAvatar(dataUrl: string | null) {
+  const current = auth.user
+  if (!current) return
+  /* 先写覆盖表：它可能因配额不足抛错，那时会话就不该被改掉（否则界面换了、刷新又没了） */
+  setAvatarOverride(current.account, dataUrl)
+  const next: SessionUser = { ...current, avatar: dataUrl ?? '' }
+  auth.user = next
+  updateSessionUser(next)
+}
 
 async function onAvatarPicked(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
-  /* 清空 value：同一个文件连选两次（第一次裁得不好想换回来）也要能再触发 change */
+  /* 清空 value：同一个文件连选两次也要能再触发 change */
   input.value = ''
   if (!file) return
 
   avatarBusy.value = true
   try {
-    setIdentityAvatar(await fileToSquareDataUrl(file))
+    applyAvatar(await fileToSquareDataUrl(file))
     showToast('头像已更新', 'success')
   } catch (error) {
     showToast(error instanceof Error ? error.message : '头像处理失败，请换一张', 'error')
@@ -81,12 +106,12 @@ async function onAvatarPicked(event: Event) {
 }
 
 async function onAvatarReset() {
-  if (!(await appConfirm('恢复默认头像？将移除当前身份的自定义头像。', { type: 'info' }))) return
-  setIdentityAvatar(null)
+  if (!(await appConfirm('恢复默认头像？', { type: 'info' }))) return
+  applyAvatar(null)
   showToast('已恢复默认头像', 'success')
 }
 
-/* ===== 账号安全（FR-GN-022） ===== */
+/* ===== 账号安全 ===== */
 const pwd = reactive({ old: '', first: '', second: '' })
 const pwdErrors = reactive<Record<string, string>>({})
 
@@ -103,25 +128,27 @@ function submitPwd() {
   showToast('密码已修改，下次登录生效', 'success')
 }
 
-/* ===== 消息偏好（FR-GN-023） ===== */
+/* ===== 消息偏好（演示：暂不落库，与机构端一致） ===== */
 const notify = reactive({ inApp: true, sms: true, email: false, digest: true })
 
 function saveNotify() {
   showToast('消息偏好已保存', 'success')
 }
 
-/* ===== 登录记录（FR-GN-025） ===== */
+/* ===== 登录记录 =====
+   只取**本人**的流水：平台日志里混着各机构账号（orgadmin_a、teacher_li…），
+   在超管的个人中心里列出别人的登录记录是说不通的。 */
 const logs = ref<Array<{ id: number; account: string; ip: string; device: string; ok: boolean; time: string }>>([])
 
 onMounted(async () => {
-  logs.value = (await fetchOrgLoginLogs()).slice(0, 8)
+  const account = auth.user?.account
+  const all = await fetchLoginLogs()
+  logs.value = (account ? all.filter((row) => row.account === account) : all).slice(0, 8)
 })
 
 async function onLogout() {
   if (!(await appConfirm('确定退出登录？', { type: 'info' }))) return
   await auth.logout()
-  /* 与 AppLayout 的退出保持一致：复位演示身份，免得下次登录被上一个会话的身份贴回来 */
-  clearDemoIdentity()
   showToast('已退出登录', 'success')
   router.push('/login')
 }
@@ -129,12 +156,12 @@ async function onLogout() {
 
 <template>
   <div class="page">
-    <AppPageHeader :desc="`${auth.user?.orgName} · ${auth.user?.roleName}`" />
+    <AppPageHeader :desc="headerDesc" />
 
     <div class="panel profile-panel">
       <!-- 用户卡片头 -->
       <div class="profile-head">
-        <!-- 点头像即换：这是最常见的入口，不必再让人去找按钮（触屏上按钮同样可点，遮罩只是没有 hover） -->
+        <!-- 点头像即换（与机构端同一套交互） -->
         <button
           class="avatar-btn"
           type="button"
@@ -144,7 +171,7 @@ async function onLogout() {
         >
           <AppAvatar
             :name="auth.user?.name"
-            :hue="auth.user?.avatarHue ?? 172"
+            :hue="auth.user?.avatarHue ?? 232"
             :avatar="auth.user?.avatar"
             :size="56"
             :radius="16"
@@ -182,13 +209,13 @@ async function onLogout() {
           </div>
           <div class="detail-item">
             <div class="d-label">手机号</div>
-            <div class="d-value">{{ profile.phone }}</div>
+            <div class="d-value">{{ profile.phone || '—' }}</div>
           </div>
           <div class="detail-item">
             <div class="d-label">邮箱</div>
             <div class="d-value">
               <template v-if="editingProfile"><input v-model="profile.email" class="f-input" style="width: 220px" /></template>
-              <template v-else>{{ profile.email }}</template>
+              <template v-else>{{ profile.email || '—' }}</template>
             </div>
           </div>
           <div class="detail-item">
@@ -200,9 +227,6 @@ async function onLogout() {
           <label class="f-label">个人简介</label>
           <textarea v-model="profile.intro" class="f-textarea" rows="3" :disabled="!editingProfile" />
         </div>
-        <p class="f-hint avatar-tip">
-          <AppIcon name="info" :size="13" /> 头像按演示身份分开保存，切换到其他身份会显示各自设置的头像
-        </p>
         <button v-if="!editingProfile" class="btn btn-primary btn-sm" @click="editingProfile = true">编辑资料</button>
         <div v-else class="op-group">
           <button class="btn btn-ghost btn-sm" @click="editingProfile = false">取消</button>
@@ -238,7 +262,7 @@ async function onLogout() {
         <div class="pref-row">
           <div>
             <p class="pref-title">接收站内通知</p>
-            <p class="f-hint">审核待办、协同邀请等即时提醒</p>
+            <p class="f-hint">入驻申请、合规抽检等平台待办即时提醒</p>
           </div>
           <AppSwitch v-model="notify.inApp" />
         </div>
@@ -287,10 +311,13 @@ async function onLogout() {
                   <span class="tag" :class="row.ok ? 'tag-green' : 'tag-red'">{{ row.ok ? '成功' : '失败' }}</span>
                 </td>
               </tr>
+              <tr v-if="logs.length === 0">
+                <td colspan="4" class="empty-hint">暂无登录记录</td>
+              </tr>
             </tbody>
           </table>
         </div>
-        <p class="f-hint" style="margin-top: 10px">仅展示最近 8 条；完整日志见 机构管理 → 日志管理</p>
+        <p class="f-hint" style="margin-top: 10px">仅展示本人最近 8 条；全部账号日志见 数据审计 → 日志审计</p>
       </div>
     </div>
   </div>
@@ -323,7 +350,6 @@ async function onLogout() {
   font-size: 12px; color: var(--sub); text-decoration: underline;
 }
 .avatar-reset:hover { color: var(--ink); }
-.avatar-tip { display: flex; align-items: center; gap: 5px; }
 
 .tab-body.narrow { max-width: 480px; }
 .security-tips { margin-top: 14px; }
@@ -337,4 +363,5 @@ async function onLogout() {
 .tab-body .btn-primary { margin-top: 14px; }
 
 .ip { font-family: 'SF Mono', Menlo, monospace; font-size: 12px; }
+.empty-hint { text-align: center; color: var(--sub); font-size: 12.5px; padding: 18px 0; }
 </style>

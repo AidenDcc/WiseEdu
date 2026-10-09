@@ -20,6 +20,15 @@ export interface MockUser {
   avatarHue: number
   /** 登录租户ID，平台侧为 0。与后端 EduSessionUserVo.tenantId 同义 */
   tenantId: number
+  /* 个人中心（ProfileView）的联系方式与简介。可空：机构端这些信息不在这里 ——
+     它有「演示身份」切换，联系方式跟着身份表走（apps/tenant/src/composables/useDemoRole.ts），
+     同一份资料放两处迟早对不上。只有管理端（账号固定、无身份切换）从这里取。
+     接真实后端时由 `/auth/me` 的 VO 一并下发。 */
+  phone?: string
+  email?: string
+  intro?: string
+  /** 自定义头像（图片地址或 data URL）；空则用 avatarHue + 姓名首字生成字母头像 */
+  avatar?: string
 }
 
 /** 登录成功后下发的会话用户信息（脱敏，不含密码） */
@@ -41,4 +50,14 @@ export interface SessionUser {
    * 可空：Mock 模式下老数据不一定带，且后端不可用时也不该因此报错。
    */
   tenantId?: number
+  /** 个人中心资料（见 MockUser 的同名字段注释） */
+  phone?: string
+  email?: string
+  intro?: string
+  /**
+   * 自定义头像。管理端由登录响应带出、上传后就地改写；机构端每次切换演示身份时
+   * 按身份重新贴一次（见 useDemoRole），否则换个人还顶着上一位的脸。
+   * 接真实后端后对应 `sys_user.avatar`。
+   */
+  avatar?: string
 }

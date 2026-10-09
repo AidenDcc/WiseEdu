@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppIcon, showToast, hueColor, resolveApiMode, getAppConfig, buildBreadcrumb, appConfirm } from '@aiteach/shared'
+import { AppAvatar, AppIcon, showToast, resolveApiMode, getAppConfig, buildBreadcrumb, appConfirm } from '@aiteach/shared'
 import type { MenuItem } from '@/menu'
 import { menus } from '@/menu'
 import { useAuthStore } from '@/stores/auth'
@@ -88,8 +88,10 @@ function onDocumentClick(event: MouseEvent) {
 onMounted(() => document.addEventListener('click', onDocumentClick))
 onBeforeUnmount(() => document.removeEventListener('click', onDocumentClick))
 
-function onPendingFeature(name: string) {
-  showToast(`「${name}」功能正在开发中，敬请期待`, 'info')
+/* 点击项在 userRef 内部，document 的关闭监听会放过它，得自己收起来 */
+function onProfile() {
+  userMenuOpen.value = false
+  router.push('/profile')
 }
 
 /* ===== 消息中心 ===== */
@@ -225,12 +227,11 @@ async function onLogout() {
           <span class="v-divider" />
 
           <div ref="userRef" class="user-chip" @click="userMenuOpen = !userMenuOpen">
-            <span
-              class="avatar"
-              :style="{ background: hueColor(auth.user?.avatarHue ?? 232) }"
-            >
-              {{ auth.user?.name?.charAt(0) ?? '管' }}
-            </span>
+            <AppAvatar
+              :name="auth.user?.name"
+              :hue="auth.user?.avatarHue ?? 232"
+              :avatar="auth.user?.avatar"
+            />
             <span class="user-meta">
               <span class="user-name">{{ auth.user?.name ?? '未登录' }}</span>
               <span class="user-role">{{ auth.user?.roleName ?? '' }}</span>
@@ -243,7 +244,7 @@ async function onLogout() {
                   <div class="org">{{ auth.user?.orgName }}</div>
                   <div class="account">{{ auth.user?.account }}</div>
                 </div>
-                <button class="user-menu-item" @click="onPendingFeature('个人中心')">
+                <button class="user-menu-item" @click="onProfile">
                   <AppIcon name="users" :size="15" /> 个人中心
                 </button>
                 <button class="user-menu-item danger" @click="onLogout">
@@ -491,14 +492,8 @@ async function onLogout() {
   transition: background 0.15s;
 }
 .user-chip:hover { background: #f2f4fa; }
-.avatar {
-  width: 34px; height: 34px;
-  border-radius: 10px;
-  color: #fff;
-  font-size: 15px;
-  font-weight: 700;
-  display: flex; align-items: center; justify-content: center;
-}
+/* 头像样式（34px / 圆角 10 / 字号 15）在共享的 AppAvatar 里，与机构端顶栏、
+   两端个人中心、试卷编辑页共用同一份 */
 .user-meta { display: flex; flex-direction: column; line-height: 1.25; }
 .user-name { font-size: 13.5px; font-weight: 600; }
 .user-role { font-size: 11px; color: var(--sub); }

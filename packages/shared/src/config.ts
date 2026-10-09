@@ -55,3 +55,11 @@ export function getTokenExpireKey(): string {
 export function getLastAccountKey(): string {
   return `aiteach:${currentConfig.appName}:last-account`
 }
+
+/**
+ * 用户自定义头像（data URL 映射表）的 localStorage key。
+ * 独立于会话缓存：会话 30 分钟到期被清掉后，头像不该跟着「忘了自己长什么样」。
+ */
+export function getAvatarStoreKey(): string {
+  return `aiteach:${currentConfig.appName}:avatars`
+}

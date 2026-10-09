@@ -23,6 +23,9 @@ export {
   forgetAccount,
 } from './api/auth'
 export type { LoginPayload, LoginResult } from './api/auth'
+/* 自定义头像的本地覆盖值。owner 的口径由各端自己定（管理端=账号，机构端=演示身份角色），
+   见 auth/avatar.ts 顶部注释 */
+export { getAvatarOverride, setAvatarOverride } from './auth/avatar'
 /* 会话有效期（固定 30 分钟、不滑动续期）：路由守卫 / 请求层 / 到期看门狗三条强制登出通路共用。
    账号配置表（AUTH_ACCOUNTS / verifyPassword）刻意不从这里导出 —— 它是 Mock 引擎的内部实现，
    界面代码不该拿到哈希表。 */
@@ -82,6 +85,10 @@ export { copyText } from './utils/clipboard'
    否则它在 document 上的 Esc 监听不受仲裁 —— 一次 Esc 会把子弹窗和它自己一起关掉 */
 export { enterOverlay, exitOverlay, isTopOverlay } from './utils/overlay-stack'
 export { default as AppIcon } from './components/AppIcon.vue'
+/* 头像：有自定义头像显示图片，否则回落到色相 + 首字 */
+export { default as AppAvatar } from './components/ui/AppAvatar.vue'
+/* 本地图片 → 正方形头像 data URL（居中裁切 + 缩放，纯浏览器 API） */
+export { fileToSquareDataUrl } from './utils/image'
 
 /* ===== 共享 UI 组件（机构端 / 超管端通用，样式自带、只取 CSS 变量） =====
    这些原本散落在单个页面的 scoped 样式里（题库管理的 `.opt-chip` / `.filter-panel` /

@@ -22,7 +22,7 @@
  * `updateSessionUser` 换用户缓存 —— 见 shared/api/auth.ts 的注释。
  */
 import { computed, ref } from 'vue'
-import { getAppConfig, setMockCurrent, updateSessionUser } from '@aiteach/shared'
+import { getAppConfig, getAvatarOverride, setAvatarOverride, setMockCurrent, updateSessionUser } from '@aiteach/shared'
 import type { SessionUser } from '@aiteach/shared'
 import { useAuthStore } from '@/stores/auth'
 
@@ -155,6 +155,9 @@ export function applyDemoIdentity(target: DemoRole): SessionUser | null {
     role: next.role,
     roleName: next.roleName,
     avatarHue: next.avatarHue,
+    /* 头像按**身份**取，不是按账号：三个身份共用 orgadmin 这一个账号，
+       按账号存会让「切到王静还顶着陈明远的照片」。见 shared/auth/avatar.ts */
+    avatar: getAvatarOverride(next.role),
   }
   store.user = user
 
@@ -193,6 +196,18 @@ export function clearDemoIdentity(): void {
   role.value = 'orgAdmin'
   const next = identityOf('orgAdmin')
   setMockCurrent({ id: next.id, name: next.name, role: next.role })
+}
+
+/**
+ * 设置**当前演示身份**的自定义头像（`null` 为恢复默认字母头像）。
+ *
+ * 必须经由这里而不是直接写 `updateSessionUser`：头像落在按身份分的覆盖表里，
+ * 再走一遍 `applyDemoIdentity` 把它贴回会话（顺带把 mock 的当前操作人也同步一次），
+ * 两处谁先谁后都成 —— 但只要有一处漏了，「换完头像切个身份再切回来」就会发现头像没了。
+ */
+export function setIdentityAvatar(dataUrl: string | null): SessionUser | null {
+  setAvatarOverride(role.value, dataUrl)
+  return applyDemoIdentity(role.value)
 }
 
 export function useDemoRole() {
