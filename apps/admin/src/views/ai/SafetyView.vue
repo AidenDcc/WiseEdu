@@ -7,9 +7,9 @@
  * - 输出质量评测：多维度评分（准确 / 完整 / 适龄 / 安全）与环比；
  * - 生成内容留痕：AI 产物溯源（traceId、模型、租户、输入摘要、安全结论）。
  */
-import { computed, onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, AppTabs, showToast, AppModal, appConfirm } from '@aiteach/shared'
-import type { AiQualityEval, AiTraceRecord, SensitivePolicyGroup } from '@aiteach/shared'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { AppFilterPanel, AppIcon, AppPageHeader, AppTabs, showToast, AppModal, appConfirm } from '@aiteach/shared'
+import type { AiQualityEval, AiTraceRecord, FilterRowDef, SensitivePolicyGroup } from '@aiteach/shared'
 import {
   deleteSensitivePolicy,
   fetchQualityEvals,
@@ -127,8 +127,7 @@ const EVAL_METRICS: Array<{ key: keyof AiQualityEval['scores']; label: string }>
 ]
 
 /* ===== 3. 留痕溯源 ===== */
-const traceScene = ref('')
-const traceSafety = ref('')
+const TRACE_SCENES = ['AI 出题', 'AI 组卷', 'AI 阅卷', 'AI 课件', '学生 AI 问答']
 
 const SAFETY_META: Record<AiTraceRecord['safety'], { text: string; tag: string }> = {
   pass: { text: '通过', tag: 'tag-green' },
@@ -136,9 +135,32 @@ const SAFETY_META: Record<AiTraceRecord['safety'], { text: string; tag: string }
   blocked: { text: '已拦截', tag: 'tag-red' },
 }
 
-const filteredTraces = computed(() =>
-  traces.value.filter((row) => (!traceScene.value || row.scene === traceScene.value) && (!traceSafety.value || row.safety === traceSafety.value)),
-)
+/* 搜索条件（AppFilterPanel 面板）：不选即不过滤，故取值直接是「选中项的第一个」，
+   原来那两个「全部场景 / 全部安全结论」的空值选项由 chip 的「取消选中」承担 */
+const TRACE_FILTERS = reactive<Record<string, string[]>>({ scene: [], safety: [] })
+const TRACE_FILTER_ROWS: FilterRowDef[] = [
+  { key: 'scene', label: '场景', options: TRACE_SCENES, multiple: false },
+  {
+    key: 'safety',
+    label: '安全结论',
+    options: Object.keys(SAFETY_META),
+    /* 取值是接口枚举，界面显示中文：optionLabels 只改文案不改值 */
+    optionLabels: Object.fromEntries(Object.entries(SAFETY_META).map(([value, meta]) => [value, meta.text])),
+    multiple: false,
+  },
+]
+
+/* 共享面板回传的是整份筛选值（覆盖式回写），逐 key 写回这份 reactive 对象本身 */
+function onTraceFiltersChange(next: Record<string, string[]>) {
+  TRACE_FILTERS.scene = next.scene ?? []
+  TRACE_FILTERS.safety = next.safety ?? []
+}
+
+const filteredTraces = computed(() => {
+  const scene = TRACE_FILTERS.scene[0] ?? ''
+  const safety = TRACE_FILTERS.safety[0] ?? ''
+  return traces.value.filter((row) => (!scene || row.scene === scene) && (!safety || row.safety === safety))
+})
 
 const enabledPolicyCount = computed(() => policies.value.filter((row) => row.enabled).length)
 
@@ -248,20 +270,13 @@ onMounted(load)
 
     <!-- 留痕溯源 -->
     <template v-else>
-      <div class="head-row">
-        <div class="run-box">
-          <select v-model="traceScene" class="f-select">
-            <option value="">全部场景</option>
-            <option v-for="scene in ['AI 出题', 'AI 组卷', 'AI 阅卷', 'AI 课件', '学生 AI 问答']" :key="scene" :value="scene">{{ scene }}</option>
-          </select>
-          <select v-model="traceSafety" class="f-select">
-            <option value="">全部安全结论</option>
-            <option value="pass">通过</option>
-            <option value="masked">已脱敏</option>
-            <option value="blocked">已拦截</option>
-          </select>
-        </div>
-      </div>
+      <!-- 搜索条件：独立面板，与下方列表分开（对齐机构端列表页布局） -->
+      <AppFilterPanel
+        :rows="TRACE_FILTER_ROWS"
+        :model-value="TRACE_FILTERS"
+        @update:model-value="onTraceFiltersChange"
+      />
+
       <div class="panel">
         <div class="data-table-wrap">
           <table class="data-table">
@@ -335,8 +350,9 @@ onMounted(load)
 </template>
 
 <style scoped>
-.toolbar { margin-bottom: 14px; }
-.head-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 12px; }
+/* 纵向节奏交给 .page 的 gap，这里不再自带下边距，否则与 gap 叠加成双倍间距 */
+/* 页签条与头部操作行原先各自带 margin-bottom，与 .page 的 gap 叠加成双倍间距，已去掉 */
+.head-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .head-hint { font-size: 12.5px; color: var(--sub); }
 .run-box { display: flex; align-items: center; gap: 10px; }
 .mono { font-family: 'SF Mono', Menlo, monospace; font-size: 12px; }

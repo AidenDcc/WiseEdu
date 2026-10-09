@@ -73,77 +73,82 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="panel">
-    <!-- 三类资源 Tab（FR-PT-029） -->
-    <div class="tabs-wrap">
-      <AppTabs :tabs="TABS" :model-value="activeTab" @update:model-value="activeTab = $event as TabKey" />
-    </div>
-    <div class="tabs-tools">
-      <AppListToolbar :searchable="false">
-        <template #left>
-          <span class="read-only-hint">
-            <AppIcon name="shield" :size="13" /> 平台侧只读，机构名称已脱敏
-          </span>
-        </template>
-      </AppListToolbar>
-    </div>
-
-    <!-- 公开题库（FR-PT-030） -->
-    <div v-if="activeTab === 'questions'" class="tab-body">
-      <AppFilterPanel :rows="Q_FILTER_ROWS" :model-value="qFilter" @update:model-value="onQFiltersChange" />
-      <AppListToolbar v-model="qKeyword" placeholder="搜索题干关键词" :search-width="220">
-        <template #right>
-          <button class="btn btn-ghost btn-sm" @click="onExport('公开题库')">
-            <AppIcon name="download" :size="14" /> 导出
-          </button>
-        </template>
-      </AppListToolbar>
-      <div class="data-table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>题干摘要</th>
-              <th>学科</th>
-              <th>题型</th>
-              <th>难度</th>
-              <th>知识点</th>
-              <th>变式</th>
-              <th>AI 校验</th>
-              <th>来源机构</th>
-              <th>入库时间</th>
-              <th style="width: 80px">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-if="loading && questions.length === 0">
-              <td colspan="10" class="empty-row">加载中…</td>
-            </tr>
-            <tr v-else-if="filteredQuestions().length === 0">
-              <td colspan="10" class="empty-row">暂无题目</td>
-            </tr>
-            <template v-else>
-              <tr v-for="q in filteredQuestions()" :key="q.id">
-                <td class="stem-cell cell-strong"><RichTextViewer :content="q.stem" tag="span" /></td>
-                <td>{{ q.subject }}</td>
-                <td>{{ q.type }}</td>
-                <td>{{ q.difficulty }}</td>
-                <td class="knowledge-cell">{{ q.knowledge }}</td>
-                <td>{{ q.variantCount > 0 ? `${q.variantCount} 个` : '—' }}</td>
-                <td><span class="tag" :class="aiStatusClass(q.aiStatus)">{{ q.aiStatus }}</span></td>
-                <td>{{ q.orgMasked }}</td>
-                <td class="time-cell">{{ q.createdAt }}</td>
-                <td>
-                  <button class="mini-btn" type="button" @click="questionOpen = q">查看</button>
-                </td>
-              </tr>
-            </template>
-          </tbody>
-        </table>
+  <div class="page">
+    <!-- 页签外壳：页签与只读提示工具条，自成一块面板 -->
+    <div class="panel">
+      <!-- 三类资源 Tab（FR-PT-029） -->
+      <div class="tabs-wrap">
+        <AppTabs :tabs="TABS" :model-value="activeTab" @update:model-value="activeTab = $event as TabKey" />
+      </div>
+      <div class="tabs-tools">
+        <AppListToolbar :searchable="false">
+          <template #left>
+            <span class="read-only-hint">
+              <AppIcon name="shield" :size="13" /> 平台侧只读，机构名称已脱敏
+            </span>
+          </template>
+        </AppListToolbar>
       </div>
     </div>
 
-    <!-- 公开试卷（FR-PT-031） -->
-    <div v-else-if="activeTab === 'papers'" class="tab-body">
+    <!-- 公开题库（FR-PT-030）：筛选条件独立成面板，与列表分开 -->
+    <template v-if="activeTab === 'questions'">
+      <AppFilterPanel :rows="Q_FILTER_ROWS" :model-value="qFilter" @update:model-value="onQFiltersChange" />
+      <div class="panel">
+        <AppListToolbar v-model="qKeyword" placeholder="搜索题干关键词" :search-width="220">
+          <template #right>
+            <button class="btn btn-ghost btn-sm" @click="onExport('公开题库')">
+              <AppIcon name="download" :size="14" /> 导出
+            </button>
+          </template>
+        </AppListToolbar>
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>题干摘要</th>
+                <th>学科</th>
+                <th>题型</th>
+                <th>难度</th>
+                <th>知识点</th>
+                <th>变式</th>
+                <th>AI 校验</th>
+                <th>来源机构</th>
+                <th>入库时间</th>
+                <th style="width: 80px">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-if="loading && questions.length === 0">
+                <td colspan="10" class="empty-row">加载中…</td>
+              </tr>
+              <tr v-else-if="filteredQuestions().length === 0">
+                <td colspan="10" class="empty-row">暂无题目</td>
+              </tr>
+              <template v-else>
+                <tr v-for="q in filteredQuestions()" :key="q.id">
+                  <td class="stem-cell cell-strong"><RichTextViewer :content="q.stem" tag="span" /></td>
+                  <td>{{ q.subject }}</td>
+                  <td>{{ q.type }}</td>
+                  <td>{{ q.difficulty }}</td>
+                  <td class="knowledge-cell">{{ q.knowledge }}</td>
+                  <td>{{ q.variantCount > 0 ? `${q.variantCount} 个` : '—' }}</td>
+                  <td><span class="tag" :class="aiStatusClass(q.aiStatus)">{{ q.aiStatus }}</span></td>
+                  <td>{{ q.orgMasked }}</td>
+                  <td class="time-cell">{{ q.createdAt }}</td>
+                  <td>
+                    <button class="mini-btn" type="button" @click="questionOpen = q">查看</button>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </template>
+
+    <!-- 公开试卷（FR-PT-031）：无筛选条件，只有列表 -->
+    <div v-else-if="activeTab === 'papers'" class="panel">
       <AppListToolbar :searchable="false">
         <template #left>
           <span class="tab-hint">平行卷信息只读展示；源卷内容与组卷结构不向平台侧开放</span>
@@ -197,8 +202,8 @@ onMounted(load)
       </div>
     </div>
 
-    <!-- 审核记录（FR-PT-032） -->
-    <div v-else class="tab-body">
+    <!-- 审核记录（FR-PT-032）：无筛选条件，只有列表 -->
+    <div v-else class="panel">
       <AppListToolbar :searchable="false">
         <template #left>
           <span class="tab-hint">多智能体检测 → 自动纠错 → 人工终审全链路记录</span>
@@ -358,8 +363,8 @@ onMounted(load)
   color: var(--sub);
 }
 .tab-hint { font-size: 12.5px; color: var(--sub); }
-.tab-body { padding: 0 16px 16px; }
-.tab-body :deep(.filter-panel) { margin-bottom: 12px; }
+/* 各页签的列表各自成块 .panel（由 .page 的 gap 分隔），工具条顶部留白由它自己给 */
+.panel > :deep(.list-toolbar) { padding: 14px 14px 0; }
 
 .stem-cell { max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .knowledge-cell { font-size: 12.5px; color: var(--ink-2); max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

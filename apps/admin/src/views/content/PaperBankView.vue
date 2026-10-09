@@ -5,21 +5,40 @@
  * 平台侧试卷资产的审核与上架；试卷解析拆题入库（P-03-12 AI 增强）在演示中用
  * 「解析入库」按钮体现拆解结果，真实环境接 OCR + 题目结构化服务。
  */
-import { onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, PLATFORM_CONTENT_STATUS_TEXT, showToast, AppModal } from '@aiteach/shared'
-import type { PlatformContentStatus, PlatformPaper } from '@aiteach/shared'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { AppFilterPanel, AppListToolbar, AppPageHeader, PLATFORM_CONTENT_STATUS_TEXT, showToast, AppModal } from '@aiteach/shared'
+import type { FilterRowDef, PlatformContentStatus, PlatformPaper } from '@aiteach/shared'
 import { fetchPlatformPapers, reviewPlatformPaper } from '@/api/content'
 
 const papers = ref<PlatformPaper[]>([])
 const keyword = ref('')
-const subjectFilter = ref('')
 const loading = ref(true)
+
+const SUBJECTS = ['数学', '语文', '英语', '物理']
+
+/* ===== 搜索条件（AppFilterPanel 面板） ===== */
+const FILTERS = reactive<Record<string, string[]>>({ subject: [] })
+const FILTER_ROWS: FilterRowDef[] = [
+  { key: 'subject', label: '学科', options: SUBJECTS, multiple: false },
+]
+
+/* 共享面板回传的是整份筛选值（覆盖式回写），逐 key 写回这份 reactive 对象本身。
+   不能交给 `v-model`：替换整个对象不是一次响应式写入，chip 既不亮也不会重新查询。 */
+function onFiltersChange(next: Record<string, string[]>) {
+  FILTERS.subject = next.subject ?? []
+}
+
+const subjectFilter = computed(() => FILTERS.subject[0] ?? '')
 
 async function load() {
   loading.value = true
   papers.value = await fetchPlatformPapers(keyword.value, subjectFilter.value)
   loading.value = false
 }
+
+/* 条件变化即重新查询（原来是点「检索」按钮 / 回车） */
+watch(FILTERS, load, { deep: true })
+watch(keyword, load)
 
 function statusTag(status: PlatformContentStatus) {
   if (status === 'published') return 'tag-green'
@@ -47,20 +66,14 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <AppPageHeader desc="公共试卷库：整卷资产审核与上架；支持从试卷解析拆题入库（AI 增强），拆出的题回流公共题库。">
-      <template #actions>
-        <div class="head-actions">
-          <select v-model="subjectFilter" class="f-select" @change="load">
-            <option value="">全部学科</option>
-            <option v-for="subject in ['数学', '语文', '英语', '物理']" :key="subject" :value="subject">{{ subject }}</option>
-          </select>
-          <input v-model="keyword" class="f-input search" placeholder="试卷名称" @keyup.enter="load" />
-          <button class="btn btn-primary" @click="load">检索</button>
-        </div>
-      </template>
-    </AppPageHeader>
+    <AppPageHeader desc="公共试卷库：整卷资产审核与上架；支持从试卷解析拆题入库（AI 增强），拆出的题回流公共题库。" />
+
+    <!-- 搜索条件：独立面板，与下方列表分开（对齐机构端列表页布局） -->
+    <AppFilterPanel :rows="FILTER_ROWS" :model-value="FILTERS" @update:model-value="onFiltersChange" />
 
     <div class="panel">
+      <AppListToolbar v-model="keyword" placeholder="试卷名称" :search-width="220" />
+
       <div class="data-table-wrap">
         <table class="data-table">
           <thead>
@@ -122,8 +135,10 @@ onMounted(load)
 </template>
 
 <style scoped>
-.head-actions { display: flex; align-items: center; gap: 10px; }
-.search { width: 220px; }
+/* 搜索条件已提为列表面板的兄弟节点（AppFilterPanel 自带边框圆角），
+   工具条排进列表面板后顶部留白由它自己给，与表格左右对齐 */
+.panel > :deep(.list-toolbar) { padding: 14px 14px 0; }
+
 .mono { font-family: 'SF Mono', Menlo, monospace; font-size: 12px; }
 .confirm-text { font-size: 14px; font-weight: 600; color: var(--text); margin: 0 0 8px; }
 .confirm-note { font-size: 12.5px; color: var(--sub); line-height: 1.7; margin: 0; }

@@ -182,86 +182,91 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="panel">
+  <div class="page">
+    <!-- 搜索条件：独立面板，与下方列表分开（对齐机构端列表页布局） -->
     <AppFilterPanel :rows="FILTER_ROWS" :model-value="FILTERS" @update:model-value="onFiltersChange">
       <template #extra>
         <AppSearchInput v-model="keyword" placeholder="搜索节点名称，自动定位高亮" :width="260" />
       </template>
     </AppFilterPanel>
-    <AppListToolbar :searchable="false">
-      <template #left>
-        <button class="btn btn-ghost btn-sm" @click="expandAll">展开全部</button>
-        <button class="btn btn-ghost btn-sm" @click="collapseAll">收起全部</button>
-      </template>
-      <template #right>
-        <button class="btn btn-primary btn-sm" @click="openCreate(null)">
-          <AppIcon name="plus" :size="15" /> 新增根节点
-        </button>
-      </template>
-    </AppListToolbar>
 
-    <div class="tree-body">
-      <div v-if="rows.length === 0" class="tree-empty">暂无节点</div>
-      <div
-        v-for="row in rows"
-        :key="row.node.id"
-        class="tree-row"
-        :class="{ disabled: !row.node.enabled, hit: keyword.trim() !== '' && row.node.name.includes(keyword.trim()) }"
-        :style="{ paddingLeft: `${14 + row.depth * 26}px` }"
-      >
-        <button
-          class="chev-btn"
-          :class="{ invisible: !row.hasChildren }"
-          type="button"
-          @click="toggleCollapse(row.node.id)"
+    <div class="panel">
+      <AppListToolbar :searchable="false">
+        <template #left>
+          <button class="btn btn-ghost btn-sm" @click="expandAll">展开全部</button>
+          <button class="btn btn-ghost btn-sm" @click="collapseAll">收起全部</button>
+        </template>
+        <template #right>
+          <button class="btn btn-primary btn-sm" @click="openCreate(null)">
+            <AppIcon name="plus" :size="15" /> 新增根节点
+          </button>
+        </template>
+      </AppListToolbar>
+
+      <div class="tree-body">
+        <div v-if="rows.length === 0" class="tree-empty">暂无节点</div>
+        <div
+          v-for="row in rows"
+          :key="row.node.id"
+          class="tree-row"
+          :class="{ disabled: !row.node.enabled, hit: keyword.trim() !== '' && row.node.name.includes(keyword.trim()) }"
+          :style="{ paddingLeft: `${14 + row.depth * 26}px` }"
         >
-          <AppIcon name="chevron-right" :size="14" />
-        </button>
-        <span class="node-name">{{ row.node.name }}</span>
-        <span class="tag tag-gray">{{ row.node.subject }}</span>
-        <span v-if="row.depth >= MAX_DEPTH - 1" class="tag tag-orange">第 {{ row.depth + 1 }} 级</span>
-        <span v-if="!row.node.enabled" class="tag tag-red">已停用</span>
+          <button
+            class="chev-btn"
+            :class="{ invisible: !row.hasChildren }"
+            type="button"
+            @click="toggleCollapse(row.node.id)"
+          >
+            <AppIcon name="chevron-right" :size="14" />
+          </button>
+          <span class="node-name">{{ row.node.name }}</span>
+          <span class="tag tag-gray">{{ row.node.subject }}</span>
+          <span v-if="row.depth >= MAX_DEPTH - 1" class="tag tag-orange">第 {{ row.depth + 1 }} 级</span>
+          <span v-if="!row.node.enabled" class="tag tag-red">已停用</span>
 
-        <div class="row-ops">
-          <AppSwitch
-            :model-value="row.node.enabled"
-            @update:model-value="onToggle(row.node)"
-          />
-          <button class="mini-btn" type="button" @click="openCreate(row.node.id)">加子节点</button>
-          <button class="mini-btn" type="button" @click="openEdit(row.node)">编辑</button>
-          <button class="mini-btn danger" type="button" @click="onDelete(row.node)">删除</button>
+          <div class="row-ops">
+            <AppSwitch
+              :model-value="row.node.enabled"
+              @update:model-value="onToggle(row.node)"
+            />
+            <button class="mini-btn" type="button" @click="openCreate(row.node.id)">加子节点</button>
+            <button class="mini-btn" type="button" @click="openEdit(row.node)">编辑</button>
+            <button class="mini-btn danger" type="button" @click="onDelete(row.node)">删除</button>
+          </div>
         </div>
       </div>
-    </div>
 
-    <AppModal
-      v-if="editing"
-      :title="editing.node ? '编辑节点' : editing.parentId == null ? '新增根节点' : '新增子节点'"
-      @close="editing = null"
-    >
-      <div class="f-field">
-        <label class="f-label">所属学科<span class="req">*</span></label>
-        <select v-model="form.subject" class="f-select">
-          <option v-for="subject in formSubjects" :key="subject" :value="subject">{{ subject }}</option>
-        </select>
-      </div>
-      <div class="f-field">
-        <label class="f-label">节点名称<span class="req">*</span></label>
-        <input v-model="form.name" class="f-input" placeholder="最多 6 级，同级不建议重名" />
-      </div>
-      <p v-if="formError" class="form-err">{{ formError }}</p>
-      <template #footer>
-        <button class="btn btn-ghost btn-sm" @click="editing = null">取消</button>
-        <button class="btn btn-primary btn-sm" :disabled="saving" @click="save">
-          {{ saving ? '保存中…' : '保存' }}
-        </button>
-      </template>
-    </AppModal>
+      <AppModal
+        v-if="editing"
+        :title="editing.node ? '编辑节点' : editing.parentId == null ? '新增根节点' : '新增子节点'"
+        @close="editing = null"
+      >
+        <div class="f-field">
+          <label class="f-label">所属学科<span class="req">*</span></label>
+          <select v-model="form.subject" class="f-select">
+            <option v-for="subject in formSubjects" :key="subject" :value="subject">{{ subject }}</option>
+          </select>
+        </div>
+        <div class="f-field">
+          <label class="f-label">节点名称<span class="req">*</span></label>
+          <input v-model="form.name" class="f-input" placeholder="最多 6 级，同级不建议重名" />
+        </div>
+        <p v-if="formError" class="form-err">{{ formError }}</p>
+        <template #footer>
+          <button class="btn btn-ghost btn-sm" @click="editing = null">取消</button>
+          <button class="btn btn-primary btn-sm" :disabled="saving" @click="save">
+            {{ saving ? '保存中…' : '保存' }}
+          </button>
+        </template>
+      </AppModal>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.panel :deep(.filter-panel) { margin: 14px 14px 12px; }
+/* 筛选面板已提为列表面板的兄弟节点（自带边框圆角），工具条顶部留白由它自己给 */
+.panel > :deep(.list-toolbar) { padding: 14px 14px 0; }
 
 .tree-body { padding: 8px 10px 12px; }
 .tree-empty { text-align: center; color: var(--sub); font-size: 13px; padding: 40px 0; }

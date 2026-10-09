@@ -6,22 +6,56 @@
  * 平台铁律（BR-001）：本端只做内容资产的审核与配置，不把题目下发给具体机构
  * （那是「内容分发」模块的职责）。
  */
-import { computed, onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, PLATFORM_CONTENT_STATUS_TEXT, showToast, AppDrawer, AppModal } from '@aiteach/shared'
-import type { PlatformContentStatus, PlatformQuestion } from '@aiteach/shared'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { AppFilterPanel, AppListToolbar, AppIcon, AppPageHeader, PLATFORM_CONTENT_STATUS_TEXT, showToast, AppDrawer, AppModal } from '@aiteach/shared'
+import type { FilterRowDef, PlatformContentStatus, PlatformQuestion } from '@aiteach/shared'
 import { fetchPlatformQuestions, reviewPlatformQuestion, togglePlatformQuestion } from '@/api/content'
 
 const questions = ref<PlatformQuestion[]>([])
 const keyword = ref('')
-const subjectFilter = ref('')
-const statusFilter = ref('')
 const loading = ref(true)
+
+/* ===== 搜索条件（AppFilterPanel 面板） ===== */
+const SUBJECTS = ['数学', '语文', '英语', '物理']
+const STATUS_OPTIONS = [
+  { value: 'pending', text: '待审核' },
+  { value: 'published', text: '已上架' },
+  { value: 'rejected', text: '已驳回' },
+  { value: 'offline', text: '已下架' },
+]
+
+const FILTERS = reactive<Record<string, string[]>>({ subject: [], status: [] })
+const FILTER_ROWS: FilterRowDef[] = [
+  { key: 'subject', label: '学科', options: SUBJECTS, multiple: false },
+  {
+    key: 'status',
+    label: '状态',
+    options: STATUS_OPTIONS.map((item) => item.value),
+    /* 取值必须是接口认识的英文枚举，界面显示中文：optionLabels 只改文案不改值 */
+    optionLabels: Object.fromEntries(STATUS_OPTIONS.map((item) => [item.value, item.text])),
+    multiple: false,
+  },
+]
+
+/* 共享面板回传的是整份筛选值（覆盖式回写），逐 key 写回这份 reactive 对象本身。
+   不能交给 `v-model`：替换整个对象不是一次响应式写入，chip 既不亮也不会重新查询。 */
+function onFiltersChange(next: Record<string, string[]>) {
+  FILTERS.subject = next.subject ?? []
+  FILTERS.status = next.status ?? []
+}
+
+const subjectFilter = computed(() => FILTERS.subject[0] ?? '')
+const statusFilter = computed(() => FILTERS.status[0] ?? '')
 
 async function load() {
   loading.value = true
   questions.value = await fetchPlatformQuestions(keyword.value, subjectFilter.value, statusFilter.value)
   loading.value = false
 }
+
+/* 条件变化即重新查询（原来是点「检索」按钮 / 回车） */
+watch(FILTERS, load, { deep: true })
+watch(keyword, load)
 
 const pendingCount = computed(() => questions.value.filter((row) => row.status === 'pending').length)
 
@@ -70,31 +104,18 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <AppPageHeader desc="公共题库的检索、审核与上下架；题目通过审核后进入公共库，再由「内容分发」授权给租户使用。">
-      <template #actions>
-        <div class="head-actions">
-          <select v-model="subjectFilter" class="f-select" @change="load">
-            <option value="">全部学科</option>
-            <option v-for="subject in ['数学', '语文', '英语', '物理']" :key="subject" :value="subject">{{ subject }}</option>
-          </select>
-          <select v-model="statusFilter" class="f-select" @change="load">
-            <option value="">全部状态</option>
-            <option value="pending">待审核</option>
-            <option value="published">已上架</option>
-            <option value="rejected">已驳回</option>
-            <option value="offline">已下架</option>
-          </select>
-          <input v-model="keyword" class="f-input search" placeholder="题干 / 来源关键词" @keyup.enter="load" />
-          <button class="btn btn-primary" @click="load">检索</button>
-        </div>
-      </template>
-    </AppPageHeader>
+    <AppPageHeader desc="公共题库的检索、审核与上下架；题目通过审核后进入公共库，再由「内容分发」授权给租户使用。" />
+
+    <!-- 搜索条件：独立面板，与下方列表分开（对齐机构端列表页布局） -->
+    <AppFilterPanel :rows="FILTER_ROWS" :model-value="FILTERS" @update:model-value="onFiltersChange" />
 
     <div v-if="pendingCount" class="notice-bar">
       <AppIcon name="warning" :size="15" /> 当前有 <b>{{ pendingCount }}</b> 道题待审核，通过后进入公共库。
     </div>
 
     <div class="panel">
+      <AppListToolbar v-model="keyword" placeholder="题干 / 来源关键词" :search-width="220" />
+
       <div class="data-table-wrap">
         <table class="data-table">
           <thead>
@@ -203,8 +224,9 @@ onMounted(load)
 </template>
 
 <style scoped>
-.head-actions { display: flex; align-items: center; gap: 10px; }
-.search { width: 220px; }
+/* 搜索条件已提为列表面板的兄弟节点（AppFilterPanel 自带边框圆角），
+   工具条排进列表面板后顶部留白由它自己给，与表格左右对齐 */
+.panel > :deep(.list-toolbar) { padding: 14px 14px 0; }
 .notice-bar {
   display: flex; align-items: center; gap: 8px; margin-bottom: 14px; padding: 10px 14px;
   background: #fff7ed; border: 1px solid #fed7aa; border-radius: 10px; font-size: 13px; color: #92600a;

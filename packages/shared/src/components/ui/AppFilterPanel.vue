@@ -7,6 +7,9 @@
  * 一行 `<select>` 下拉。这里统一成共享组件。
  *
  * 行定义用 `options` 直接给候选值；候选项来自字典时由父组件先查好再传进来。
+ *
+ * 一行条件不一定是 chip（比如日期区间），这时把该行标成 `custom`：面板不画它的控件，
+ * 由宿主用 `#extra` 插槽画，但汇总、清空照旧归面板管。详见 `FilterRowDef.custom`。
  */
 import { computed, ref } from 'vue'
 import AppIcon from '../AppIcon.vue'
@@ -39,12 +42,19 @@ const COLLAPSE_MAX = 18
 
 const moreRows = computed(() => props.moreRows ?? [])
 
+/**
+ * 只有这部分行会在面板里画 chip。`custom` 行的控件由宿主的 `#extra` 插槽渲染，
+ * 这里再画一遍就是一行空 chip。但它们仍然要进 `activeRows`（折叠摘要）和 `clearAll`（清空）。
+ */
+const chipsRows = computed(() => props.rows.filter((row) => !row.custom))
+const allRows = computed(() => [...props.rows, ...moreRows.value])
+
 function selectedOf(key: string): string[] {
   return props.modelValue[key] ?? []
 }
 
 const activeRows = computed(() =>
-  [...props.rows, ...moreRows.value]
+  allRows.value
     .filter((row) => selectedOf(row.key).length > 0)
     .map((row) => {
       // 摘要跟着 optionLabels 走，否则展开态写着「（已停用）」、折叠态却只剩原值
@@ -64,7 +74,7 @@ function onRowChange(key: string, value: string[]) {
 
 function clearAll() {
   const next: Record<string, string[]> = {}
-  for (const row of [...props.rows, ...moreRows.value]) next[row.key] = []
+  for (const row of allRows.value) next[row.key] = []
   emit('update:modelValue', next)
 }
 </script>
@@ -93,7 +103,7 @@ function clearAll() {
 
     <div v-if="open" class="fp-body">
       <AppFilterChips
-        v-for="row in rows"
+        v-for="row in chipsRows"
         :key="row.key"
         :label="row.label"
         :options="row.options"

@@ -107,7 +107,7 @@ onMounted(load)
 </script>
 
 <template>
-  <div>
+  <div class="page">
     <AppPageHeader desc="版本与学科联动：同一学科下版本名不可重复">
       <template #actions>
         <button class="btn btn-primary btn-sm" @click="openCreate">
@@ -116,9 +116,10 @@ onMounted(load)
       </template>
     </AppPageHeader>
 
-    <div class="panel">
-      <AppFilterPanel :rows="FILTER_ROWS" :model-value="FILTERS" @update:model-value="onFiltersChange" />
+    <!-- 搜索条件：独立面板，与下方列表分开（对齐机构端列表页布局） -->
+    <AppFilterPanel :rows="FILTER_ROWS" :model-value="FILTERS" @update:model-value="onFiltersChange" />
 
+    <div class="panel">
       <div class="data-table-wrap">
         <table class="data-table">
           <thead>
@@ -193,7 +194,9 @@ onMounted(load)
 </template>
 
 <style scoped>
-.panel :deep(.filter-panel) { margin: 14px 14px 12px; }
+/* 筛选面板已提为 .panel 的兄弟节点（自带边框圆角），不再需要内缩边距。
+   同时表格成为 .panel 的首个子元素，首行表头圆角由 main.css 的
+   `.panel > .data-table-wrap:first-child` 规则负责。 */
 
 .cover {
   width: 32px;

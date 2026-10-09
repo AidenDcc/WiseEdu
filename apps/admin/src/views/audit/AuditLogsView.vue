@@ -91,25 +91,28 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="panel">
-    <div class="tabs-wrap">
-      <AppTabs :tabs="TABS" :model-value="activeTab" @update:model-value="switchTab" />
-    </div>
-    <div class="tabs-tools">
-      <AppListToolbar :searchable="false">
-        <template #left>
-          <span class="tab-hint">{{ currentHint }}</span>
-        </template>
-        <template #right>
-          <button class="btn btn-ghost btn-sm" @click="onExport">
-            <AppIcon name="download" :size="14" /> 导出
-          </button>
-        </template>
-      </AppListToolbar>
+  <div class="page">
+    <!-- 页签外壳：页签与「与页签无关」的导出工具条，自成一块面板 -->
+    <div class="panel">
+      <div class="tabs-wrap">
+        <AppTabs :tabs="TABS" :model-value="activeTab" @update:model-value="switchTab" />
+      </div>
+      <div class="tabs-tools">
+        <AppListToolbar :searchable="false">
+          <template #left>
+            <span class="tab-hint">{{ currentHint }}</span>
+          </template>
+          <template #right>
+            <button class="btn btn-ghost btn-sm" @click="onExport">
+              <AppIcon name="download" :size="14" /> 导出
+            </button>
+          </template>
+        </AppListToolbar>
+      </div>
     </div>
 
-    <!-- 登录日志 -->
-    <div v-if="activeTab === 'login'" class="tab-body">
+    <!-- 登录日志：只按关键词检索，没有独立的条件面板 -->
+    <div v-if="activeTab === 'login'" class="panel">
       <AppListToolbar v-model="loginKeyword" placeholder="账号 / IP 检索" :search-width="220" />
       <div class="data-table-wrap">
         <table class="data-table">
@@ -144,50 +147,54 @@ onMounted(load)
           </tbody>
         </table>
       </div>
+      <AppPagination :total="currentTotal" v-model:page="page" :page-size="pageSize" />
     </div>
 
-    <!-- 操作日志 -->
-    <div v-else-if="activeTab === 'operation'" class="tab-body">
+    <!-- 操作日志：筛选条件独立成面板，与列表分开 -->
+    <template v-else-if="activeTab === 'operation'">
       <AppFilterPanel :rows="OP_FILTER_ROWS" :model-value="opFilter" @update:model-value="onOpFiltersChange" />
-      <div class="data-table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>时间</th>
-              <th>操作账号</th>
-              <th>模块</th>
-              <th>动作</th>
-              <th>对象</th>
-              <th>结果</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-if="loading && operationLogs.length === 0">
-              <td colspan="6" class="empty-row">加载中…</td>
-            </tr>
-            <tr v-else-if="pageOf(filteredOps).length === 0">
-              <td colspan="6" class="empty-row">无匹配记录</td>
-            </tr>
-            <template v-else>
-              <tr v-for="row in pageOf(filteredOps)" :key="row.id">
-                <td class="time-cell">{{ row.time }}</td>
-                <td class="cell-strong">{{ row.account }}</td>
-                <td><span class="tag tag-gray">{{ row.module }}</span></td>
-                <td>{{ row.action }}</td>
-                <td>{{ row.target }}</td>
-                <td>
-                  <span v-if="row.ok" class="tag tag-green">成功</span>
-                  <span v-else class="tag tag-red">失败</span>
-                </td>
+      <div class="panel">
+        <div class="data-table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>操作账号</th>
+                <th>模块</th>
+                <th>动作</th>
+                <th>对象</th>
+                <th>结果</th>
               </tr>
-            </template>
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              <tr v-if="loading && operationLogs.length === 0">
+                <td colspan="6" class="empty-row">加载中…</td>
+              </tr>
+              <tr v-else-if="pageOf(filteredOps).length === 0">
+                <td colspan="6" class="empty-row">无匹配记录</td>
+              </tr>
+              <template v-else>
+                <tr v-for="row in pageOf(filteredOps)" :key="row.id">
+                  <td class="time-cell">{{ row.time }}</td>
+                  <td class="cell-strong">{{ row.account }}</td>
+                  <td><span class="tag tag-gray">{{ row.module }}</span></td>
+                  <td>{{ row.action }}</td>
+                  <td>{{ row.target }}</td>
+                  <td>
+                    <span v-if="row.ok" class="tag tag-green">成功</span>
+                    <span v-else class="tag tag-red">失败</span>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+        <AppPagination :total="currentTotal" v-model:page="page" :page-size="pageSize" />
       </div>
-    </div>
+    </template>
 
-    <!-- 异常日志 -->
-    <div v-else class="tab-body">
+    <!-- 异常日志：无筛选条件，只有列表 -->
+    <div v-else class="panel">
       <div class="data-table-wrap">
         <table class="data-table">
           <thead>
@@ -220,9 +227,8 @@ onMounted(load)
           </tbody>
         </table>
       </div>
+      <AppPagination :total="currentTotal" v-model:page="page" :page-size="pageSize" />
     </div>
-
-    <AppPagination :total="currentTotal" v-model:page="page" :page-size="pageSize" />
 
     <!-- 堆栈详情 -->
     <AppModal v-if="stackOpen" :title="`异常堆栈 · ${stackOpen.level}`" :width="640" @close="stackOpen = null">
@@ -236,8 +242,8 @@ onMounted(load)
 .tabs-wrap { padding: 0 16px; }
 .tabs-tools { padding: 0 16px; }
 .tab-hint { font-size: 12.5px; color: var(--sub); }
-.tab-body { padding: 0 16px; }
-.tab-body :deep(.filter-panel) { margin-bottom: 12px; }
+/* 筛选面板已提为列表面板的兄弟节点（自带边框圆角），工具条顶部留白由它自己给 */
+.panel > :deep(.list-toolbar) { padding: 14px 14px 0; }
 
 .time-cell { font-size: 12.5px; color: var(--sub); white-space: nowrap; }
 .ip-chip {

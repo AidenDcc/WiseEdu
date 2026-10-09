@@ -79,7 +79,7 @@ onMounted(load)
 </script>
 
 <template>
-  <div>
+  <div class="page">
     <!-- 统计条（FR-PT-028） -->
     <div class="stat-strip">
       <div class="stat-card">
@@ -104,12 +104,14 @@ onMounted(load)
       </div>
     </div>
 
+    <!-- 搜索条件：独立面板，与下方列表分开（对齐机构端列表页布局） -->
+    <AppFilterPanel :rows="FILTER_ROWS" :model-value="filters" @update:model-value="onFiltersChange">
+      <template #extra>
+        <AppSearchInput v-model="keyword" placeholder="机构（脱敏名）" :width="200" />
+      </template>
+    </AppFilterPanel>
+
     <div class="panel">
-      <AppFilterPanel :rows="FILTER_ROWS" :model-value="filters" @update:model-value="onFiltersChange">
-        <template #extra>
-          <AppSearchInput v-model="keyword" placeholder="机构（脱敏名）" :width="200" />
-        </template>
-      </AppFilterPanel>
       <AppListToolbar :searchable="false">
         <template #right>
           <button class="btn btn-ghost btn-sm" @click="onExport">
@@ -177,11 +179,11 @@ onMounted(load)
 </template>
 
 <style scoped>
+/* 纵向节奏交给 .page 的 gap，这里不再自带下边距，否则与 gap 叠加成双倍间距 */
 .stat-strip {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 14px;
-  margin-bottom: 14px;
 }
 .stat-card {
   background: #fff;
@@ -197,8 +199,8 @@ onMounted(load)
 .stat-num.bad { color: var(--danger); }
 .stat-label { font-size: 12px; color: var(--sub); }
 
-.panel > :deep(.filter-panel) { margin: 14px 14px 0; }
-.panel > :deep(.list-toolbar) { padding: 0 14px; }
+/* 筛选面板已是列表面板的兄弟节点（自带边框圆角），工具条顶部留白由它自己给 */
+.panel > :deep(.list-toolbar) { padding: 14px 14px 0; }
 
 .time-cell { font-size: 12.5px; color: var(--sub); white-space: nowrap; }
 .fail-row td { background: rgba(214, 69, 69, 0.05); }
