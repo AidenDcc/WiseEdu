@@ -1,8 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppFilterPanel, AppIcon, AppListToolbar, hueColor, showToast, ApiError, AppModal, appConfirm } from '@aiteach/shared'
-import type { FilterRowDef, PackageRecord, TenantRecord } from '@aiteach/shared'
+import {
+  AppFilterPanel,
+  AppIcon,
+  AppListToolbar,
+  CERT_CATEGORIES,
+  CERT_CATEGORY_TEXT,
+  hueColor,
+  showToast,
+  ApiError,
+  AppModal,
+  appConfirm,
+} from '@aiteach/shared'
+import type { CertCategory, CertFile, FilterRowDef, PackageRecord, TenantRecord } from '@aiteach/shared'
 import AppPagination from '@/components/ui/AppPagination.vue'
 import {
   activateTenant,
@@ -14,6 +25,7 @@ import {
   fetchTenants,
   renewTenant,
 } from '@/api/tenant'
+import { REGION_OPTIONS, regionText } from '@/utils/region'
 
 const router = useRouter()
 
@@ -28,6 +40,12 @@ const DURATIONS = [
 
 const FILTERS = reactive<Record<string, string[]>>({ status: [], package: [], orgType: [] })
 
+/* 到期时间是本页唯一一个「不是 chip」的条件：控件是 el-date-picker，由 #extra 插槽画。
+   行定义里仍然登记它（`custom: true`），面板据此把它算进折叠摘要、也据此清空它 ——
+   否则折叠起来就看不见这个条件，也永远清不掉。 */
+const EXPIRE_KEY = 'expire'
+const EXPIRE_LABEL = '到期时间'
+
 /* AppFilterPanel 回传整份筛选值（覆盖式回写），逐 key 写回这份 reactive 对象本身。
    不能交给 `v-model`：它会替换掉整个对象，而替换引用不是一次响应式写入 —— 点了 chip
    既不亮选中态也不重新筛选。机构端 CollabView 里有同款说明。 */
@@ -35,10 +53,21 @@ function onFiltersChange(next: Record<string, string[]>) {
   FILTERS.status = next.status ?? []
   FILTERS.package = next.package ?? []
   FILTERS.orgType = next.orgType ?? []
+  /* expire 这一行没有 chip，面板只可能在「清空」时给出空数组；区间本身由 expireRange 承载 */
+  if (!next[EXPIRE_KEY]?.length) expireRange.value = null
 }
 const keyword = ref('')
-const expireFrom = ref('')
-const expireTo = ref('')
+/* 到期区间：[起始, 结束]，YYYY-MM-DD。el-date-picker 的 daterange 用 value-format
+   直接吐字符串，省掉一层 dayjs 来回转换，接口拿到的就是它要的格式。 */
+const expireRange = ref<[string, string] | null>(null)
+
+/* 交给面板的筛选值：在 FILTERS 之上补一个只读的 expire 项，值就是折叠时要显示的那行字。
+   单向派生（不是第二份状态）—— 区间仍只存在 expireRange 里，这里只是把它的展示文案
+   翻译成面板认识的样子。 */
+const panelValue = computed<Record<string, string[]>>(() => ({
+  ...FILTERS,
+  [EXPIRE_KEY]: expireRange.value ? [`${expireRange.value[0]} ~ ${expireRange.value[1]}`] : [],
+}))
 const page = ref(1)
 const pageSize = 10
 const total = ref(0)
@@ -58,6 +87,7 @@ const FILTER_ROWS = computed<FilterRowDef[]>(() => [
   { key: 'status', label: '状态', options: Object.values(STATUS_META).map((meta) => meta.text), multiple: false },
   { key: 'package', label: '套餐', options: packages.value.map((pkg) => pkg.name), multiple: false },
   { key: 'orgType', label: '类型', options: ORG_TYPES, multiple: false },
+  { key: EXPIRE_KEY, label: EXPIRE_LABEL, options: [], custom: true },
 ])
 
 /** chip 文案 → 接口参数（status 为 1~4 的数字串） */
@@ -81,8 +111,8 @@ async function load() {
       packageId: packageParam(),
       orgType: FILTERS.orgType[0] ?? '',
       keyword: keyword.value.trim(),
-      expireFrom: expireFrom.value,
-      expireTo: expireTo.value,
+      expireFrom: expireRange.value?.[0] ?? '',
+      expireTo: expireRange.value?.[1] ?? '',
       page: page.value,
       pageSize,
     })
@@ -98,19 +128,10 @@ function search() {
   load()
 }
 
-function resetFilters() {
-  FILTERS.status = []
-  FILTERS.package = []
-  FILTERS.orgType = []
-  keyword.value = ''
-  expireFrom.value = ''
-  expireTo.value = ''
-  search()
-}
-
-/* 筛选条件 / 关键词 / 到期区间变化即重新查询（原来是点「查询」按钮） */
-watch(FILTERS, search, { deep: true })
-watch([keyword, expireFrom, expireTo], search)
+/* 筛选条件 / 关键词 / 到期区间变化即重新查询（原来是点「查询」按钮）。
+   三个源合成一个 watcher：面板的「清空」会同时改 FILTERS 和 expireRange，
+   拆成两个 watcher 就是两次内容相同的请求。 */
+watch([FILTERS, keyword, expireRange], search, { deep: true })
 
 function pkgName(id: number) {
   return packages.value.find((pkg) => pkg.id === id)?.name ?? `套餐 ${id}`
@@ -276,12 +297,33 @@ const createForm = reactive({
   contact: '',
   phone: '',
   email: '',
+  /* 机构地址拆两段：`region` 是省市区（级联选择器给的路径数组），`address` 是门牌级详细地址。
+     提交时前者拼成一行字进 city，后者原样进 address —— 两个字段后端是分开存的。 */
+  region: [] as string[],
+  address: '',
   intro: '',
 })
-const createCerts = ref<Array<{ name: string; type: 'pdf' | 'img' }>>([])
+
+/** 资质材料按三类分开收集，提交时拍平成一个数组（接口只认一个 certFiles） */
+const createCerts = reactive<Record<CertCategory, CertFile[]>>({ license: [], permit: [], legal: [] })
+
+/** 每个分类的补充说明，写在标题下方 */
+const CERT_HINTS: Record<CertCategory, string> = {
+  license: '营业执照副本彩色扫描件',
+  permit: '办学许可证 / 培训资质许可',
+  legal: '法人身份证正反面、授权委托书',
+}
+const CERT_ACCEPT = '.pdf,.jpg,.jpeg,.png'
+
+/* 三个分组共用一个隐藏 input：点哪一组的上传按钮就把该组记在 pickTarget 上，
+   input 的 change 回调据此知道往哪个桶里放。每组建一个 input 也行，但那样要么写三个
+   ref、要么在 v-for 里收 ref 数组，都不如一个变量直接。 */
+const pickTarget = ref<CertCategory | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const createError = ref('')
 const creating = ref(false)
+
+const allCerts = computed(() => CERT_CATEGORIES.flatMap((category) => createCerts[category]))
 
 function openCreate() {
   createOpen.value = true
@@ -292,27 +334,40 @@ function openCreate() {
     contact: '',
     phone: '',
     email: '',
+    region: [],
+    address: '',
     intro: '',
   })
-  createCerts.value = []
+  for (const category of CERT_CATEGORIES) createCerts[category] = []
+  pickTarget.value = null
   createError.value = ''
+}
+
+function pickFiles(category: CertCategory) {
+  pickTarget.value = category
+  fileInput.value?.click()
 }
 
 function onPickFiles(event: Event) {
   const input = event.target as HTMLInputElement
-  const files = Array.from(input.files ?? [])
-  for (const file of files) {
-    if (createCerts.value.some((item) => item.name === file.name)) continue
-    createCerts.value.push({
-      name: file.name,
-      type: file.name.toLowerCase().endsWith('.pdf') ? 'pdf' : 'img',
-    })
+  const category = pickTarget.value
+  if (category) {
+    const bucket = createCerts[category]
+    for (const file of Array.from(input.files ?? [])) {
+      if (bucket.some((item) => item.name === file.name)) continue
+      bucket.push({
+        name: file.name,
+        type: file.name.toLowerCase().endsWith('.pdf') ? 'pdf' : 'img',
+        category,
+      })
+    }
   }
   input.value = ''
+  pickTarget.value = null
 }
 
-function removeCert(index: number) {
-  createCerts.value.splice(index, 1)
+function removeCert(category: CertCategory, index: number) {
+  createCerts[category].splice(index, 1)
 }
 
 function toggleCreateStage(stage: string) {
@@ -338,7 +393,7 @@ async function submitCreate() {
     createError.value = '请输入 11 位联系电话'
     return
   }
-  if (createCerts.value.length === 0) {
+  if (allCerts.value.length === 0) {
     createError.value = '请至少上传一份资质材料'
     return
   }
@@ -351,8 +406,10 @@ async function submitCreate() {
       contact: createForm.contact.trim(),
       phone: createForm.phone.trim(),
       email: createForm.email.trim() || undefined,
+      city: regionText(createForm.region) || undefined,
+      address: createForm.address.trim() || undefined,
       intro: createForm.intro.trim() || undefined,
-      certFiles: [...createCerts.value],
+      certFiles: allCerts.value,
     })
     createOpen.value = false
     showToast(`已提交入驻审核（申请编号 ${apply.applyNo}），请在「入驻审核」中处理`, 'success')
@@ -365,24 +422,29 @@ async function submitCreate() {
 </script>
 
 <template>
-  <div>
-    <div class="panel">
-      <!-- 筛选栏 -->
-      <AppFilterPanel :rows="FILTER_ROWS" :model-value="FILTERS" @update:model-value="onFiltersChange">
-        <template #extra>
-          <div class="range-row">
-            <span class="range-label">到期时间</span>
-            <div class="range-box">
-              <input v-model="expireFrom" class="f-input" type="date" />
-              <span class="range-sep">至</span>
-              <input v-model="expireTo" class="f-input" type="date" />
-            </div>
+  <div class="page">
+    <!-- 搜索条件：独立面板，与下方列表分开（对齐机构端列表页布局） -->
+    <AppFilterPanel :rows="FILTER_ROWS" :model-value="panelValue" @update:model-value="onFiltersChange">
+      <template #extra>
+        <div class="range-row">
+          <span class="range-label">{{ EXPIRE_LABEL }}</span>
+          <div class="range-picker">
+            <el-date-picker
+              v-model="expireRange"
+              type="daterange"
+              value-format="YYYY-MM-DD"
+              range-separator="至"
+              start-placeholder="开始日期"
+              end-placeholder="结束日期"
+            />
           </div>
-        </template>
-      </AppFilterPanel>
+        </div>
+      </template>
+    </AppFilterPanel>
+
+    <div class="panel">
       <AppListToolbar v-model="keyword" placeholder="机构名称 / 编号" :search-width="220">
         <template #right>
-          <button class="btn btn-ghost btn-sm" @click="resetFilters">重置</button>
           <button class="btn btn-primary btn-sm" @click="openCreate">
             <AppIcon name="plus" :size="15" /> 新增机构
           </button>
@@ -611,7 +673,7 @@ async function submitCreate() {
     <AppModal
       v-if="createOpen"
       title="新增机构"
-      :width="520"
+      :width="780"
       :close-on-mask="false"
       @close="createOpen = false"
     >
@@ -642,6 +704,24 @@ async function submitCreate() {
           <label class="f-label">电子邮箱</label>
           <input v-model="createForm.email" class="f-input" placeholder="选填" />
         </div>
+        <!-- 机构地址拆两段：左边省市区级联，右边门牌级详细地址 -->
+        <div class="f-field">
+          <label class="f-label">所在地区</label>
+          <div class="region-picker">
+            <el-cascader
+              v-model="createForm.region"
+              :options="REGION_OPTIONS"
+              :props="{ expandTrigger: 'hover' }"
+              placeholder="省 / 市 / 区"
+              clearable
+              filterable
+            />
+          </div>
+        </div>
+        <div class="f-field">
+          <label class="f-label">详细地址</label>
+          <input v-model="createForm.address" class="f-input" placeholder="选填，如：珞喻路 152 号 3 号楼" />
+        </div>
         <div class="f-field span-2">
           <label class="f-label">覆盖学段</label>
           <div class="stage-row">
@@ -663,26 +743,36 @@ async function submitCreate() {
         </div>
         <div class="f-field span-2">
           <label class="f-label">资质材料<span class="req">*</span></label>
-          <button class="upload-zone" type="button" @click="fileInput?.click()">
-            <AppIcon name="upload" :size="18" />
-            <span>点击上传营业执照、办学许可证等（支持 PDF / JPG / PNG，可多选）</span>
-          </button>
+          <div class="cert-groups">
+            <div v-for="category in CERT_CATEGORIES" :key="category" class="cert-group">
+              <div class="cert-group-head">
+                <b class="cert-group-title">{{ CERT_CATEGORY_TEXT[category] }}</b>
+                <span class="cert-group-hint">{{ CERT_HINTS[category] }}</span>
+              </div>
+              <button class="upload-zone" type="button" @click="pickFiles(category)">
+                <AppIcon name="upload" :size="17" />
+                <span>点击上传</span>
+              </button>
+              <ul v-if="createCerts[category].length" class="picked-list">
+                <li v-for="(file, index) in createCerts[category]" :key="file.name">
+                  <AppIcon :name="file.type === 'pdf' ? 'file' : 'image'" :size="16" />
+                  <span class="picked-name">{{ file.name }}</span>
+                  <button class="mini-btn danger" type="button" @click="removeCert(category, index)">
+                    删除
+                  </button>
+                </li>
+              </ul>
+            </div>
+          </div>
           <input
             ref="fileInput"
             type="file"
             multiple
-            accept=".pdf,.jpg,.jpeg,.png"
+            :accept="CERT_ACCEPT"
             style="display: none"
             @change="onPickFiles"
           />
-          <ul v-if="createCerts.length" class="picked-list">
-            <li v-for="(file, index) in createCerts" :key="file.name">
-              <AppIcon :name="file.type === 'pdf' ? 'file' : 'image'" :size="16" />
-              <span class="picked-name">{{ file.name }}</span>
-              <button class="mini-btn danger" type="button" @click="removeCert(index)">删除</button>
-            </li>
-          </ul>
-          <p class="f-hint">演示环境仅登记文件名用于审核展示，不实际上传文件内容。</p>
+          <p class="f-hint">支持 PDF / JPG / PNG，可多选；演示环境仅登记文件名用于审核展示，不实际上传文件内容。</p>
         </div>
       </div>
       <p v-if="createError" class="err">{{ createError }}</p>
@@ -697,14 +787,24 @@ async function submitCreate() {
 </template>
 
 <style scoped>
-.panel > :deep(.filter-panel) { margin: 14px 14px 0; }
-.panel > :deep(.list-toolbar) { padding: 0 14px; }
+/* 筛选面板已是列表面板的兄弟节点（自带边框圆角），工具条顶部留白由它自己给 */
+.panel > :deep(.list-toolbar) { padding: 14px 14px 0; }
 
+/* 到期区间：与上方 chip 行同缩进（标签列宽 58px 对齐 AppFilterChips 的行首标签） */
 .range-row { display: flex; align-items: center; gap: 12px; }
 .range-label { width: 58px; flex-shrink: 0; font-size: 12.5px; font-weight: 600; color: var(--sub); }
-.range-box { display: flex; align-items: center; gap: 6px; }
-.range-box .f-input { width: 138px; height: var(--ctrl-h); }
-.range-sep { font-size: 12.5px; color: var(--sub); }
+
+/* 日期区间宽度：组件库给 daterange 的默认宽度是 350px，比这行的 chip 宽出一大截。
+   两处坑叠在一起，只能这么写：
+   1) 宽度值 `--el-date-editor-daterange-width: 350px` 声明在 `.el-date-editor` 自身上，
+      从祖先元素覆盖这个变量传不下去；
+   2) 标签上的内联 style / class 也压不住它 —— picker 的 $attrs 一路传到内部的 ElPopper，
+      而 ElPopper 声明了 inheritAttrs: false 且从不读 $attrs，属性在这里被整个丢掉。
+   于是改成「外层容器定宽 + 提高权重选中真正的控件」：外层类名带 scoped 的 data-v 属性，
+   再加两个类名，权重 0,4,0 稳过组件库的 0,2,0（不必依赖样式注入顺序）。
+   240px 是「够显示两个完整日期、又不比 chip 行显眼」的宽度。 */
+.range-picker { width: 240px; flex-shrink: 0; }
+.range-picker :deep(.el-date-editor.el-range-editor.el-input__wrapper) { width: 100%; }
 
 .org-cell { display: flex; align-items: center; gap: 10px; }
 .org-logo {
@@ -796,6 +896,24 @@ async function submitCreate() {
   gap: 0 16px;
 }
 .create-grid .span-2 { grid-column: span 2; }
+
+/* 省市区级联（Element Plus）。它的外观全由自己的令牌算出来（默认高 32px、圆角 4px、
+   边框是 1px 的 inset 阴影、主色是组件库自己的蓝），摆在 .f-input 旁边一眼就能看出是外来户。
+   这里把尺寸与配色这几颗令牌换成设计系统的值 —— 令牌都是声明在 `.el-input` / `.el-input__wrapper`
+   元素**自身**上的 var() 引用，从外层容器赋值传得下去，所以不用像日期选择器那样硬压权重
+   （那个宽度坑是「值写死在元素自身上」，两回事，见上面 .range-picker 的注释）。 */
+.region-picker {
+  width: 100%;
+  --el-component-size: 38px; /* 与 .f-input 同高（其中内层 36px + 上下各 1px 内边距） */
+  --el-border-radius-base: 10px;
+  --el-font-size-base: 13.5px;
+  --el-input-border-color: var(--border);
+  --el-input-hover-border-color: #c9d2e6;
+  --el-input-placeholder-color: var(--sub);
+  --el-input-icon-color: var(--sub);
+  --el-color-primary: var(--brand); /* 聚焦描边（is-focus 的 box-shadow 用它） */
+}
+.region-picker :deep(.el-cascader) { width: 100%; line-height: normal; }
 .stage-row { display: flex; gap: 8px; }
 .stage-btn {
   height: 36px;
@@ -813,13 +931,20 @@ async function submitCreate() {
   background: var(--brand-soft);
   color: var(--brand);
 }
+/* 资质材料三分类并排：弹窗加宽后横向排开，比竖着堆三块省一半高度 */
+.cert-groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.cert-group { min-width: 0; }
+.cert-group-head { margin-bottom: 7px; }
+.cert-group-title { font-size: 13px; color: var(--ink); }
+.cert-group-hint { display: block; font-size: 11.5px; color: var(--sub); margin-top: 2px; }
+
 .upload-zone {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 9px;
   width: 100%;
-  height: 84px;
+  height: 76px;
   border: 1.5px dashed #c9d2e6;
   border-radius: 11px;
   background: #fafbfd;

@@ -95,6 +95,20 @@ const form = reactive({
 const formError = ref('')
 const saving = ref(false)
 
+/**
+ * el-date-picker 的 daterange 只认 `[起始, 结束]` 一个数组，而表单字段、保存参数、
+ * 同学期重叠校验用的都是 `dateFrom` / `dateTo` 两个独立字符串。
+ * 这里用一个可写 computed 做双向映射，两边就都不用改：空值统一成 `null`
+ * （半截区间在 daterange 里是非法状态，落回未选更诚实）。
+ */
+const termRange = computed<string[] | null>({
+  get: () => (form.dateFrom && form.dateTo ? [form.dateFrom, form.dateTo] : null),
+  set: (value) => {
+    form.dateFrom = value?.[0] ?? ''
+    form.dateTo = value?.[1] ?? ''
+  },
+})
+
 /** 适用学科候选项取自学科字典，与机构端下拉同一份口径 */
 const subjectOptions = ref<string[]>([])
 
@@ -389,11 +403,14 @@ onMounted(load)
       </div>
       <div v-if="activeType === 'term'" class="f-field">
         <label class="f-label">起止日期<span class="req">*</span></label>
-        <div class="date-row">
-          <input v-model="form.dateFrom" class="f-input" type="date" />
-          <span class="range-sep">至</span>
-          <input v-model="form.dateTo" class="f-input" type="date" />
-        </div>
+        <el-date-picker
+          v-model="termRange"
+          type="daterange"
+          value-format="YYYY-MM-DD"
+          range-separator="至"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+        />
         <p class="f-hint">同学年起止日期不可与已有学期交叉重叠。</p>
       </div>
       <div v-if="activeType === 'questionType'" class="f-field">
@@ -464,9 +481,13 @@ onMounted(load)
   color: #4b5568;
 }
 .ref-zero { color: var(--sub); }
-.date-row { display: flex; align-items: center; gap: 8px; }
-.date-row .f-input { flex: 1; }
-.range-sep { font-size: 12.5px; color: var(--sub); }
+/* 起止日期改用 el-date-picker（daterange）。宽度不能写在标签的 style 上：picker 的
+   $attrs 最终落到内部的 ElPopper，而它声明了 inheritAttrs: false 且从不读 $attrs，
+   内联 width 会被整个丢掉，控件就按组件库默认的 350px 渲染。只能从外面用 :deep() 选中
+   真正的 .el-date-editor 元素（类名写全是为了压过组件库 .el-date-editor.el-input__wrapper
+   那条 350px 的宽度规则，且不依赖样式注入顺序）。
+   原来的 .date-row / .range-sep 已无调用方，删除 */
+.f-field :deep(.el-date-editor.el-range-editor.el-input__wrapper) { width: 100%; }
 .warn-hint { color: var(--warn); }
 .subject-checks { display: flex; flex-wrap: wrap; gap: 6px 16px; }
 .check-item { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }

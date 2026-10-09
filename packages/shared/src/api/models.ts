@@ -77,6 +77,27 @@ export interface PageResult<T> {
 
 export type ApplyStatus = '待审核' | '已通过' | '已驳回'
 
+/**
+ * 资质材料分类。新增机构时按这三类分组上传，申请审核与机构详情里也按这三类分组展示。
+ * 数组顺序即界面顺序（营业执照 → 许可证 → 法人信息），所以用数组常量而不是枚举。
+ */
+export type CertCategory = 'license' | 'permit' | 'legal'
+
+export const CERT_CATEGORIES: CertCategory[] = ['license', 'permit', 'legal']
+
+export const CERT_CATEGORY_TEXT: Record<CertCategory, string> = {
+  license: '营业执照',
+  permit: '许可证',
+  legal: '法人信息',
+}
+
+/** 资质材料。演示环境只登记文件名与分类，不保存文件内容本身 */
+export interface CertFile {
+  name: string
+  type: 'pdf' | 'img'
+  category: CertCategory
+}
+
 export interface TenantApply {
   id: number
   applyNo: string
@@ -86,8 +107,12 @@ export interface TenantApply {
   contact: string
   phone: string
   email?: string
+  /** 所在地区（省市区连着写，如「湖北省武汉市江岸区」）；审核通过后原样写进租户的 `city` */
+  city?: string
+  /** 机构详细地址（与 `city` 分开：city 是所在地区，这里是门牌级地址） */
+  address?: string
   intro?: string
-  certFiles: Array<{ name: string; type: 'pdf' | 'img' }>
+  certFiles: CertFile[]
   submittedAt: string
   waitingHours: number
   status: ApplyStatus
@@ -137,9 +162,11 @@ export interface TenantRecord {
   contact: string
   phone: string
   city: string
+  /** 机构详细地址（门牌级），与 `city`（所在城市）分开两份数据 */
+  address: string
   intro: string
   /** 机构资质档案（入驻时提交，随租户留存） */
-  certFiles: Array<{ name: string; type: 'pdf' | 'img' }>
+  certFiles: CertFile[]
   isolationType: 1 | 2
   storageRegion: string
   disableReason?: string

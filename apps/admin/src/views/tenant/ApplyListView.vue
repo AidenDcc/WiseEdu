@@ -1,6 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { AppFilterPanel, AppIcon, AppListToolbar, showToast, ApiError, AppDrawer, AppModal } from '@aiteach/shared'
+import {
+  AppDrawer,
+  AppFilterPanel,
+  AppIcon,
+  AppListToolbar,
+  AppModal,
+  ApiError,
+  CERT_CATEGORIES,
+  CERT_CATEGORY_TEXT,
+  showToast,
+} from '@aiteach/shared'
 import type { FilterRowDef, PackageRecord, TenantApply } from '@aiteach/shared'
 import { approveApply, fetchApplies, fetchPackages, rejectApply } from '@/api/tenant'
 
@@ -146,6 +156,16 @@ function previewFile(name: string) {
   showToast(`演示环境：在线预览「${name}」`, 'info')
 }
 
+/* 资质材料按提交时的分类分组（营业执照 / 许可证 / 法人信息），空分类不占位置 */
+const certGroups = computed(() => {
+  const files = detail.value?.certFiles ?? []
+  return CERT_CATEGORIES.map((category) => ({
+    category,
+    label: CERT_CATEGORY_TEXT[category],
+    files: files.filter((file) => file.category === category),
+  })).filter((group) => group.files.length > 0)
+})
+
 onMounted(async () => {
   load()
   packages.value = await fetchPackages()
@@ -153,7 +173,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div>
+  <div class="page">
     <!-- 统计条 -->
     <div class="head-row">
       <div class="panel head-card">
@@ -172,9 +192,11 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- 搜索条件：独立面板，与下方列表分开（对齐机构端列表页布局） -->
+    <AppFilterPanel :rows="FILTER_ROWS" :model-value="FILTERS" @update:model-value="onFiltersChange" />
+
     <!-- 列表 -->
     <div class="panel">
-      <AppFilterPanel :rows="FILTER_ROWS" :model-value="FILTERS" @update:model-value="onFiltersChange" />
       <AppListToolbar v-model="keyword" placeholder="机构名称 / 申请编号" :search-width="220">
         <template #right>
           <button class="btn btn-ghost btn-sm" @click="resetFilters">重置</button>
@@ -274,21 +296,22 @@ onMounted(async () => {
       <p class="intro">{{ detail.intro || '未填写' }}</p>
 
       <h4 class="section-title" style="margin-top: 22px">资质材料</h4>
-      <div class="cert-list">
-        <p v-if="detail.certFiles.length === 0" class="cert-empty">
-          该申请未上传资质材料
-        </p>
-        <button
-          v-for="file in detail.certFiles"
-          :key="file.name"
-          class="cert-item"
-          type="button"
-          @click="previewFile(file.name)"
-        >
-          <AppIcon :name="file.type === 'pdf' ? 'file' : 'image'" :size="20" />
-          <span class="cert-name">{{ file.name }}</span>
-          <span class="cert-act">预览</span>
-        </button>
+      <p v-if="certGroups.length === 0" class="cert-empty">该申请未上传资质材料</p>
+      <div v-for="group in certGroups" :key="group.category" class="cert-block">
+        <p class="cert-block-title">{{ group.label }}</p>
+        <div class="cert-list">
+          <button
+            v-for="file in group.files"
+            :key="file.name"
+            class="cert-item"
+            type="button"
+            @click="previewFile(file.name)"
+          >
+            <AppIcon :name="file.type === 'pdf' ? 'file' : 'image'" :size="20" />
+            <span class="cert-name">{{ file.name }}</span>
+            <span class="cert-act">预览</span>
+          </button>
+        </div>
       </div>
 
       <template v-if="detail.status !== '待审核'">
@@ -381,7 +404,8 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.head-row { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+/* 纵向节奏交给 .page 的 gap，这里不再自带下边距，否则与 gap 叠加成双倍间距 */
+.head-row { display: flex; align-items: center; gap: 14px; }
 .head-card {
   display: flex;
   align-items: center;
@@ -395,8 +419,8 @@ onMounted(async () => {
 .head-card b { font-size: 22px; display: block; line-height: 1.1; }
 .head-card span { font-size: 12px; color: var(--sub); }
 
-.panel > :deep(.filter-panel) { margin: 14px 14px 0; }
-.panel > :deep(.list-toolbar) { padding: 0 14px; }
+/* 筛选面板已是列表面板的兄弟节点（自带边框圆角），工具条顶部留白由它自己给 */
+.panel > :deep(.list-toolbar) { padding: 14px 14px 0; }
 
 .org-cell { display: flex; align-items: center; gap: 6px; }
 .org-name { color: var(--ink); font-weight: 600; }
@@ -410,6 +434,14 @@ onMounted(async () => {
   padding: 12px 14px;
 }
 
+/* 分类小标题 + 该分类下的文件；间距放 .cert-block，.cert-list 自己不带 */
+.cert-block { margin-bottom: 14px; }
+.cert-block-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--sub);
+  margin-bottom: 7px;
+}
 .cert-list { display: flex; flex-direction: column; gap: 8px; }
 .cert-empty {
   font-size: 13px;

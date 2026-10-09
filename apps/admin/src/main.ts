@@ -1,9 +1,15 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
+import ElementPlus from 'element-plus'
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import { armSessionWatch, clearSession, registerSessionExpiredHandler, setupApp } from '@aiteach/shared'
 import App from './App.vue'
 import router from './router'
 import './styles/main.css'
+/* Element Plus 只用来补齐日期选择（日历弹层）——自有设计系统里没有这号控件。
+   整包引入是刻意的：本端是演示原型，按需引入要再搭一套 unplugin 配置，
+   收益只有产物体积，而产物这里不敏感。locale 传中文，否则日历是英文月份/星期。 */
+import 'element-plus/dist/index.css'
 
 // 注入端标识：管理端使用独立的 token 存储与 Mock 账号库
 setupApp({ appName: 'admin', apiBaseUrl: import.meta.env.VITE_API_BASE_URL ?? '/api' })
@@ -19,6 +25,7 @@ registerSessionExpiredHandler(() => {
 
 const app = createApp(App)
 app.use(createPinia())
+app.use(ElementPlus, { locale: zhCn })
 app.use(router)
 app.mount('#app')
 

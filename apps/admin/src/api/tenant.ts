@@ -1,5 +1,6 @@
 import { request } from '@aiteach/shared'
 import type {
+  CertFile,
   FeatureSwitches,
   PackageRecord,
   PageResult,
@@ -51,8 +52,10 @@ export function createApply(data: {
   contact: string
   phone: string
   email?: string
+  city?: string
+  address?: string
   intro?: string
-  certFiles: Array<{ name: string; type: 'pdf' | 'img' }>
+  certFiles: CertFile[]
 }) {
   return request<TenantApply>('/admin/tenant/applies', { method: 'POST', data })
 }
@@ -112,7 +115,15 @@ export function activateTenant(id: number, packageId: number) {
 
 export function updateTenantBase(
   id: number,
-  data: { name: string; contact: string; phone: string; city: string; intro: string; stages: string[] },
+  data: {
+    name: string
+    contact: string
+    phone: string
+    city: string
+    address: string
+    intro: string
+    stages: string[]
+  },
 ) {
   return request<null>(`/admin/tenants/${id}/base`, { method: 'POST', data })
 }

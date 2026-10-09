@@ -5,6 +5,8 @@ import {
   AppIcon,
   AppTabs,
   BarChart,
+  CERT_CATEGORIES,
+  CERT_CATEGORY_TEXT,
   hueColor,
   showToast,
   ApiError,
@@ -62,6 +64,7 @@ const baseForm = reactive({
   contact: '',
   phone: '',
   city: '',
+  address: '',
   intro: '',
   stages: [] as string[],
 })
@@ -94,6 +97,7 @@ async function load() {
   baseForm.contact = tenant.contact
   baseForm.phone = tenant.phone
   baseForm.city = tenant.city
+  baseForm.address = tenant.address
   baseForm.intro = tenant.intro
   baseForm.stages = [...tenant.stages]
   featureForm.switches = { ...tenant.switches }
@@ -112,6 +116,17 @@ function toggleStage(stage: string) {
 function previewFile(name: string) {
   showToast(`演示环境：在线预览「${name}」`, 'info')
 }
+
+/* 资质档案按上传时的分类分组展示（营业执照 / 许可证 / 法人信息），
+   空分类不占位置 —— 少一类就不显示那一栏的标题 */
+const certGroups = computed(() => {
+  const files = detail.value?.tenant.certFiles ?? []
+  return CERT_CATEGORIES.map((category) => ({
+    category,
+    label: CERT_CATEGORY_TEXT[category],
+    files: files.filter((file) => file.category === category),
+  })).filter((group) => group.files.length > 0)
+})
 
 async function saveBase() {
   if (!baseForm.name.trim()) {
@@ -226,6 +241,10 @@ onMounted(async () => {
               <label class="f-label">所在城市</label>
               <input v-model="baseForm.city" class="f-input" placeholder="如：浙江省杭州市" />
             </div>
+            <div class="f-field span-2">
+              <label class="f-label">机构地址</label>
+              <input v-model="baseForm.address" class="f-input" placeholder="门牌级详细地址，如：洪山区珞喻路 152 号 3 号楼" />
+            </div>
             <div class="f-field">
               <label class="f-label">联系人</label>
               <input v-model="baseForm.contact" class="f-input" />
@@ -256,20 +275,23 @@ onMounted(async () => {
           </div>
 
           <h4 class="section-title">资质材料</h4>
-          <div class="cert-list">
-            <button
-              v-for="file in detail.tenant.certFiles"
-              :key="file.name"
-              class="cert-item"
-              type="button"
-              @click="previewFile(file.name)"
-            >
-              <AppIcon :name="file.type === 'pdf' ? 'file' : 'image'" :size="20" />
-              <span class="cert-name">{{ file.name }}</span>
-              <span class="cert-act">预览</span>
-            </button>
-            <p v-if="detail.tenant.certFiles.length === 0" class="cert-empty">该机构暂无资质档案</p>
+          <div v-for="group in certGroups" :key="group.category" class="cert-block">
+            <p class="cert-block-title">{{ group.label }}</p>
+            <div class="cert-list">
+              <button
+                v-for="file in group.files"
+                :key="file.name"
+                class="cert-item"
+                type="button"
+                @click="previewFile(file.name)"
+              >
+                <AppIcon :name="file.type === 'pdf' ? 'file' : 'image'" :size="20" />
+                <span class="cert-name">{{ file.name }}</span>
+                <span class="cert-act">预览</span>
+              </button>
+            </div>
           </div>
+          <p v-if="certGroups.length === 0" class="cert-empty">该机构暂无资质档案</p>
 
           <div class="form-actions">
             <button class="btn btn-primary btn-sm" :disabled="saving" @click="saveBase">
@@ -475,6 +497,9 @@ onMounted(async () => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0 20px;
 }
+/* 机构地址独占一行：地址本来长，挤在半栏里放不下；顺带把字段数凑成
+   「名称|城市 / 地址 / 联系人|电话」三行，不留半格空位 */
+.form-grid .span-2 { grid-column: span 2; }
 .stage-row { display: flex; align-items: center; gap: 8px; }
 .stage-btn {
   height: 36px;
@@ -494,7 +519,16 @@ onMounted(async () => {
 }
 .form-actions { padding-top: 4px; }
 
-.cert-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+/* 一个分类一块：小标题 + 该分类下的文件。间距放在 .cert-block 上，
+   .cert-list 自己不再带下边距（否则每块底部会多出一截） */
+.cert-block { margin-bottom: 14px; }
+.cert-block-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--sub);
+  margin-bottom: 7px;
+}
+.cert-list { display: flex; flex-direction: column; gap: 8px; }
 .cert-item {
   display: flex;
   align-items: center;

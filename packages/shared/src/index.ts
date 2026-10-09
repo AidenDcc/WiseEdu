@@ -37,9 +37,12 @@ export {
   cancelSessionWatch,
 } from './auth/session'
 export type { AdminOverview, TenantOverview } from './api/models'
+export { CERT_CATEGORIES, CERT_CATEGORY_TEXT } from './api/models'
 export type {
   PageResult,
   ApplyStatus,
+  CertCategory,
+  CertFile,
   TenantApply,
   FeatureSwitches,
   PackageRecord,

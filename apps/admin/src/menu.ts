@@ -16,8 +16,8 @@ export const menus: MenuItem[] = [
     title: '租户管理',
     icon: 'building',
     children: [
-      { path: '/tenant/apply', title: '入驻审核' },
       { path: '/tenant/list', title: '机构列表' },
+      { path: '/tenant/apply', title: '入驻审核' },
       { path: '/tenant/package', title: '套餐管理' },
     ],
   },

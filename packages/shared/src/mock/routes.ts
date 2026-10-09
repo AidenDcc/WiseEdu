@@ -8,7 +8,14 @@ import * as admin from './admin-store'
 import * as org from './org-store'
 import * as student from './student-store'
 import * as content from './content-store'
-import type { DictTypeKey, FeatureSwitches, PackageRecord, PhotoResultEdit, TenantRecord } from '../api/models'
+import type {
+  CertFile,
+  DictTypeKey,
+  FeatureSwitches,
+  PackageRecord,
+  PhotoResultEdit,
+  TenantRecord,
+} from '../api/models'
 import type { SessionUser, MockUser } from './types'
 
 /** 资料 → 会话用户（SessionUser 不含密码，也不含只对 Mock 有意义的 appId） */
@@ -398,9 +405,7 @@ export const mockRoutes: MockRoute[] = [
         if (!orgType) mockFail(3011, '请选择机构类型')
         if (!contact) mockFail(3012, '联系人不能为空')
         if (!/^1\d{10}$/.test(phone)) mockFail(3013, '请输入 11 位手机号')
-        const certFiles = Array.isArray(body.certFiles)
-          ? (body.certFiles as Array<{ name: string; type: 'pdf' | 'img' }>)
-          : []
+        const certFiles = Array.isArray(body.certFiles) ? (body.certFiles as CertFile[]) : []
         if (certFiles.length === 0) mockFail(3014, '请至少上传一份资质材料')
         return store.createApply({
           orgName,
@@ -409,6 +414,8 @@ export const mockRoutes: MockRoute[] = [
           contact,
           phone,
           email: String(body.email ?? '').trim() || undefined,
+          city: String(body.city ?? '').trim() || undefined,
+          address: String(body.address ?? '').trim() || undefined,
           intro: String(body.intro ?? '').trim() || undefined,
           certFiles,
         })
@@ -503,6 +510,7 @@ export const mockRoutes: MockRoute[] = [
               contact: String(body.contact ?? ''),
               phone: String(body.phone ?? ''),
               city: String(body.city ?? ''),
+              address: String(body.address ?? ''),
               intro: String(body.intro ?? ''),
               stages: Array.isArray(body.stages) ? (body.stages as string[]) : [],
             })

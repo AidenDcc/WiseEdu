@@ -5,6 +5,7 @@
  */
 import type {
   ApplyStatus,
+  CertFile,
   FeatureSwitches,
   PackageRecord,
   PageResult,
@@ -211,9 +212,9 @@ export const applies: TenantApply[] = APPLY_SEEDS.map((seed) => ({
   email: seed.email,
   intro: seed.intro,
   certFiles: [
-    { name: '营业执照.pdf', type: 'pdf' },
-    { name: '办学许可证.jpg', type: 'img' },
-    { name: '法人身份证.jpg', type: 'img' },
+    { name: '营业执照.pdf', type: 'pdf', category: 'license' },
+    { name: '办学许可证.jpg', type: 'img', category: 'permit' },
+    { name: '法人身份证.jpg', type: 'img', category: 'legal' },
   ],
   submittedAt: dateAfter(-seed.submittedDaysAgo),
   waitingHours: Math.round(seed.submittedDaysAgo * 24),
@@ -262,17 +263,19 @@ interface TenantSeed {
   contact: string
   phone: string
   city: string
+  address: string
   intro: string
   isolationType: 1 | 2
   storageRegion: string
   disableReason?: string
-  certFiles?: Array<{ name: string; type: 'pdf' | 'img' }>
+  certFiles?: CertFile[]
 }
 
-/** 默认资质档案 */
-const DEFAULT_CERTS: Array<{ name: string; type: 'pdf' | 'img' }> = [
-  { name: '营业执照.pdf', type: 'pdf' },
-  { name: '办学许可证.jpg', type: 'img' },
+/** 默认资质档案：三类各一份，与新增机构表单的分组一一对应 */
+const DEFAULT_CERTS: CertFile[] = [
+  { name: '营业执照.pdf', type: 'pdf', category: 'license' },
+  { name: '办学许可证.jpg', type: 'img', category: 'permit' },
+  { name: '法人身份证.jpg', type: 'img', category: 'legal' },
 ]
 
 const TENANT_SEEDS: TenantSeed[] = [
@@ -292,6 +295,7 @@ const TENANT_SEEDS: TenantSeed[] = [
     contact: '何俊',
     phone: '13971304482',
     city: '湖北省武汉市',
+    address: '洪山区珞喻路 152 号光谷教育园区 3 号楼',
     intro: '省级示范高中，全校推行精细化教学，AI 组卷覆盖九大学科。',
     isolationType: 1,
     storageRegion: '华东 1（杭州）',
@@ -312,6 +316,7 @@ const TENANT_SEEDS: TenantSeed[] = [
     contact: '孙倩',
     phone: '13817894456',
     city: '上海市',
+    address: '杨浦区国权路 383 号',
     intro: '十五年一贯制双语学校，自建校本 AI 题库 4.2 万题。',
     isolationType: 2,
     storageRegion: '华东 2（上海）',
@@ -332,6 +337,7 @@ const TENANT_SEEDS: TenantSeed[] = [
     contact: '罗敏',
     phone: '13660401177',
     city: '广东省广州市',
+    address: '天河区体育东路 122 号羊城国际商贸大厦 18 层',
     intro: 'K12 课外辅导机构，12 个校区共用一个租户。',
     isolationType: 1,
     storageRegion: '华南 1（深圳）',
@@ -352,6 +358,7 @@ const TENANT_SEEDS: TenantSeed[] = [
     contact: '李文博',
     phone: '13701256633',
     city: '北京市',
+    address: '海淀区中关村南大街 12 号',
     intro: '区属实验小学，智慧课堂课题试点校。',
     isolationType: 1,
     storageRegion: '华北 2（北京）',
@@ -372,6 +379,7 @@ const TENANT_SEEDS: TenantSeed[] = [
     contact: '周灿',
     phone: '13574822906',
     city: '湖南省长沙市',
+    address: '岳麓区麓山南路 932 号',
     intro: '开展跨学科主题教学，需协同组卷与变式训练。',
     isolationType: 1,
     storageRegion: '华东 1（杭州）',
@@ -392,6 +400,7 @@ const TENANT_SEEDS: TenantSeed[] = [
     contact: '高翔',
     phone: '13983705526',
     city: '重庆市',
+    address: '渝北区龙溪街道金开大道 1001 号',
     intro: '国际化学校，已到期待续费。',
     isolationType: 2,
     storageRegion: '西南 1（成都）',
@@ -412,6 +421,7 @@ const TENANT_SEEDS: TenantSeed[] = [
     contact: '范晓芸',
     phone: '15122779034',
     city: '天津市',
+    address: '河西区友谊路 35 号',
     intro: '中考冲刺培训机构，到期未续费。',
     isolationType: 1,
     storageRegion: '华北 1（青岛）',
@@ -432,6 +442,7 @@ const TENANT_SEEDS: TenantSeed[] = [
     contact: '吴建平',
     phone: '13915408871',
     city: '江苏省苏州市',
+    address: '苏州工业园区星海街 155 号',
     intro: '园区直属完全中学，AI 月度额度使用率长期偏高。',
     isolationType: 1,
     storageRegion: '华东 1（杭州）',
@@ -452,6 +463,7 @@ const TENANT_SEEDS: TenantSeed[] = [
     contact: '姜涛',
     phone: '15865572109',
     city: '山东省青岛市',
+    address: '崂山区松岭路 70 号',
     intro: '因多次违规采集试题被平台停用整改。',
     isolationType: 1,
     storageRegion: '华北 1（青岛）',
@@ -473,13 +485,14 @@ const TENANT_SEEDS: TenantSeed[] = [
     contact: '陈建国',
     phone: '13857102266',
     city: '浙江省杭州市',
+    address: '西湖区文一西路 522 号',
     intro: '创建未满 24 小时的新租户（用于演示数据隔离可调整窗口）。',
     isolationType: 1,
     storageRegion: '华东 1（杭州）',
     certFiles: [
-      { name: '营业执照.pdf', type: 'pdf' },
-      { name: '办学许可证.jpg', type: 'img' },
-      { name: '法人身份证.jpg', type: 'img' },
+      { name: '营业执照.pdf', type: 'pdf', category: 'license' },
+      { name: '办学许可证.jpg', type: 'img', category: 'permit' },
+      { name: '法人身份证.jpg', type: 'img', category: 'legal' },
     ],
   },
 ]
@@ -505,6 +518,7 @@ export const tenants: TenantRecord[] = TENANT_SEEDS.map((seed) => {
     contact: seed.contact,
     phone: seed.phone,
     city: seed.city,
+    address: seed.address,
     intro: seed.intro,
     certFiles: seed.certFiles ?? DEFAULT_CERTS,
     isolationType: seed.isolationType,
@@ -594,7 +608,9 @@ export function approveApply(
     createdAt: dateAfter(0),
     contact: apply.contact,
     phone: apply.phone,
-    city: '',
+    /* 早期种子申请没有 city（那时申请表单还不收省市区），回退成空串 */
+    city: apply.city ?? '',
+    address: apply.address ?? '',
     intro: apply.intro ?? '',
     certFiles: apply.certFiles.length > 0 ? apply.certFiles : DEFAULT_CERTS,
     isolationType: 1,
@@ -629,8 +645,10 @@ export function createApply(payload: {
   contact: string
   phone: string
   email?: string
+  city?: string
+  address?: string
   intro?: string
-  certFiles: Array<{ name: string; type: 'pdf' | 'img' }>
+  certFiles: CertFile[]
 }): TenantApply {
   const apply: TenantApply = {
     id: Math.max(0, ...applies.map((item) => item.id)) + 1,
@@ -643,6 +661,8 @@ export function createApply(payload: {
     contact: payload.contact,
     phone: payload.phone,
     email: payload.email,
+    city: payload.city,
+    address: payload.address,
     intro: payload.intro,
     certFiles: payload.certFiles,
     submittedAt: dateAfter(0),
@@ -737,7 +757,15 @@ export function activateTenant(id: number, packageId: number): string {
 /** 更新基础信息 */
 export function updateTenantBase(
   id: number,
-  patch: { name: string; contact: string; phone: string; city: string; intro: string; stages: string[] },
+  patch: {
+    name: string
+    contact: string
+    phone: string
+    city: string
+    address: string
+    intro: string
+    stages: string[]
+  },
 ): void {
   const tenant = getTenant(id)
   Object.assign(tenant, patch)
