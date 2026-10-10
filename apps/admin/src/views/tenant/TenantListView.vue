@@ -46,6 +46,11 @@ const FILTERS = reactive<Record<string, string[]>>({ status: [], package: [], or
 const EXPIRE_KEY = 'expire'
 const EXPIRE_LABEL = '到期时间'
 
+/* AI 用量区间：与到期时间同款 —— 不是 chip 的条件，控件（两个数字输入）由 #extra 画，
+   行定义里登记 `custom: true` 只为让它进折叠摘要、也能被「清空」一并清掉。 */
+const AI_KEY = 'aiUsage'
+const AI_LABEL = 'AI用量'
+
 /* AppFilterPanel 回传整份筛选值（覆盖式回写），逐 key 写回这份 reactive 对象本身。
    不能交给 `v-model`：它会替换掉整个对象，而替换引用不是一次响应式写入 —— 点了 chip
    既不亮选中态也不重新筛选。机构端 CollabView 里有同款说明。 */
@@ -53,20 +58,28 @@ function onFiltersChange(next: Record<string, string[]>) {
   FILTERS.status = next.status ?? []
   FILTERS.package = next.package ?? []
   FILTERS.orgType = next.orgType ?? []
-  /* expire 这一行没有 chip，面板只可能在「清空」时给出空数组；区间本身由 expireRange 承载 */
+  /* 这两行都没有 chip，面板只可能在「清空」时给出空数组；区间本身由各自的 ref 承载 */
   if (!next[EXPIRE_KEY]?.length) expireRange.value = null
+  if (!next[AI_KEY]?.length) {
+    aiMin.value = ''
+    aiMax.value = ''
+  }
 }
 const keyword = ref('')
 /* 到期区间：[起始, 结束]，YYYY-MM-DD。el-date-picker 的 daterange 用 value-format
    直接吐字符串，省掉一层 dayjs 来回转换，接口拿到的就是它要的格式。 */
 const expireRange = ref<[string, string] | null>(null)
+/* AI 用量区间：两个输入框各存各的（允许只填一边），字符串是为了让「未填」与「填 0」分得开 */
+const aiMin = ref('')
+const aiMax = ref('')
 
-/* 交给面板的筛选值：在 FILTERS 之上补一个只读的 expire 项，值就是折叠时要显示的那行字。
-   单向派生（不是第二份状态）—— 区间仍只存在 expireRange 里，这里只是把它的展示文案
-   翻译成面板认识的样子。 */
+/* 交给面板的筛选值：在 FILTERS 之上补两个只读项（到期 / AI 用量），值就是折叠时要显示的那行字。
+   单向派生（不是第二份状态）—— 区间仍只存在 expireRange / aiMin / aiMax 里，
+   这里只是把它们的展示文案翻译成面板认识的样子。 */
 const panelValue = computed<Record<string, string[]>>(() => ({
   ...FILTERS,
   [EXPIRE_KEY]: expireRange.value ? [`${expireRange.value[0]} ~ ${expireRange.value[1]}`] : [],
+  [AI_KEY]: aiMin.value || aiMax.value ? [`${aiMin.value || 0} ~ ${aiMax.value || '不限'}`] : [],
 }))
 const page = ref(1)
 const pageSize = 10
@@ -88,6 +101,7 @@ const FILTER_ROWS = computed<FilterRowDef[]>(() => [
   { key: 'package', label: '套餐', options: packages.value.map((pkg) => pkg.name), multiple: false },
   { key: 'orgType', label: '类型', options: ORG_TYPES, multiple: false },
   { key: EXPIRE_KEY, label: EXPIRE_LABEL, options: [], custom: true },
+  { key: AI_KEY, label: AI_LABEL, options: [], custom: true },
 ])
 
 /** chip 文案 → 接口参数（status 为 1~4 的数字串） */
@@ -113,6 +127,8 @@ async function load() {
       keyword: keyword.value.trim(),
       expireFrom: expireRange.value?.[0] ?? '',
       expireTo: expireRange.value?.[1] ?? '',
+      aiMin: aiMin.value,
+      aiMax: aiMax.value,
       page: page.value,
       pageSize,
     })
@@ -128,10 +144,11 @@ function search() {
   load()
 }
 
-/* 筛选条件 / 关键词 / 到期区间变化即重新查询（原来是点「查询」按钮）。
-   三个源合成一个 watcher：面板的「清空」会同时改 FILTERS 和 expireRange，
-   拆成两个 watcher 就是两次内容相同的请求。 */
-watch([FILTERS, keyword, expireRange], search, { deep: true })
+/* 筛选条件 / 关键词 / 两个区间变化即重新查询（原来是点「查询」按钮）。
+   这些源合成一个 watcher：面板的「清空」会同时改 FILTERS、expireRange 与 AI 用量，
+   拆成多个 watcher 就是同一次操作发好几次内容相同的请求。
+   AI 用量的 min / max 也必须在同一个里 —— 两个 ref 各挂一个 watcher 同样是两次请求。 */
+watch([FILTERS, keyword, expireRange, aiMin, aiMax], search, { deep: true })
 
 function pkgName(id: number) {
   return packages.value.find((pkg) => pkg.id === id)?.name ?? `套餐 ${id}`
@@ -150,6 +167,14 @@ function usageClass(tenant: TenantRecord) {
 
 function fmtDate(time: string) {
   return time.slice(0, 10)
+}
+
+/* 创建时间要精确到秒：同一批机构常在同一天开通，只到日看不出先后。
+   mock 里是 'YYYY-MM-DD HH:mm:ss'；真机若回 ISO（带 T）也认 —— 与 tenant-store 里生成
+   时间戳的写法一致（toISOString().slice(0, 19).replace('T', ' ')）。
+   「到期时间」仍走 fmtDate：它旁边跟着「剩 N 天」，秒在那里是噪音。 */
+function fmtDateTime(time: string) {
+  return time.slice(0, 19).replace('T', ' ')
 }
 
 /* ===== 禁用 / 启用（FR-PT-010） ===== */
@@ -412,7 +437,7 @@ async function submitCreate() {
       certFiles: allCerts.value,
     })
     createOpen.value = false
-    showToast(`已提交入驻审核（申请编号 ${apply.applyNo}），请在「入驻审核」中处理`, 'success')
+    showToast(`已提交入驻审核（机构编号 ${apply.code}），请在「机构入驻审核」中处理`, 'success')
   } catch (error) {
     createError.value = error instanceof ApiError ? error.message : '提交失败，请重试'
   } finally {
@@ -437,6 +462,14 @@ async function submitCreate() {
               start-placeholder="开始日期"
               end-placeholder="结束日期"
             />
+          </div>
+        </div>
+        <div class="range-row">
+          <span class="range-label">{{ AI_LABEL }}</span>
+          <div class="ai-range">
+            <input v-model="aiMin" class="f-input" type="number" min="0" placeholder="最小值" />
+            <span class="range-sep">~</span>
+            <input v-model="aiMax" class="f-input" type="number" min="0" placeholder="最大值" />
           </div>
         </div>
       </template>
@@ -520,7 +553,7 @@ async function submitCreate() {
                     </div>
                   </div>
                 </td>
-                <td>{{ fmtDate(tenant.createdAt) }}</td>
+                <td class="time-cell">{{ fmtDateTime(tenant.createdAt) }}</td>
                 <td>
                   <div class="op-group">
                     <button
@@ -804,6 +837,12 @@ async function submitCreate() {
    再加两个类名，权重 0,4,0 稳过组件库的 0,2,0（不必依赖样式注入顺序）。
    240px 是「够显示两个完整日期、又不比 chip 行显眼」的宽度。 */
 .range-picker { width: 240px; flex-shrink: 0; }
+
+/* AI 用量区间：两个数字输入 + 中间的 ~。总和宽度与上面的日期区间对齐（240px），
+   两行看起来一样长。无对应组件库控件，故内联两个原生 input。 */
+.ai-range { display: flex; align-items: center; gap: 8px; width: 240px; flex-shrink: 0; }
+.ai-range .f-input { width: 100%; min-width: 0; }
+.range-sep { color: var(--sub); font-size: 12.5px; flex-shrink: 0; }
 .range-picker :deep(.el-date-editor.el-range-editor.el-input__wrapper) { width: 100%; }
 
 .org-cell { display: flex; align-items: center; gap: 10px; }
@@ -835,6 +874,10 @@ async function submitCreate() {
 .days-left { font-size: 11.5px; color: var(--sub); }
 .expire-warn { color: var(--warn); font-weight: 600; }
 .expire-over { color: var(--danger); font-weight: 600; }
+
+/* 「创建时间」是 19 个字符、中间带一个空格，表格单元格默认会在空格处折成两行。
+   宁可让 .data-table-wrap 横向滚动，也别让日期和时间断成上下两截 */
+.time-cell { white-space: nowrap; }
 
 .warn-banner {
   display: flex;
@@ -897,23 +940,6 @@ async function submitCreate() {
 }
 .create-grid .span-2 { grid-column: span 2; }
 
-/* 省市区级联（Element Plus）。它的外观全由自己的令牌算出来（默认高 32px、圆角 4px、
-   边框是 1px 的 inset 阴影、主色是组件库自己的蓝），摆在 .f-input 旁边一眼就能看出是外来户。
-   这里把尺寸与配色这几颗令牌换成设计系统的值 —— 令牌都是声明在 `.el-input` / `.el-input__wrapper`
-   元素**自身**上的 var() 引用，从外层容器赋值传得下去，所以不用像日期选择器那样硬压权重
-   （那个宽度坑是「值写死在元素自身上」，两回事，见上面 .range-picker 的注释）。 */
-.region-picker {
-  width: 100%;
-  --el-component-size: 38px; /* 与 .f-input 同高（其中内层 36px + 上下各 1px 内边距） */
-  --el-border-radius-base: 10px;
-  --el-font-size-base: 13.5px;
-  --el-input-border-color: var(--border);
-  --el-input-hover-border-color: #c9d2e6;
-  --el-input-placeholder-color: var(--sub);
-  --el-input-icon-color: var(--sub);
-  --el-color-primary: var(--brand); /* 聚焦描边（is-focus 的 box-shadow 用它） */
-}
-.region-picker :deep(.el-cascader) { width: 100%; line-height: normal; }
 .stage-row { display: flex; gap: 8px; }
 .stage-btn {
   height: 36px;

@@ -12,61 +12,96 @@ import {
   showToast,
 } from '@aiteach/shared'
 import type { FilterRowDef, PackageRecord, TenantApply } from '@aiteach/shared'
+import AppPagination from '@/components/ui/AppPagination.vue'
+import { useAuthStore } from '@/stores/auth'
 import { approveApply, fetchApplies, fetchPackages, rejectApply } from '@/api/tenant'
 
 /* ===== 列表 ===== */
 const ORG_TYPES = ['公立学校', '民办学校', '培训机构', '其他']
 const STATUS_OPTIONS = ['待审核', '已通过', '已驳回']
+const STAGES = ['小学', '初中', '高中']
+
+/* 联系人是本页唯一「不是 chip」的条件：控件是文本框，由 #extra 插槽画。
+   行定义里仍然登记它（`custom: true`），面板据此把它算进折叠摘要、也据此清空它 ——
+   否则折叠起来就看不见这个条件，也永远清不掉。 */
+const CONTACT_KEY = 'contact'
+const CONTACT_LABEL = '联系人'
 
 const FILTER_ROWS: FilterRowDef[] = [
   { key: 'status', label: '状态', options: STATUS_OPTIONS, multiple: false },
   { key: 'orgType', label: '类型', options: ORG_TYPES, multiple: false },
+  { key: 'stages', label: '学段', options: STAGES, multiple: true },
+  { key: CONTACT_KEY, label: CONTACT_LABEL, options: [], custom: true },
 ]
 
-const FILTERS = reactive<Record<string, string[]>>({ status: [], orgType: [] })
+const FILTERS = reactive<Record<string, string[]>>({ status: [], orgType: [], stages: [] })
 
 /* AppFilterPanel 回传整份筛选值（覆盖式回写），逐 key 写回这份 reactive 对象本身。
    不能交给 `v-model`：它会替换掉整个对象，而替换引用不是一次响应式写入 ——
-   下面那句 `watch(FILTERS, load, { deep: true })` 就永远不会触发。
+   下面那句 `watch(FILTERS, search, { deep: true })` 就永远不会触发。
    机构端 CollabView 里有同款说明。 */
 function onFiltersChange(next: Record<string, string[]>) {
   FILTERS.status = next.status ?? []
   FILTERS.orgType = next.orgType ?? []
+  FILTERS.stages = next.stages ?? []
+  /* 联系人这一行没有 chip，面板只可能在「清空」时给出空数组 */
+  if (!next[CONTACT_KEY]?.length) contact.value = ''
 }
 const keyword = ref('')
+/** 联系人姓名（模糊查询）。单独一个 ref，与 FILTERS 合并进同一个 watcher */
+const contact = ref('')
 
+/* 交给面板的筛选值：在 FILTERS 之上补一个只读的 contact 项，值就是折叠时要显示的那行字。
+   单向派生（不是第二份状态）—— 输入仍只存在 contact 里，这里只是把它的展示文案
+   翻译成面板认识的样子。 */
+const panelValue = computed<Record<string, string[]>>(() => ({
+  ...FILTERS,
+  [CONTACT_KEY]: contact.value.trim() ? [contact.value.trim()] : [],
+}))
+
+const page = ref(1)
+const pageSize = 10
+const total = ref(0)
 const list = ref<TenantApply[]>([])
 const loading = ref(false)
 const packages = ref<PackageRecord[]>([])
+const auth = useAuthStore()
+
+/** 审核留痕里的操作人：取当前登录管理员的姓名（mock 的 admin 账号 = 「平台运营」） */
+function reviewerName() {
+  return auth.user?.name ?? ''
+}
 
 async function load() {
   loading.value = true
   try {
-    list.value = await fetchApplies({
+    const result = await fetchApplies({
       status: FILTERS.status[0] ?? '',
       orgType: FILTERS.orgType[0] ?? '',
+      /* 学段是多选，先 join 成逗号串再交给接口（withQuery 会 String(value)） */
+      stages: FILTERS.stages.join(','),
+      contact: contact.value.trim(),
       keyword: keyword.value.trim(),
+      page: page.value,
+      pageSize,
     })
+    list.value = result.list
+    total.value = result.total
   } finally {
     loading.value = false
   }
 }
 
-function resetFilters() {
-  FILTERS.status = []
-  FILTERS.orgType = []
-  keyword.value = ''
+/* 加分页后，每个筛选 / 关键词变化都要把页码归 1，否则停在第 3 页时会显示空列表 */
+function search() {
+  page.value = 1
   load()
 }
 
-/* 筛选条件 / 关键词变化即重新查询（原来是点「查询」按钮） */
-watch(FILTERS, load, { deep: true })
-watch(keyword, load)
-
-const pendingCount = computed(() => list.value.filter((item) => item.status === '待审核').length)
-const overtimeCount = computed(
-  () => list.value.filter((item) => item.status === '待审核' && item.waitingHours > 48).length,
-)
+/* 筛选条件 / 关键词 / 联系人变化即重新查询（原来是点「查询」按钮）。
+   三个源合成一个 watcher：面板的「清空」会同时改 FILTERS 和 contact，
+   拆成两个 watcher 就是两次内容相同的请求。 */
+watch([FILTERS, keyword, contact], search, { deep: true })
 
 function statusTag(status: TenantApply['status']) {
   return status === '待审核' ? 'tag-blue' : status === '已通过' ? 'tag-green' : 'tag-red'
@@ -74,6 +109,11 @@ function statusTag(status: TenantApply['status']) {
 
 function fmtTime(time: string) {
   return time.slice(0, 16)
+}
+
+/** 联系电话中间四位脱密：列表是「一眼扫过」的场景，完整号码只留在详情里（详情不脱敏） */
+function maskPhone(phone: string) {
+  return phone.length >= 7 ? `${phone.slice(0, 3)}****${phone.slice(-4)}` : phone
 }
 
 /* ===== 审核详情抽屉 ===== */
@@ -109,7 +149,10 @@ async function confirmApprove() {
   }
   approving.value = true
   try {
-    const result = await approveApply(approveTarget.value.id, { ...approveForm })
+    const result = await approveApply(approveTarget.value.id, {
+      ...approveForm,
+      reviewer: reviewerName(),
+    })
     showToast(`已开通租户「${result.tenantName}」，初始密码已短信发送至联系人`, 'success')
     approveTarget.value = null
     load()
@@ -141,7 +184,7 @@ async function confirmReject() {
   }
   rejecting.value = true
   try {
-    await rejectApply(rejectTarget.value.id, reason)
+    await rejectApply(rejectTarget.value.id, reason, reviewerName())
     showToast('已驳回该入驻申请', 'success')
     rejectTarget.value = null
     load()
@@ -174,71 +217,62 @@ onMounted(async () => {
 
 <template>
   <div class="page">
-    <!-- 统计条 -->
-    <div class="head-row">
-      <div class="panel head-card">
-        <AppIcon name="clock" :size="18" />
-        <div>
-          <b>{{ pendingCount }}</b>
-          <span>待审核</span>
-        </div>
-      </div>
-      <div class="panel head-card warn" :class="{ muted: overtimeCount === 0 }">
-        <AppIcon name="warning" :size="18" />
-        <div>
-          <b>{{ overtimeCount }}</b>
-          <span>超 48h 未处理</span>
-        </div>
-      </div>
-    </div>
-
     <!-- 搜索条件：独立面板，与下方列表分开（对齐机构端列表页布局） -->
-    <AppFilterPanel :rows="FILTER_ROWS" :model-value="FILTERS" @update:model-value="onFiltersChange" />
+    <AppFilterPanel :rows="FILTER_ROWS" :model-value="panelValue" @update:model-value="onFiltersChange">
+      <template #extra>
+        <div class="contact-row">
+          <span class="contact-label">{{ CONTACT_LABEL }}</span>
+          <input v-model="contact" class="f-input" placeholder="姓名，支持模糊查询" />
+        </div>
+      </template>
+    </AppFilterPanel>
 
     <!-- 列表 -->
     <div class="panel">
-      <AppListToolbar v-model="keyword" placeholder="机构名称 / 申请编号" :search-width="220">
-        <template #right>
-          <button class="btn btn-ghost btn-sm" @click="resetFilters">重置</button>
-        </template>
-      </AppListToolbar>
+      <AppListToolbar v-model="keyword" placeholder="机构名称 / 机构编号" :search-width="220" />
 
       <div class="data-table-wrap">
         <table class="data-table">
           <thead>
             <tr>
-              <th>申请编号</th>
+              <th>机构编号</th>
               <th>机构名称</th>
               <th>类型</th>
               <th>学段</th>
               <th>联系人</th>
               <th>联系电话</th>
               <th>提交时间</th>
+              <th>审核时间</th>
               <th>状态</th>
               <th style="width: 170px">操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-if="loading && list.length === 0">
-              <td colspan="9" class="empty-row">加载中…</td>
+              <td colspan="10" class="empty-row">加载中…</td>
             </tr>
             <tr v-else-if="list.length === 0">
-              <td colspan="9" class="empty-row">暂无符合条件的入驻申请</td>
+              <td colspan="10" class="empty-row">暂无符合条件的入驻申请</td>
             </tr>
             <template v-else>
               <tr v-for="item in list" :key="item.id">
-              <td class="cell-strong">{{ item.applyNo }}</td>
+              <td class="cell-strong">{{ item.code }}</td>
               <td>
                 <div class="org-cell">
                   <span class="org-name">{{ item.orgName }}</span>
-                  <span v-if="item.status === '待审核' && item.waitingHours > 48" class="tag tag-orange">超时</span>
+                  <span
+                    v-if="item.status === '待审核' && item.waitingHours > 48"
+                    class="tag tag-orange"
+                    title="超 48h 未处理"
+                  >超时</span>
                 </div>
               </td>
               <td>{{ item.orgType }}</td>
               <td>{{ item.stages.join(' / ') }}</td>
               <td>{{ item.contact }}</td>
-              <td>{{ item.phone }}</td>
+              <td>{{ maskPhone(item.phone) }}</td>
               <td>{{ fmtTime(item.submittedAt) }}</td>
+              <td>{{ item.reviewedAt ? fmtTime(item.reviewedAt) : '—' }}</td>
               <td>
                 <span class="tag" :class="statusTag(item.status)">{{ item.status }}</span>
               </td>
@@ -256,13 +290,15 @@ onMounted(async () => {
           </tbody>
         </table>
       </div>
+
+      <AppPagination :total="total" :page="page" :page-size="pageSize" @update:page="page = $event; load()" />
     </div>
 
     <!-- 审核详情抽屉 -->
     <AppDrawer
       v-if="detail"
       :title="detail.orgName"
-      :subtitle="`申请编号 ${detail.applyNo}`"
+      :subtitle="`机构编号 ${detail.code}`"
       @close="detail = null"
     >
       <div class="detail-grid" style="margin-bottom: 20px">
@@ -273,6 +309,10 @@ onMounted(async () => {
         <div class="detail-item">
           <div class="d-label">覆盖学段</div>
           <div class="d-value">{{ detail.stages.join(' / ') }}</div>
+        </div>
+        <div class="detail-item">
+          <div class="d-label">所在地区</div>
+          <div class="d-value">{{ detail.city || '—' }}</div>
         </div>
         <div class="detail-item">
           <div class="d-label">联系人</div>
@@ -286,7 +326,13 @@ onMounted(async () => {
           <div class="d-label">电子邮箱</div>
           <div class="d-value">{{ detail.email || '—' }}</div>
         </div>
-        <div class="detail-item">
+        <!-- 地址独占一行：门牌级地址比半栏宽，挤在两列里会折得很难看。
+            紧随其后的「提交时间」也一并占整行，否则会在它后面留出半格空位 -->
+        <div class="detail-item span-2">
+          <div class="d-label">机构地址</div>
+          <div class="d-value">{{ detail.address || '—' }}</div>
+        </div>
+        <div class="detail-item span-2">
           <div class="d-label">提交时间</div>
           <div class="d-value">{{ fmtTime(detail.submittedAt) }}</div>
         </div>
@@ -322,16 +368,20 @@ onMounted(async () => {
             <b>{{ detail.status }}</b>
             <p v-if="detail.rejectReason">{{ detail.rejectReason }}</p>
             <p v-else>已开通租户并短信通知联系人。</p>
+            <!-- 审核留痕：谁在什么时候处理的 -->
+            <p class="result-meta">
+              审核时间：{{ detail.reviewedAt ? fmtTime(detail.reviewedAt) : '—' }}
+              · 操作人：{{ detail.reviewer || '—' }}
+            </p>
           </div>
         </div>
       </template>
 
-      <template #footer>
-        <template v-if="detail.status === '待审核'">
-          <button class="btn btn-ghost" style="flex: 1" @click="openReject(detail); detail = null">驳回</button>
-          <button class="btn btn-primary" style="flex: 1" @click="openApprove(detail); detail = null">通过并开通</button>
-        </template>
-        <button v-else class="btn btn-ghost" style="flex: 1" @click="detail = null">关闭</button>
+      <!-- 只留「驳回 / 通过并开通」两个动作；关闭走抽屉右上角自带的 icon，
+           已审核的申请没有可执行动作，整块 footer 不渲染（空 slot 会留一条空栏） -->
+      <template v-if="detail.status === '待审核'" #footer>
+        <button class="btn btn-ghost" style="flex: 1" @click="openReject(detail); detail = null">驳回</button>
+        <button class="btn btn-primary" style="flex: 1" @click="openApprove(detail); detail = null">通过并开通</button>
       </template>
     </AppDrawer>
 
@@ -404,20 +454,21 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-/* 纵向节奏交给 .page 的 gap，这里不再自带下边距，否则与 gap 叠加成双倍间距 */
-.head-row { display: flex; align-items: center; gap: 14px; }
-.head-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 20px;
-  color: var(--brand);
-  min-width: 180px;
+/* 联系人这一行的节奏对齐面板里其他 chip 行（标签左对齐 + 控件跟在其后），
+   标签宽度与 TenantListView 的 .range-label 一致，两页看起来是一套 */
+.contact-row { display: flex; align-items: center; gap: 12px; }
+.contact-label {
+  width: 58px;
+  flex-shrink: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--sub);
 }
-.head-card.warn { color: var(--warn); }
-.head-card.muted { color: var(--sub); opacity: 0.75; }
-.head-card b { font-size: 22px; display: block; line-height: 1.1; }
-.head-card span { font-size: 12px; color: var(--sub); }
+.contact-row .f-input { width: 220px; flex-shrink: 0; }
+
+/* 详情抽屉里让「机构地址 / 提交时间」独占一行。.detail-grid 是全局类（main.css），
+   它只定义了两列网格、不带 span 规则，所以跨度得由使用方自己加 */
+.detail-grid .span-2 { grid-column: span 2; }
 
 /* 筛选面板已是列表面板的兄弟节点（自带边框圆角），工具条顶部留白由它自己给 */
 .panel > :deep(.list-toolbar) { padding: 14px 14px 0; }
@@ -480,6 +531,8 @@ onMounted(async () => {
 .result-banner.ok { background: var(--success-soft); color: var(--success); }
 .result-banner.no { background: var(--danger-soft); color: var(--danger); }
 .result-banner p { color: var(--ink-2); margin-top: 4px; line-height: 1.6; }
+/* 审核留痕比正文弱一档，不抢「审核结果」的视线 */
+.result-banner .result-meta { font-size: 12.5px; color: var(--sub); }
 
 .modal-tip {
   font-size: 13px;

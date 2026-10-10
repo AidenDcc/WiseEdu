@@ -52,7 +52,8 @@ function questionTypesFor(subject: string): string[] {
   return scopedQuestionTypes(dict.value.questionType, subject)
 }
 
-/** 原始考试类型字典项：试卷类型树要按 paperCategory / stage / subjects 分组与过滤，光有名字不够 */
+/** 原始考试类型字典项：试卷类型树要按 paperCategory / stage / subjects 分组与过滤，光有名字不够。
+    这几项由平台管理端「考试类型」树投影而来（见 mock/admin-store 的 syncExamTypeDict） */
 const examTypeItems = computed(() => dict.value.examType)
 
 /**

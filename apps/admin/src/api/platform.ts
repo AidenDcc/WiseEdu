@@ -8,6 +8,7 @@ import type {
   DictItem,
   DictTypeKey,
   ErrorLog,
+  ExamTypeNode,
   KnowledgeNode,
   LoginLog,
   OperationLog,
@@ -49,10 +50,6 @@ export function deleteDictItem(type: DictTypeKey, id: number) {
   return request<null>(`/admin/dict/${type}/delete`, { method: 'POST', data: { id } })
 }
 
-export function moveDictItem(type: DictTypeKey, id: number, direction: -1 | 1) {
-  return request<null>(`/admin/dict/${type}/move`, { method: 'POST', data: { id, direction } })
-}
-
 /* ===== 知识点树 / 教材版本 ===== */
 
 export function fetchKnowledge() {
@@ -69,6 +66,27 @@ export function toggleKnowledgeNode(id: number) {
 
 export function deleteKnowledgeNode(id: number) {
   return request<null>('/admin/knowledge/delete', { method: 'POST', data: { id } })
+}
+
+/* ===== 考试类型树（需求四：与知识点树同构，最多 5 层） ===== */
+
+export function fetchExamTypeNodes() {
+  return request<ExamTypeNode[]>('/admin/exam-type-nodes')
+}
+
+export function saveExamTypeNode(data: Partial<ExamTypeNode>) {
+  return request<ExamTypeNode>('/admin/exam-type-nodes/save', { method: 'POST', data })
+}
+
+export function toggleExamTypeNode(id: number) {
+  return request<{ enabled: boolean }>('/admin/exam-type-nodes/toggle', {
+    method: 'POST',
+    data: { id },
+  })
+}
+
+export function deleteExamTypeNode(id: number) {
+  return request<null>('/admin/exam-type-nodes/delete', { method: 'POST', data: { id } })
 }
 
 export function fetchTextbooks() {

@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   AppIcon,
+  AppSegmented,
   AppTabs,
   BarChart,
   CERT_CATEGORIES,
@@ -13,6 +14,7 @@ import {
 } from '@aiteach/shared'
 import type { FeatureSwitches, PackageRecord, TenantDetailModel } from '@aiteach/shared'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
+import { REGION_OPTIONS, regionPath, regionText } from '@/utils/region'
 import {
   fetchPackages,
   fetchTenantDetail,
@@ -49,6 +51,11 @@ const detail = ref<TenantDetailModel | null>(null)
 const packages = ref<PackageRecord[]>([])
 const activeTab = ref<'base' | 'feature' | 'isolation' | 'stats'>('base')
 const saving = ref(false)
+/* 详情页默认只读，点「编辑」才进编辑态、按钮变「保存」。三个页签各一份、互不牵连：
+   在基础信息里点编辑不该把套餐权限也一并变成可改 */
+const editingBase = ref(false)
+const editingFeature = ref(false)
+const editingIsolation = ref(false)
 
 type TabKey = 'base' | 'feature' | 'isolation' | 'stats'
 const TABS: Array<{ key: TabKey; label: string }> = [
@@ -63,7 +70,11 @@ const baseForm = reactive({
   name: '',
   contact: '',
   phone: '',
+  /* city 存的是「省市区连写」的一行字（与列表、页头同一份），编辑时由 region 这个级联路径
+     决定，保存时才 regionText() 回字符串。两者都留着：region 只服务编辑态，city 负责展示 ——
+     数据里出现数据集没有的区划时，regionPath 解析不完整也不会让已存的值显示成空 */
   city: '',
+  region: [] as string[],
   address: '',
   intro: '',
   stages: [] as string[],
@@ -79,6 +90,66 @@ const currentPackageId = ref(0)
 /* ===== Tab 3：数据隔离 ===== */
 const isolationForm = reactive({ isolationType: 1 as 1 | 2, storageRegion: '' })
 
+/* ===== Tab 4：数据统计 · AI 调用量的粒度 ===== */
+const AI_RANGES = [
+  { value: 'month', label: '本月' },
+  { value: 'half', label: '半年' },
+]
+/* 默认落在「本月」：进这页多半是看当月的量，而「近 6 个月」在列表页和页头都已经有地方在说了 */
+const aiRange = ref<'month' | 'half'>('month')
+/* 正在查看的月份（YYYY-MM）。真正的初值在 load 里补成当月 —— 可选月份来自日历，不必预先知道 */
+const aiMonth = ref('')
+
+/* 有数据的月份集合（aiDaily 覆盖的近 12 个月），给日历标底色用 */
+const aiDataMonths = computed(() => new Set((detail.value?.aiDaily ?? []).map((item) => item.month)))
+
+/* el-date-picker 的 cell-class-name 钩子：每画一格月份调一次，返回值当类名打在格子上。
+   只给「有数据」的格子加类，「没有数据」的由 CSS 用 :not() 反向选中 —— 这个返回值会被当成
+   类名对象的键（组件内部是 `style[cell.customClass] = true`），要塞两个类名得靠空格，不值得 */
+function aiMonthCellClass(date: Date): string {
+  const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+  return aiDataMonths.value.has(month) ? 'ai-month-has-data' : ''
+}
+
+/** 该月的天数（'2026-02' → 28）。横轴要摊满整月，数不到的日子由调用方补 0 */
+function daysInMonth(month: string) {
+  const [year, mon] = month.split('-').map(Number)
+  return new Date(year, mon, 0).getDate()
+}
+
+/** 图表只认 labels + values + 标题，两种粒度在这一处收口，模板不必再分叉 */
+const aiChart = computed(() => {
+  const model = detail.value
+  if (!model) return { labels: [] as string[], values: [] as number[], title: '' }
+  if (aiRange.value === 'half') {
+    return {
+      labels: model.aiMonthly.months,
+      values: model.aiMonthly.calls,
+      title: '近 6 个月 AI 调用量（次）',
+    }
+  }
+  const months = model.aiMonthly.months
+  const month = aiMonth.value || months[months.length - 1] || ''
+  const daily = model.aiDaily.find((item) => item.month === month)?.calls ?? []
+  const days = daysInMonth(month)
+  /* 月份的前导 0 要去掉：'2026-02' 读作「2026 年 2 月」，不是「02 月」 */
+  const [year, monthNo] = month.split('-')
+  return {
+    /* 横轴恒为该月全部日子（1..28/30/31），数据里没有的位置补 0：当月没到的日子，
+       以及日历上选到的窗口外月份（整月都是 0）—— 缺口画 0 好过把横轴截短 */
+    labels: Array.from({ length: days }, (_, index) => String(index + 1)),
+    values: Array.from({ length: days }, (_, index) => daily[index] ?? 0),
+    /* 窗口外的月份数据里根本没有这一项，标题上点一句，免得一整片 0 的图看着像坏了 */
+    title: `${year} 年 ${Number(monthNo)} 月 AI 调用量（次）${daily.length ? '' : ' · 暂无数据'}`,
+  }
+})
+
+/* AppSegmented 回传的是 string，这里收窄回联合类型（仓库里几处调用同款写法）。
+   切粒度不动 aiMonth：从「9 月」切去半年再切回来，应当还在 9 月 */
+function setAiRange(value: string) {
+  aiRange.value = value as 'month' | 'half'
+}
+
 const within24h = computed(() => {
   if (!detail.value) return false
   return (Date.now() - new Date(detail.value.tenant.createdAt).getTime()) / 3600_000 <= 24
@@ -90,21 +161,82 @@ const usageRatio = computed(() => {
   return quotas.aiQuota ? aiUsed / quotas.aiQuota : 0
 })
 
-async function load() {
-  detail.value = await fetchTenantDetail(TENANT_ID)
-  const { tenant, pkg } = detail.value
+/** 页头那行地址：所在地区 + 门牌级地址拼成一份完整地址（两者都空时才显示占位文案） */
+const addressText = computed(() => {
+  const tenant = detail.value?.tenant
+  if (!tenant) return ''
+  const parts = [tenant.city, tenant.address].filter((value) => value && value.trim())
+  return parts.length ? parts.join(' ') : '未填写地址'
+})
+
+/**
+ * 把详情回填进三份表单。拆成三个而不是合成一个，是为了让「取消」只回滚自己那个页签 ——
+ * 三个页签各有独立编辑态，在基础信息点取消不该把套餐权限里未保存的改动一并抹掉。
+ */
+function fillBaseForm() {
+  const tenant = detail.value?.tenant
+  if (!tenant) return
   baseForm.name = tenant.name
   baseForm.contact = tenant.contact
   baseForm.phone = tenant.phone
   baseForm.city = tenant.city
+  baseForm.region = regionPath(tenant.city)
   baseForm.address = tenant.address
   baseForm.intro = tenant.intro
   baseForm.stages = [...tenant.stages]
+}
+
+function fillFeatureForm() {
+  const tenant = detail.value?.tenant
+  if (!tenant) return
   featureForm.switches = { ...tenant.switches }
   featureForm.quotas = { ...tenant.quotas }
   currentPackageId.value = tenant.packageId
+}
+
+function fillIsolationForm() {
+  const tenant = detail.value?.tenant
+  if (!tenant) return
   isolationForm.isolationType = tenant.isolationType
   isolationForm.storageRegion = tenant.storageRegion
+}
+
+async function load() {
+  const model = await fetchTenantDetail(TENANT_ID)
+  detail.value = model
+  fillBaseForm()
+  fillFeatureForm()
+  fillIsolationForm()
+  /* 只在首次落位到当月；保存后重新 load 不该把用户选好的月份弹回当月 */
+  if (!aiMonth.value) {
+    const months = model.aiMonthly.months
+    aiMonth.value = months[months.length - 1] ?? ''
+  }
+}
+
+/* 「取消」＝丢弃本页签未保存的改动。就地用详情里的值重填，不再打一次接口
+   （detail 已在内存里）。这与两端 ProfileView 的先例（取消不回滚）有意不同：
+   那边只有 4 个字段，这边基础信息 7 个、套餐权限 10 个，不回滚会让只读视图显示一批
+   并未保存的值，「看起来已改其实没存」。 */
+function cancelBase() {
+  fillBaseForm()
+  editingBase.value = false
+}
+function cancelFeature() {
+  fillFeatureForm()
+  editingFeature.value = false
+}
+function cancelIsolation() {
+  fillIsolationForm()
+  editingIsolation.value = false
+}
+
+/* 切页签即退出编辑态并回滚，避免「改了没存 → 切走 → 切回来还是脏的、却没有任何提示」 */
+function switchTab(value: string) {
+  activeTab.value = value as TabKey
+  cancelBase()
+  cancelFeature()
+  cancelIsolation()
 }
 
 function toggleStage(stage: string) {
@@ -135,9 +267,21 @@ async function saveBase() {
   }
   saving.value = true
   try {
-    await updateTenantBase(TENANT_ID, { ...baseForm, stages: [...baseForm.stages] })
+    await updateTenantBase(TENANT_ID, {
+      name: baseForm.name,
+      contact: baseForm.contact,
+      phone: baseForm.phone,
+      /* 发给后端的是拼好的字符串；region 是编辑态的内部表示，不出门 */
+      city: regionText(baseForm.region),
+      address: baseForm.address,
+      intro: baseForm.intro,
+      stages: [...baseForm.stages],
+    })
     showToast('基础信息已保存', 'success')
-    load()
+    /* 保存成功即回到只读态。先置 false 再 await load()：load 只写表单数据、不碰编辑态，
+       所以不会出现「编辑态闪回」；await 是为了让 saving 在数据刷新后才归位 */
+    editingBase.value = false
+    await load()
   } catch (error) {
     showToast(error instanceof ApiError ? error.message : '保存失败，请重试', 'error')
   } finally {
@@ -153,7 +297,8 @@ async function saveFeature() {
       quotas: { ...featureForm.quotas },
     })
     showToast('套餐权限已保存，机构端菜单将实时生效', 'success')
-    load()
+    editingFeature.value = false
+    await load()
   } catch (error) {
     showToast(error instanceof ApiError ? error.message : '保存失败，请重试', 'error')
   } finally {
@@ -166,7 +311,8 @@ async function saveIsolation() {
   try {
     await updateTenantIsolation(TENANT_ID, isolationForm.isolationType, isolationForm.storageRegion)
     showToast('数据隔离策略已保存', 'success')
-    load()
+    editingIsolation.value = false
+    await load()
   } catch (error) {
     showToast(error instanceof ApiError ? error.message : '保存失败，请重试', 'error')
   } finally {
@@ -208,6 +354,9 @@ onMounted(async () => {
             · <span class="disabled-reason">禁用原因：{{ detail.tenant.disableReason }}</span>
           </template>
         </p>
+        <!-- 地址放左侧信息区，不放右侧 .head-facts —— 那是一栏右对齐的数字区，
+             长地址塞进去会把「本月 AI 用量 / 到期时间」挤变形 -->
+        <p class="head-sub">地址：{{ addressText }}</p>
       </div>
       <div class="head-facts">
         <div class="fact">
@@ -226,53 +375,98 @@ onMounted(async () => {
     <!-- Tabs -->
     <div class="panel">
       <div class="tabs-wrap">
-        <AppTabs :tabs="TABS" :model-value="activeTab" @update:model-value="activeTab = $event as TabKey" />
+        <AppTabs :tabs="TABS" :model-value="activeTab" @update:model-value="switchTab" />
       </div>
 
       <div class="tab-body">
         <!-- Tab 1 基础信息 -->
         <section v-if="activeTab === 'base'" class="form-col">
-          <div class="form-grid">
-            <div class="f-field">
-              <label class="f-label">机构名称<span class="req">*</span></label>
-              <input v-model="baseForm.name" class="f-input" placeholder="机构全称" />
+          <!-- 只读态：详情页默认就是一份档案，不点「编辑」不给输入框 -->
+          <div v-if="!editingBase" class="detail-grid">
+            <div class="detail-item">
+              <div class="d-label">机构名称</div>
+              <div class="d-value">{{ baseForm.name || '—' }}</div>
             </div>
-            <div class="f-field">
-              <label class="f-label">所在城市</label>
-              <input v-model="baseForm.city" class="f-input" placeholder="如：浙江省杭州市" />
+            <div class="detail-item">
+              <div class="d-label">联系人</div>
+              <div class="d-value">{{ baseForm.contact || '—' }}</div>
             </div>
-            <div class="f-field span-2">
-              <label class="f-label">机构地址</label>
-              <input v-model="baseForm.address" class="f-input" placeholder="门牌级详细地址，如：洪山区珞喻路 152 号 3 号楼" />
+            <div class="detail-item">
+              <div class="d-label">所在地区</div>
+              <div class="d-value">{{ baseForm.city || '—' }}</div>
             </div>
-            <div class="f-field">
-              <label class="f-label">联系人</label>
-              <input v-model="baseForm.contact" class="f-input" />
+            <div class="detail-item">
+              <div class="d-label">联系电话</div>
+              <div class="d-value">{{ baseForm.phone || '—' }}</div>
             </div>
-            <div class="f-field">
-              <label class="f-label">联系电话</label>
-              <input v-model="baseForm.phone" class="f-input" />
+            <div class="detail-item span-2">
+              <div class="d-label">机构地址</div>
+              <div class="d-value">{{ baseForm.address || '—' }}</div>
             </div>
-          </div>
-          <div class="f-field">
-            <label class="f-label">覆盖学段</label>
-            <div class="stage-row">
-              <button
-                v-for="stage in STAGES"
-                :key="stage"
-                class="stage-btn"
-                :class="{ active: baseForm.stages.includes(stage) }"
-                type="button"
-                @click="toggleStage(stage)"
-              >
-                {{ stage }}
-              </button>
+            <div class="detail-item span-2">
+              <div class="d-label">覆盖学段</div>
+              <div class="d-value">{{ baseForm.stages.join(' / ') || '未设置学段' }}</div>
+            </div>
+            <div class="detail-item span-2">
+              <div class="d-label">机构简介</div>
+              <div class="d-value multi">{{ baseForm.intro || '未填写' }}</div>
             </div>
           </div>
-          <div class="f-field">
-            <label class="f-label">机构简介</label>
-            <textarea v-model="baseForm.intro" class="f-textarea" maxlength="300" />
-          </div>
+
+          <!-- 编辑态：与改造前的基础信息表单一致 -->
+          <template v-else>
+            <div class="form-grid">
+              <div class="f-field">
+                <label class="f-label">机构名称<span class="req">*</span></label>
+                <input v-model="baseForm.name" class="f-input" placeholder="机构全称" />
+              </div>
+              <!-- 与「新增机构」同一个控件、同一份省市区数据（样式在 main.css 的 .region-picker） -->
+              <div class="f-field">
+                <label class="f-label">所在地区</label>
+                <div class="region-picker">
+                  <el-cascader
+                    v-model="baseForm.region"
+                    :options="REGION_OPTIONS"
+                    :props="{ expandTrigger: 'hover' }"
+                    placeholder="省 / 市 / 区"
+                    clearable
+                    filterable
+                  />
+                </div>
+              </div>
+              <div class="f-field span-2">
+                <label class="f-label">机构地址</label>
+                <input v-model="baseForm.address" class="f-input" placeholder="门牌级详细地址，如：洪山区珞喻路 152 号 3 号楼" />
+              </div>
+              <div class="f-field">
+                <label class="f-label">联系人</label>
+                <input v-model="baseForm.contact" class="f-input" />
+              </div>
+              <div class="f-field">
+                <label class="f-label">联系电话</label>
+                <input v-model="baseForm.phone" class="f-input" />
+              </div>
+            </div>
+            <div class="f-field">
+              <label class="f-label">覆盖学段</label>
+              <div class="stage-row">
+                <button
+                  v-for="stage in STAGES"
+                  :key="stage"
+                  class="stage-btn"
+                  :class="{ active: baseForm.stages.includes(stage) }"
+                  type="button"
+                  @click="toggleStage(stage)"
+                >
+                  {{ stage }}
+                </button>
+              </div>
+            </div>
+            <div class="f-field">
+              <label class="f-label">机构简介</label>
+              <textarea v-model="baseForm.intro" class="f-textarea" maxlength="300" />
+            </div>
+          </template>
 
           <h4 class="section-title">资质材料</h4>
           <div v-for="group in certGroups" :key="group.category" class="cert-block">
@@ -294,9 +488,13 @@ onMounted(async () => {
           <p v-if="certGroups.length === 0" class="cert-empty">该机构暂无资质档案</p>
 
           <div class="form-actions">
-            <button class="btn btn-primary btn-sm" :disabled="saving" @click="saveBase">
-              {{ saving ? '保存中…' : '保存修改' }}
-            </button>
+            <button v-if="!editingBase" class="btn btn-primary btn-sm" @click="editingBase = true">编辑</button>
+            <div v-else class="op-group">
+              <button class="btn btn-ghost btn-sm" :disabled="saving" @click="cancelBase">取消</button>
+              <button class="btn btn-primary btn-sm" :disabled="saving" @click="saveBase">
+                {{ saving ? '保存中…' : '保存' }}
+              </button>
+            </div>
           </div>
         </section>
 
@@ -326,12 +524,40 @@ onMounted(async () => {
                 <b>{{ feature.label }}</b>
                 <span>{{ feature.desc }}</span>
               </div>
-              <AppSwitch v-model="featureForm.switches[feature.key]" />
+              <!-- 只读态用标签而不是禁用态的 AppSwitch：后者的 .disabled 是整体 opacity: .5，
+                   会把「已开启」的品牌色一并灰掉，看起来像坏掉的控件，而只读要的是陈述事实 -->
+              <AppSwitch v-if="editingFeature" v-model="featureForm.switches[feature.key]" />
+              <span
+                v-else
+                class="tag"
+                :class="featureForm.switches[feature.key] ? 'tag-green' : 'tag-gray'"
+              >
+                {{ featureForm.switches[feature.key] ? '已开启' : '已关闭' }}
+              </span>
             </div>
           </div>
 
           <h4 class="section-title" style="margin-top: 22px">资源配额</h4>
-          <div class="form-grid">
+          <!-- 只读态：四项配额正好两行，不必再套 .form-grid 的字段间距 -->
+          <div v-if="!editingFeature" class="detail-grid">
+            <div class="detail-item">
+              <div class="d-label">AI 月度额度（次）</div>
+              <div class="d-value">{{ featureForm.quotas.aiQuota.toLocaleString('zh-CN') }}</div>
+            </div>
+            <div class="detail-item">
+              <div class="d-label">存储空间（GB）</div>
+              <div class="d-value">{{ featureForm.quotas.storageGb }}</div>
+            </div>
+            <div class="detail-item">
+              <div class="d-label">最大员工数</div>
+              <div class="d-value">{{ featureForm.quotas.maxStaff }}</div>
+            </div>
+            <div class="detail-item">
+              <div class="d-label">AI 并发上限</div>
+              <div class="d-value">{{ featureForm.quotas.maxConcurrent }}</div>
+            </div>
+          </div>
+          <div v-else class="form-grid">
             <div class="f-field">
               <label class="f-label">AI 月度额度（次）</label>
               <input v-model.number="featureForm.quotas.aiQuota" class="f-input" type="number" min="0" />
@@ -350,20 +576,30 @@ onMounted(async () => {
             </div>
           </div>
           <div class="form-actions">
-            <button class="btn btn-primary btn-sm" :disabled="saving" @click="saveFeature">
-              {{ saving ? '保存中…' : '保存权限配置' }}
-            </button>
+            <button v-if="!editingFeature" class="btn btn-primary btn-sm" @click="editingFeature = true">编辑</button>
+            <div v-else class="op-group">
+              <button class="btn btn-ghost btn-sm" :disabled="saving" @click="cancelFeature">取消</button>
+              <button class="btn btn-primary btn-sm" :disabled="saving" @click="saveFeature">
+                {{ saving ? '保存中…' : '保存' }}
+              </button>
+            </div>
           </div>
         </section>
 
         <!-- Tab 3 数据隔离 -->
         <section v-else-if="activeTab === 'isolation'" class="isolation-body">
           <div class="iso-cards">
+            <!-- 只读态仍保留 .active 高亮（要看出当前生效的是哪一种），但不给点。
+                 不复用 .disabled：它带较低的不透明度，会把选中卡片也一起洗白 -->
             <button
               class="iso-card"
-              :class="{ active: isolationForm.isolationType === 1, disabled: !within24h }"
+              :class="{
+                active: isolationForm.isolationType === 1,
+                readonly: !editingIsolation,
+                disabled: editingIsolation && !within24h,
+              }"
               type="button"
-              @click="within24h && (isolationForm.isolationType = 1)"
+              @click="editingIsolation && within24h && (isolationForm.isolationType = 1)"
             >
               <div class="iso-icon"><AppIcon name="grid" :size="22" /></div>
               <b>标准隔离（共享库 + 租户ID）</b>
@@ -371,9 +607,13 @@ onMounted(async () => {
             </button>
             <button
               class="iso-card"
-              :class="{ active: isolationForm.isolationType === 2, disabled: !within24h }"
+              :class="{
+                active: isolationForm.isolationType === 2,
+                readonly: !editingIsolation,
+                disabled: editingIsolation && !within24h,
+              }"
               type="button"
-              @click="within24h && (isolationForm.isolationType = 2)"
+              @click="editingIsolation && within24h && (isolationForm.isolationType = 2)"
             >
               <div class="iso-icon"><AppIcon name="shield" :size="22" /></div>
               <b>专属数据库（独立实例）</b>
@@ -381,7 +621,13 @@ onMounted(async () => {
             </button>
           </div>
 
-          <div class="form-grid" style="margin-top: 18px">
+          <div v-if="!editingIsolation" class="detail-grid" style="margin-top: 18px">
+            <div class="detail-item">
+              <div class="d-label">存储区域</div>
+              <div class="d-value">{{ isolationForm.storageRegion || '—' }}</div>
+            </div>
+          </div>
+          <div v-else class="form-grid" style="margin-top: 18px">
             <div class="f-field">
               <label class="f-label">存储区域</label>
               <select v-model="isolationForm.storageRegion" class="f-select" :disabled="!within24h">
@@ -395,10 +641,20 @@ onMounted(async () => {
             机构创建超过 24 小时后，隔离策略变更需平台技术支持执行数据迁移，如有需要请提交工单。
           </div>
 
+          <!-- 超过 24h 干脆不给「编辑」：点进去整屏控件全是禁用态，是个没有出口的死状态 -->
           <div class="form-actions">
-            <button class="btn btn-primary btn-sm" :disabled="saving || !within24h" @click="saveIsolation">
-              {{ saving ? '保存中…' : '保存隔离策略' }}
+            <button v-if="!within24h" class="btn btn-ghost btn-sm" disabled>
+              隔离策略已锁定（创建超 24h）
             </button>
+            <button v-else-if="!editingIsolation" class="btn btn-primary btn-sm" @click="editingIsolation = true">
+              编辑
+            </button>
+            <div v-else class="op-group">
+              <button class="btn btn-ghost btn-sm" :disabled="saving" @click="cancelIsolation">取消</button>
+              <button class="btn btn-primary btn-sm" :disabled="saving || !within24h" @click="saveIsolation">
+                {{ saving ? '保存中…' : '保存' }}
+              </button>
+            </div>
           </div>
         </section>
 
@@ -425,12 +681,34 @@ onMounted(async () => {
 
           <div class="panel" style="padding: 18px 20px 8px; margin-top: 14px">
             <div class="chart-head">
-              <h4 class="section-title" style="margin: 0">近 6 个月 AI 调用量（次）</h4>
-              <button class="btn btn-ghost btn-sm" @click="onExport">
-                <AppIcon name="download" :size="14" /> 导出报表
-              </button>
+              <h4 class="section-title" style="margin: 0">{{ aiChart.title }}</h4>
+              <div class="chart-ops">
+                <!-- 月份日历只在「本月」这种按天的粒度下出现：半年视图本来就摊着 6 个月，
+                     再给一个「看哪个月」的选择器会让人以为它能改变那 6 根柱子。
+                     有数据的月份在日历里带品牌淡底，标色写在 main.css 的 .ai-month-popper
+                     （日历面板 teleport 到 body，scoped 样式够不着） -->
+                <div v-if="aiRange === 'month'" class="chart-picker">
+                  <el-date-picker
+                    v-model="aiMonth"
+                    type="month"
+                    value-format="YYYY-MM"
+                    :clearable="false"
+                    :cell-class-name="aiMonthCellClass"
+                    popper-class="ai-month-popper"
+                    placeholder="选择月份"
+                  />
+                </div>
+                <AppSegmented
+                  :options="AI_RANGES"
+                  :model-value="aiRange"
+                  @update:model-value="setAiRange"
+                />
+                <button class="btn btn-ghost btn-sm" @click="onExport">
+                  <AppIcon name="download" :size="14" /> 导出报表
+                </button>
+              </div>
             </div>
-            <BarChart :labels="detail.aiMonthly.months" :values="detail.aiMonthly.calls" :height="240" />
+            <BarChart :labels="aiChart.labels" :values="aiChart.values" :height="240" />
           </div>
         </section>
       </div>
@@ -500,6 +778,17 @@ onMounted(async () => {
 /* 机构地址独占一行：地址本来长，挤在半栏里放不下；顺带把字段数凑成
    「名称|城市 / 地址 / 联系人|电话」三行，不留半格空位 */
 .form-grid .span-2 { grid-column: span 2; }
+/* 只读态。`.detail-grid` 是 main.css 的全局类，自带两列网格、不带跨度规则，
+   跨度得由使用方自己加。与上面那条刻意分开写：选择的容器不同，
+   合并成一个选择器会让只读网格里的描述项跟着 .form-grid 的规则走 */
+.detail-grid .span-2 { grid-column: span 2; }
+/* 机构简介这类多行文本：别跟着 .d-value 的字重一起加粗，行距也放宽一点 */
+.detail-grid .d-value.multi {
+  font-weight: 400;
+  color: var(--ink-2);
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
 .stage-row { display: flex; align-items: center; gap: 8px; }
 .stage-btn {
   height: 36px;
@@ -607,6 +896,10 @@ onMounted(async () => {
 .iso-card.active { border-color: var(--brand); background: var(--brand-soft); }
 .iso-card.active .iso-icon { color: #fff; background: var(--brand-grad); }
 .iso-card.disabled { opacity: 0.55; cursor: not-allowed; }
+/* 只读态：卡片照常显示、保留 .active 高亮（要看得出当前生效的是哪一种），只是不给点。
+   cursor 必须显式退回 default —— main.css 有全局的 `button { cursor: pointer }`，
+   而这时卡片是点不动的；也不能复用 .disabled，它的 opacity 会把选中卡一起洗白 */
+.iso-card.readonly { cursor: default; }
 .iso-icon {
   width: 40px;
   height: 40px;
@@ -638,7 +931,28 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   margin-bottom: 12px;
+}
+.chart-ops { display: flex; align-items: center; gap: 8px; }
+/* 图表头里的月份选择器。两层写法都是必须的：
+   宽度 —— `.el-date-editor` 把 `--el-date-editor-width: 220px` 声明在**元素自己身上**，从祖先赋值
+     传不下去（与 TenantListView 的 .range-picker 同一个坑），只能外层定宽 + :deep() 提权重压成 100%；
+   配色 —— 它同样在自身上声明了一整套 --el-input-*，所以覆盖的是这些令牌本身。
+   --el-component-size 定高 32px，与旁边的 AppSegmented、导出按钮齐平。 */
+.chart-picker {
+  width: 130px;
+  flex-shrink: 0;
+  --el-component-size: 32px;
+}
+.chart-picker :deep(.el-date-editor) {
+  width: 100%;
+  --el-input-border-color: var(--border);
+  --el-input-hover-border-color: #c9d2e6;
+  --el-input-focus-border-color: var(--brand);
+  --el-input-text-color: var(--ink);
+  --el-input-placeholder-color: var(--sub);
+  --el-input-icon-color: var(--sub);
 }
 
 .loading-panel { text-align: center; color: var(--sub); padding: 60px 0; font-size: 13px; }

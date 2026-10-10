@@ -134,9 +134,9 @@ const filtered = computed(() => papers.value.filter((row) => matches(row)))
 const rows = computed(() => filtered.value.slice((page.value - 1) * 10, page.value * 10))
 
 /* ===== 左侧：考试类型树（分类 → 考试类型） =====
- * 分组与归属来自平台管理端「基础字典 - 考试类型」的 `paperCategory`，这里只按 `PAPER_CATEGORIES`
- * 的顺序归组；没配分类的字典项不进树 —— 于是筛不到它。这不是漏洞：字典管理端**强制**考试类型
- * 必须选分类（`DictBaseView` 保存前拦截），配不出没有分类的类型。与组卷工作台试卷页签同一条口径。 */
+ * 分组与归属来自平台管理端「考试类型」树的 `paperCategory`，这里只按 `PAPER_CATEGORIES`
+ * 的顺序归组；没配分类的项不进树 —— 于是筛不到它。这不是漏洞：那棵树的一级节点就是四个
+ * 试卷分类、新节点只能挂在某个分类下，配不出没有分类的类型。与组卷工作台试卷页签同一条口径。 */
 const scopedExamTypeItems = computed(() => {
   const stages = filters.grade.map((grade) => stageOf(grade) ?? '')
   const subjects = filters.subject

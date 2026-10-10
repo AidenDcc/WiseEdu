@@ -23,13 +23,24 @@ function withQuery<T extends object>(url: string, params: T): string {
 
 /* ===== 入驻审核（FR-PT-005 ~ 007） ===== */
 
-export function fetchApplies(params: { status?: string; orgType?: string; keyword?: string }) {
-  return request<TenantApply[]>(withQuery('/admin/tenant/applies', params))
+export interface ApplyQuery {
+  status?: string
+  orgType?: string
+  keyword?: string
+  /** 已 join 成逗号串的学段（`withQuery` 会 `String(value)`，数组直接传会变成 "小学,初中" 的另一种拼法） */
+  stages?: string
+  contact?: string
+  page?: number
+  pageSize?: number
+}
+
+export function fetchApplies(params: ApplyQuery) {
+  return request<PageResult<TenantApply>>(withQuery('/admin/tenant/applies', params))
 }
 
 export function approveApply(
   id: number,
-  payload: { trialDays: number; packageId: number; adminAccount: string },
+  payload: { trialDays: number; packageId: number; adminAccount: string; reviewer?: string },
 ) {
   return request<{ tenantName: string; expireTime: string; adminAccount: string }>(
     `/admin/tenant/applies/${id}/approve`,
@@ -37,10 +48,11 @@ export function approveApply(
   )
 }
 
-export function rejectApply(id: number, reason: string) {
+/* reviewer = 当前登录管理员的姓名，落进申请的审核留痕（列表的「审核时间 / 操作人」读它） */
+export function rejectApply(id: number, reason: string, reviewer?: string) {
   return request<null>(`/admin/tenant/applies/${id}/reject`, {
     method: 'POST',
-    data: { reason },
+    data: { reason, reviewer },
   })
 }
 
@@ -69,6 +81,9 @@ export interface TenantQuery {
   keyword?: string
   expireFrom?: string
   expireTo?: string
+  /** 本月 AI 用量区间（闭区间，与列表「本月 AI 用量」列同口径） */
+  aiMin?: string
+  aiMax?: string
   page?: number
   pageSize?: number
 }

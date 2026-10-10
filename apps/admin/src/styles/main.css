@@ -307,6 +307,45 @@ div.empty-row { padding: 30px 0 !important; margin: 0; }
 .f-field .f-err { font-size: 12px; color: var(--danger); margin-top: 5px; }
 .f-hint { font-size: 12px; color: var(--sub); margin-top: 5px; line-height: 1.5; }
 
+/* 省市区级联（Element Plus，全局注册）。新增机构与机构详情两处共用，所以放全局而不是某个页面的 scoped。
+   它的外观全由自己的令牌算出来（默认高 32px、圆角 4px、边框是 1px 的 inset 阴影、主色是组件库自己的蓝），
+   摆在 .f-input 旁边一眼就能看出是外来户。这里把尺寸与配色这几颗令牌换成设计系统的值 —— 令牌都是声明在
+   `.el-input` / `.el-input__wrapper` 元素**自身**上的 var() 引用，从外层容器赋值传得下去，所以不用像日期
+   选择器那样硬压权重（那个宽度坑是「值写死在元素自身上」，两回事）。 */
+.region-picker {
+  width: 100%;
+  --el-component-size: 38px; /* 与 .f-input 同高（其中内层 36px + 上下各 1px 内边距） */
+  --el-border-radius-base: 10px;
+  --el-font-size-base: 13.5px;
+  --el-input-border-color: var(--border);
+  --el-input-hover-border-color: #c9d2e6;
+  --el-input-placeholder-color: var(--sub);
+  --el-input-icon-color: var(--sub);
+  --el-color-primary: var(--brand); /* 聚焦描边（is-focus 的 box-shadow 用它） */
+}
+.region-picker .el-cascader { width: 100%; line-height: normal; }
+
+/* 机构详情「数据统计」的月份日历（Element Plus 的 el-date-picker type="month"）。它的面板
+   teleport 到 body，页面的 scoped 样式够不着，所以令牌与标色都写在这里。
+   1) 选中月份那颗胶囊、今天的高亮：换成本仓品牌色 —— 面板根 `.el-date-picker` 上那句
+      `--el-datepicker-active-color: var(--el-color-primary)` 是在 popper 内部求值的，
+      在 popper 类上赋 `--el-color-primary` 就能一路传下去；
+   2) 「有数据」的月份：月份格给一层品牌淡底。类名由 TenantDetailView 的 aiMonthCellClass
+      通过 el-date-picker 的 cell-class-name 钩子打在格子的 <td> 上；
+   3) 「没有数据」的月份只把字压淡一档 —— 仍然点得动，点进去画一整月的 0。
+   选择器前面那截 `.el-picker-panel` 是为了拉开权重：组件库的 :hover / .current 几条与本条同权重，
+   而 main.css 在 element-plus 的样式**之前**加载，靠顺序分胜负不可靠。
+   两条都排除 .current：选中态自带品牌胶囊，再叠一层底色会脏。 */
+.ai-month-popper { --el-color-primary: var(--brand); }
+.ai-month-popper .el-picker-panel .el-month-table td.ai-month-has-data:not(.current) .el-date-table-cell__text {
+  background: var(--brand-soft);
+  color: var(--brand-deep);
+  font-weight: 600;
+}
+.ai-month-popper .el-picker-panel .el-month-table td:not(.ai-month-has-data):not(.current) .el-date-table-cell__text {
+  color: var(--sub);
+}
+
 /* 次级/危险按钮 */
 .btn-ghost {
   color: var(--ink-2);

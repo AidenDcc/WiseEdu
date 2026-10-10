@@ -390,7 +390,11 @@ export const mockRoutes: MockRoute[] = [
   {
     method: 'GET',
     path: '/admin/tenant/applies',
-    handler: ({ query }) => guard(() => store.listApplies(query)),
+    handler: ({ query }) =>
+      guard(() => {
+        const all = store.listApplies(query)
+        return store.paginate(all, Number(query.page ?? 1), Number(query.pageSize ?? 10))
+      }),
   },
   {
     method: 'POST',
@@ -437,14 +441,19 @@ export const mockRoutes: MockRoute[] = [
             mockFail(3001, '试用天数须为 1-90 的整数')
           }
           if (!adminAccount) mockFail(3002, '初始管理员账号不能为空')
-          const tenant = store.approveApply(id, { trialDays, packageId, adminAccount })
+          const tenant = store.approveApply(id, {
+            trialDays,
+            packageId,
+            adminAccount,
+            reviewer: String(body.reviewer ?? '').trim() || undefined,
+          })
           return { tenantName: tenant.name, expireTime: tenant.expireTime, adminAccount }
         }
         const reason = String(body.reason ?? '').trim()
         if (reason.length < 5 || reason.length > 200) {
           mockFail(3003, '驳回原因须为 5-200 字')
         }
-        store.rejectApply(id, reason)
+        store.rejectApply(id, reason, String(body.reviewer ?? '').trim() || undefined)
         return null
       }),
   },
@@ -571,8 +580,25 @@ export const mockRoutes: MockRoute[] = [
           admin.deleteDictItem(dictType, Number(body.id))
           return null
         }
-        if (action === 'move') {
-          admin.moveDictItem(dictType, Number(body.id), Number(body.direction) === -1 ? -1 : 1)
+        mockFail(404, '接口不存在')
+      }),
+  },
+  /* 考试类型树（合并原「考试类型」+「杯赛」字典，桥接见 admin-store 的 syncExamTypeDict） */
+  {
+    method: 'GET',
+    path: '/admin/exam-type-nodes',
+    handler: () => guard(() => admin.listExamTypeNodes()),
+  },
+  {
+    method: 'POST',
+    path: '/admin/exam-type-nodes/*',
+    handler: ({ path, body }) =>
+      guard(() => {
+        const [, action] = parseSegments(path, '/admin/exam-type-nodes/')
+        if (action === 'save') return admin.saveExamTypeNode(body as Record<string, never>)
+        if (action === 'toggle') return { enabled: admin.toggleExamTypeNode(Number(body.id)) }
+        if (action === 'delete') {
+          admin.deleteExamTypeNode(Number(body.id))
           return null
         }
         mockFail(404, '接口不存在')
@@ -867,11 +893,17 @@ export const mockRoutes: MockRoute[] = [
   { method: 'POST', path: '/admin/system/backups/create', handler: ({ body }) => guard(() => content.createBackup(String(body.scope ?? '全平台'))) },
 ]
 
-/** 从 /admin/dict/{type}/... 中解析字典类型；白名单直接取 DICT_TYPES，新增字典类型时不必再改这里 */
+/**
+ * 从 /admin/dict/{type}/... 中解析字典类型。
+ *
+ * 白名单取 `ADMIN_DICT_TYPES`（不含 examType / competition）：这两类已由「考试类型」树
+ * 接管，若旧接口仍可写，写进去的脏数据会被下一次 `syncExamTypeDict()` 悄悄覆盖。
+ * 机构端不受影响 —— `/tenant/dict` 直接调 `listDict`，不经过这里。
+ */
 function parseDictType(path: string): DictTypeKey {
   const segments = path.split('/').filter(Boolean)
   const type = segments[2]
-  const valid: DictTypeKey[] = admin.DICT_TYPES.map((item) => item.key)
+  const valid: DictTypeKey[] = admin.ADMIN_DICT_TYPES.map((item) => item.key)
   if (!valid.includes(type as DictTypeKey)) mockFail(404, `未知字典类型：${type}`)
   return type as DictTypeKey
 }

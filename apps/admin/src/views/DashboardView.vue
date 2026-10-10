@@ -87,11 +87,11 @@ function onPending(name: string) {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="apply in overview.pendingApplies" :key="apply.applyNo">
+              <tr v-for="apply in overview.pendingApplies" :key="apply.code">
                 <td>
                   <div class="org-cell">
                     <span class="org-name">{{ apply.orgName }}</span>
-                    <span class="org-no">{{ apply.applyNo }}</span>
+                    <span class="org-no">{{ apply.code }}</span>
                   </div>
                 </td>
                 <td class="muted">{{ apply.orgType }} · {{ apply.stages }}</td>

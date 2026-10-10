@@ -37,3 +37,25 @@ export const REGION_OPTIONS: RegionOption[] = Object.entries(pca).map(([province
 export function regionText(path: readonly string[] | null | undefined) {
   return (path ?? []).join('')
 }
+
+/** `regionText` 的反操作，编辑已有机构时把 `city` 拆回级联要的路径数组：
+    '湖北省武汉市江岸区' → ['湖北省','武汉市','江岸区']。
+    沿 REGION_OPTIONS 逐级做前缀匹配、吃掉已匹配的那段再进下一层。
+    匹配不上就停在上一层（返回已匹配的部分）而不抛错 —— 数据里出现数据集没有的区划时，
+    级联显示半截路径也好过整条丢掉；调用方展示时仍以原始字符串为准（见 TenantDetailView）。
+    直辖市的「市辖区」层在上面构造 REGION_OPTIONS 时已被摊平，所以 '上海市杨浦区' 解析成两级。 */
+export function regionPath(city: string | null | undefined): string[] {
+  let rest = (city ?? '').trim()
+  let options: RegionOption[] | undefined = REGION_OPTIONS
+  const path: string[] = []
+  while (rest && options) {
+    /* 命中项要写死类型：不写的话 tsc 会顺着「options 由命中项的 children 变来」绕回去，
+       报 TS7022「hit 隐式 any」。这个标注是给编译器看的，不是给读的人看的 */
+    const hit: RegionOption | undefined = options.find((option) => rest.startsWith(option.value))
+    if (!hit) break
+    path.push(hit.value)
+    rest = rest.slice(hit.value.length)
+    options = hit.children
+  }
+  return path
+}

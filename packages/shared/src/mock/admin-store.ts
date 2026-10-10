@@ -13,6 +13,8 @@ import type {
   DictItem,
   DictTypeKey,
   ErrorLog,
+  ExamTypeNode,
+  ExamTypeNodeKind,
   KnowledgeNode,
   LoginLog,
   OperationLog,
@@ -23,6 +25,7 @@ import type {
   TextbookVersion,
   TenantMenuItem,
 } from '../api/models'
+import { PAPER_CATEGORIES } from '../api/models'
 
 function nowStr(offsetHours = 0): string {
   return new Date(Date.now() + offsetHours * 3600_000).toISOString().slice(0, 19).replace('T', ' ')
@@ -35,16 +38,30 @@ function dateAfter(days: number): string {
 /* ================= 全局字典（FR-PT-015 / 016） ================= */
 
 export const DICT_TYPES: Array<{ key: DictTypeKey; title: string; hint: string }> = [
-  { key: 'subject', title: '学科', hint: '编码唯一，创建后不可修改' },
-  { key: 'grade', title: '年级 / 学段', hint: '年级挂靠学段' },
+  { key: 'subject', title: '学科', hint: '编码唯一，创建后不可修改；可限定适配年级' },
+  { key: 'grade', title: '年级 / 学段', hint: '年级挂靠学段；编码唯一' },
   { key: 'term', title: '学期', hint: '起止日期不可交叉重叠' },
-  { key: 'questionType', title: '题型', hint: '已被题目使用的题型不可修改作答类型；可限定适用学科' },
-  { key: 'difficulty', title: '难度等级', hint: '系数 0.1-1.0，保留 1 位小数且不可重复' },
-  { key: 'examType', title: '考试类型', hint: '题目筛选与组卷场景使用；可配置试卷分类与适配学段 / 学科' },
-  { key: 'competition', title: '杯赛', hint: '题目筛选维度，非杯赛题留空' },
+  { key: 'questionType', title: '题型', hint: '编码唯一；已被题目使用的题型不可修改作答类型，可限定适用学科' },
+  { key: 'difficulty', title: '难度等级', hint: '系数 0-1.0，越小越难；保留 1 位小数且不可重复' },
+  /* 这两项的维护入口已移到「考试类型」树（见 `examTypeNodes`），基础字典里不再展示；
+     hint 保留给机构端与平台端的说明用，不再出现在管理端左栏 */
+  { key: 'examType', title: '考试类型', hint: '题目筛选与组卷场景使用；含试卷分类与适配学段 / 学科，由「考试类型」树维护' },
+  { key: 'competition', title: '杯赛', hint: '题目筛选维度，非杯赛题留空；由「考试类型」树维护' },
   { key: 'region', title: '地区', hint: '题目来源地区，用于筛名校真题' },
   { key: 'copyright', title: '版权信息', hint: '机构端首页页脚文案，一行一条，按排序展示' },
 ]
+
+/**
+ * 管理端「基础字典」左栏可见的类型。
+ *
+ * examType / competition 已由「考试类型」树接管维护（见 `examTypeNodes`），
+ * 不再在基础字典里平铺展示。**但 `DICT_TYPES` 不能跟着删** —— 机构端仍通过
+ * `/tenant/dict?type=examType|competition` 读它们（`listDict` → `dictStore`），
+ * 那两条数据由树的投影函数持续刷新。
+ */
+export const ADMIN_DICT_TYPES = DICT_TYPES.filter(
+  (item) => item.key !== 'examType' && item.key !== 'competition',
+)
 
 /**
  * 杯赛 / 地区的取值。字典项与题目种子共用这一份 —— 题目侧按题号轮转取值（见
@@ -95,18 +112,18 @@ export const dictStore: Record<DictTypeKey, DictItem[]> = {
   ],
   /* refCount 为静态演示值：>0 时仅可停用、不可删除 */
   grade: [
-    { id: 11, name: '一年级', stage: '小学', sort: 1, enabled: true, refCount: 6 },
-    { id: 12, name: '二年级', stage: '小学', sort: 2, enabled: true, refCount: 5 },
-    { id: 17, name: '三年级', stage: '小学', sort: 3, enabled: true, refCount: 2 },
-    { id: 18, name: '四年级', stage: '小学', sort: 4, enabled: true, refCount: 2 },
-    { id: 19, name: '五年级', stage: '小学', sort: 5, enabled: true, refCount: 2 },
-    { id: 20, name: '六年级', stage: '小学', sort: 6, enabled: true, refCount: 2 },
-    { id: 13, name: '七年级', stage: '初中', sort: 7, enabled: true, refCount: 6 },
-    { id: 14, name: '八年级', stage: '初中', sort: 8, enabled: true, refCount: 7 },
-    { id: 21, name: '九年级', stage: '初中', sort: 9, enabled: true, refCount: 7 },
-    { id: 15, name: '高一', stage: '高中', sort: 10, enabled: true, refCount: 9 },
-    { id: 22, name: '高二', stage: '高中', sort: 11, enabled: true, refCount: 7 },
-    { id: 16, name: '高三', stage: '高中', sort: 12, enabled: true, refCount: 5 },
+    { id: 11, name: '一年级', code: 'G01', stage: '小学', sort: 1, enabled: true, refCount: 6 },
+    { id: 12, name: '二年级', code: 'G02', stage: '小学', sort: 2, enabled: true, refCount: 5 },
+    { id: 17, name: '三年级', code: 'G03', stage: '小学', sort: 3, enabled: true, refCount: 2 },
+    { id: 18, name: '四年级', code: 'G04', stage: '小学', sort: 4, enabled: true, refCount: 2 },
+    { id: 19, name: '五年级', code: 'G05', stage: '小学', sort: 5, enabled: true, refCount: 2 },
+    { id: 20, name: '六年级', code: 'G06', stage: '小学', sort: 6, enabled: true, refCount: 2 },
+    { id: 13, name: '七年级', code: 'G07', stage: '初中', sort: 7, enabled: true, refCount: 6 },
+    { id: 14, name: '八年级', code: 'G08', stage: '初中', sort: 8, enabled: true, refCount: 7 },
+    { id: 21, name: '九年级', code: 'G09', stage: '初中', sort: 9, enabled: true, refCount: 7 },
+    { id: 15, name: '高一', code: 'G10', stage: '高中', sort: 10, enabled: true, refCount: 9 },
+    { id: 22, name: '高二', code: 'G11', stage: '高中', sort: 11, enabled: true, refCount: 7 },
+    { id: 16, name: '高三', code: 'G12', stage: '高中', sort: 12, enabled: true, refCount: 5 },
   ],
   term: [
     { id: 23, name: '2024-2025 上学期', year: '2024-2025', termHalf: '上学期', dateFrom: '2024-09-02', dateTo: '2025-01-25', sort: 1, enabled: true, refCount: 5 },
@@ -117,27 +134,28 @@ export const dictStore: Record<DictTypeKey, DictItem[]> = {
     { id: 26, name: '2026-2027 下学期', year: '2026-2027', termHalf: '下学期', dateFrom: '2027-02-22', dateTo: '2027-07-09', sort: 6, enabled: true, refCount: 0 },
   ],
   questionType: [
-    { id: 31, name: '单选', answerType: '选择', sort: 1, enabled: true, refCount: 9 },
-    { id: 32, name: '多选', answerType: '选择', sort: 2, enabled: true, refCount: 7 },
-    { id: 36, name: '判断', answerType: '选择', sort: 3, enabled: true, refCount: 3 },
-    { id: 33, name: '填空', answerType: '填空', sort: 4, enabled: true, refCount: 8 },
-    { id: 34, name: '解答', answerType: '解答', sort: 5, enabled: true, refCount: 9 },
-    { id: 37, name: '计算', answerType: '解答', sort: 6, enabled: true, refCount: 1 },
-    { id: 38, name: '证明', answerType: '解答', sort: 7, enabled: true, refCount: 1 },
-    { id: 39, name: '连线', answerType: '连线', sort: 8, enabled: true, refCount: 1 },
-    { id: 40, name: '作文', answerType: '解答', sort: 9, enabled: true, refCount: 1 },
+    { id: 31, name: '单选', code: 'QT01', answerType: '选择', sort: 1, enabled: true, refCount: 9 },
+    { id: 32, name: '多选', code: 'QT02', answerType: '选择', sort: 2, enabled: true, refCount: 7 },
+    { id: 36, name: '判断', code: 'QT03', answerType: '选择', sort: 3, enabled: true, refCount: 3 },
+    { id: 33, name: '填空', code: 'QT04', answerType: '填空', sort: 4, enabled: true, refCount: 8 },
+    { id: 34, name: '解答', code: 'QT05', answerType: '解答', sort: 5, enabled: true, refCount: 9 },
+    { id: 37, name: '计算', code: 'QT06', answerType: '解答', sort: 6, enabled: true, refCount: 1 },
+    { id: 38, name: '证明', code: 'QT07', answerType: '解答', sort: 7, enabled: true, refCount: 1 },
+    { id: 39, name: '连线', code: 'QT08', answerType: '连线', sort: 8, enabled: true, refCount: 1 },
+    { id: 40, name: '作文', code: 'QT09', answerType: '解答', sort: 9, enabled: true, refCount: 1 },
     /* 英语专属题型（subjects 限定）：录题 / 筛选题型时先选学科，选到英语才多出这三项 */
-    { id: 42, name: '完形填空', answerType: '填空', sort: 10, enabled: true, refCount: 1, subjects: ['英语'] },
-    { id: 43, name: '七选五', answerType: '填空', sort: 11, enabled: true, refCount: 1, subjects: ['英语'] },
-    { id: 44, name: '短文改错', answerType: '解答', sort: 12, enabled: true, refCount: 1, subjects: ['英语'] },
-    { id: 35, name: '作图', answerType: '解答', sort: 13, enabled: false, refCount: 1 },
+    { id: 42, name: '完形填空', code: 'QT10', answerType: '填空', sort: 10, enabled: true, refCount: 1, subjects: ['英语'] },
+    { id: 43, name: '七选五', code: 'QT11', answerType: '填空', sort: 11, enabled: true, refCount: 1, subjects: ['英语'] },
+    { id: 44, name: '短文改错', code: 'QT12', answerType: '解答', sort: 12, enabled: true, refCount: 1, subjects: ['英语'] },
+    { id: 35, name: '作图', code: 'QT13', answerType: '解答', sort: 13, enabled: false, refCount: 1 },
   ],
+  /* 难度系数：**越小越难**（0 = 最难，1 = 最容易），保留 1 位小数。sort 仍是「容易 → 困难」的展示顺序。 */
   difficulty: [
-    { id: 41, name: '容易', coefficient: 0.3, sort: 1, enabled: true, refCount: 9 },
-    { id: 42, name: '较易', coefficient: 0.5, sort: 2, enabled: true, refCount: 8 },
-    { id: 43, name: '中等', coefficient: 0.7, sort: 3, enabled: true, refCount: 9 },
-    { id: 44, name: '较难', coefficient: 0.85, sort: 4, enabled: true, refCount: 6 },
-    { id: 45, name: '困难', coefficient: 1.0, sort: 5, enabled: true, refCount: 3 },
+    { id: 41, name: '容易', coefficient: 1.0, sort: 1, enabled: true, refCount: 9 },
+    { id: 42, name: '较易', coefficient: 0.8, sort: 2, enabled: true, refCount: 8 },
+    { id: 43, name: '中等', coefficient: 0.6, sort: 3, enabled: true, refCount: 9 },
+    { id: 44, name: '较难', coefficient: 0.4, sort: 4, enabled: true, refCount: 6 },
+    { id: 45, name: '困难', coefficient: 0.2, sort: 5, enabled: true, refCount: 3 },
   ],
   /* 试卷分类（paperCategory）= 组卷工作台试卷页签左树的一级分组；见 models.PAPER_CATEGORIES。
      存量这 10 条**刻意不设 stage / subjects**：它们的名字（期中考试、学业水平考试…）本身就跨学段，
@@ -180,16 +198,31 @@ function nextId(items: Array<{ id: number }>): number {
   return Math.max(0, ...items.map((item) => item.id)) + 1
 }
 
+/** 需要编码的字典类型；编码创建后不可改（编辑时被 strip 掉），故种子必须自带。 */
+const CODE_TYPES: DictTypeKey[] = ['subject', 'grade', 'questionType']
+const CODE_TYPE_LABEL: Partial<Record<DictTypeKey, string>> = {
+  subject: '学科',
+  grade: '年级',
+  questionType: '题型',
+}
+
 export function listDict(type: DictTypeKey): DictItem[] {
   return [...dictStore[type]].sort((a, b) => a.sort - b.sort)
 }
 
 export function saveDictItem(type: DictTypeKey, input: Partial<DictItem>): DictItem {
   const items = dictStore[type]
+  /* 序号：列表按它升序展示，越小越靠前。允许与已有项并列（并列时保持稳定序），
+     但不能是 0 / 负数 / 小数 —— 界面上的「序号」就是这一列。 */
+  if (input.sort !== undefined) {
+    const sort = Number(input.sort)
+    if (!Number.isInteger(sort) || sort < 1) throw new Error('序号须为不小于 1 的整数')
+    input.sort = sort
+  }
   if (type === 'difficulty' && input.coefficient !== undefined) {
     const coefficient = Math.round(Number(input.coefficient) * 10) / 10
-    if (!Number.isFinite(coefficient) || coefficient < 0.1 || coefficient > 1) {
-      throw new Error('难度系数须在 0.1-1.0 之间（保留 1 位小数）')
+    if (!Number.isFinite(coefficient) || coefficient < 0 || coefficient > 1) {
+      throw new Error('难度系数须在 0-1 之间（保留 1 位小数，越小越难）')
     }
     input.coefficient = coefficient
   }
@@ -219,10 +252,11 @@ export function saveDictItem(type: DictTypeKey, input: Partial<DictItem>): DictI
     return item
   }
   /* 新增：编码唯一 / 学期日期重叠 / 系数重复校验 */
-  if (type === 'subject') {
+  if (CODE_TYPES.includes(type)) {
+    const label = CODE_TYPE_LABEL[type] ?? '字典项'
     const code = (input.code ?? '').trim().toUpperCase()
-    if (!code) throw new Error('学科编码不能为空')
-    if (items.some((row) => row.code === code)) throw new Error('学科编码已存在')
+    if (!code) throw new Error(`${label}编码不能为空`)
+    if (items.some((row) => row.code === code)) throw new Error(`${label}编码已存在`)
     input.code = code
   }
   if (type === 'difficulty' && input.coefficient !== undefined) {
@@ -243,7 +277,9 @@ export function saveDictItem(type: DictTypeKey, input: Partial<DictItem>): DictI
     id: nextId(items),
     name: input.name ?? '',
     code: input.code,
-    sort: input.sort ?? items.length + 1,
+    /* 兜底序号取「现有最大 + 1」而不是 `length + 1`：序号可被改成任意 ≥1 的整数，
+       用条数当序号会撞号（10 条里把序号改成 1~10 之外的数，第 11 条就与某条并列） */
+    sort: input.sort ?? Math.max(0, ...items.map((row) => row.sort)) + 1,
     enabled: input.enabled ?? true,
     refCount: 0,
     stage: input.stage,
@@ -254,6 +290,7 @@ export function saveDictItem(type: DictTypeKey, input: Partial<DictItem>): DictI
     answerType: input.answerType,
     coefficient: input.coefficient,
     subjects: input.subjects?.length ? [...input.subjects] : undefined,
+    grades: input.grades?.length ? [...input.grades] : undefined,
     paperCategory: input.paperCategory,
   }
   items.push(item)
@@ -276,16 +313,234 @@ export function deleteDictItem(type: DictTypeKey, id: number): void {
   dictStore[type] = dictStore[type].filter((row) => row.id !== id)
 }
 
-export function moveDictItem(type: DictTypeKey, id: number, direction: -1 | 1): void {
-  const items = listDict(type)
-  const index = items.findIndex((row) => row.id === id)
-  const target = index + direction
-  if (index < 0 || target < 0 || target >= items.length) return
-  const current = items[index]
-  const other = items[target]
-  const temp = current.sort
-  current.sort = other.sort
-  other.sort = temp
+/* ================= 考试类型树（合并原「考试类型」+「杯赛」字典） ================= */
+
+/**
+ * 合并后的考试类型树，最多 5 级。**它是唯一事实源**：`dictStore.examType` 与
+ * `dictStore.competition` 退化为它的投影（见 `syncExamTypeDict`）。机构端读字典
+ * 仍走 `GET /tenant/dict` → `listDict` → `dictStore`，因此那边一行都不用改。
+ *
+ * 四个一级节点固定为 `PAPER_CATEGORIES`：机构端组卷「试卷类型树」正是按这四个名字
+ * 分组的（见 tenant 的 PapersTab / ListView），根节点改名或删除会让其子节点在机构端
+ * 树上失联，所以根不允许改名与删除。
+ */
+export const MAX_EXAM_TYPE_DEPTH = 5
+
+/** 根节点 id 基数：与字典项 id（51~85）拉开，避免混淆 */
+const CATEGORY_ROOT_BASE = 100
+
+/**
+ * 树的种子：把原先平铺的两份字典折成树。
+ * - 四个分类根（id 100~103）来自 `PAPER_CATEGORIES`
+ * - examType 各条按 `paperCategory` 挂到对应根下，**原样带上 stage / subjects / refCount**
+ *   （少了 stage / subjects，机构端「小升初真题只在小学生效」「数学竞赛只在数学生效」就废了）
+ * - `COMPETITIONS` 5 条挂到「竞赛」根下，kind = 'competition'
+ */
+function seedExamTypeNodes(): ExamTypeNode[] {
+  const rootIdOf = (category: string | undefined): number | null => {
+    const index = PAPER_CATEGORIES.findIndex((item) => item === category)
+    return index < 0 ? null : CATEGORY_ROOT_BASE + index
+  }
+  const roots: ExamTypeNode[] = PAPER_CATEGORIES.map((name, index) => ({
+    id: CATEGORY_ROOT_BASE + index,
+    parentId: null,
+    name,
+    kind: 'category',
+    enabled: true,
+    refCount: 0,
+  }))
+  const examTypes: ExamTypeNode[] = dictStore.examType
+    .filter((item) => rootIdOf(item.paperCategory) !== null)
+    .map((item) => ({
+      id: item.id,
+      parentId: rootIdOf(item.paperCategory),
+      name: item.name,
+      kind: 'examType',
+      enabled: item.enabled,
+      refCount: item.refCount,
+      stage: item.stage,
+      subjects: item.subjects?.length ? [...item.subjects] : undefined,
+    }))
+  const cups: ExamTypeNode[] = dictStore.competition.map((item) => ({
+    id: item.id,
+    parentId: rootIdOf('竞赛'),
+    name: item.name,
+    kind: 'competition',
+    enabled: item.enabled,
+    refCount: item.refCount,
+  }))
+  return [...roots, ...examTypes, ...cups]
+}
+
+export const examTypeNodes: ExamTypeNode[] = seedExamTypeNodes()
+
+/** 节点所属的试卷分类根名（不在任何分类根之下时返回 null） */
+function rootCategoryOf(id: number): string | null {
+  let cursor = examTypeNodes.find((node) => node.id === id)
+  const seen = new Set<number>()
+  while (cursor && cursor.parentId !== null) {
+    if (seen.has(cursor.id)) return null
+    seen.add(cursor.id)
+    const parentId = cursor.parentId
+    cursor = examTypeNodes.find((node) => node.id === parentId)
+  }
+  return cursor && cursor.kind === 'category' ? cursor.name : null
+}
+
+/** 节点深度（根 = 1） */
+function examTypeDepthOf(id: number): number {
+  let depth = 1
+  let cursor = examTypeNodes.find((node) => node.id === id)
+  const seen = new Set<number>()
+  while (cursor && cursor.parentId !== null) {
+    if (seen.has(cursor.id)) break
+    seen.add(cursor.id)
+    const parentId = cursor.parentId
+    cursor = examTypeNodes.find((node) => node.id === parentId)
+    depth += 1
+  }
+  return depth
+}
+
+/** 前序遍历：树上的展示顺序就是机构端筛选 / 试卷类型树里的顺序 */
+function preorderExamTypeNodes(): ExamTypeNode[] {
+  const out: ExamTypeNode[] = []
+  const walk = (parentId: number | null) => {
+    for (const node of examTypeNodes.filter((item) => item.parentId === parentId)) {
+      out.push(node)
+      walk(node.id)
+    }
+  }
+  walk(null)
+  return out
+}
+
+/**
+ * 把树投影回两份只读字典（`dictStore.examType` / `dictStore.competition`）。
+ *
+ * 用 `splice` 原地替换而不是重新赋值：`dictStore` 是个 `const` 对象字面量，
+ * 且机构端接口持有的是 `dictStore[type]` 的引用路径，换掉数组会让引用对不上。
+ * 每次增删改后都调一次，两边就不会漂移。
+ */
+function syncExamTypeDict(): void {
+  const ordered = preorderExamTypeNodes()
+  const examType: DictItem[] = ordered
+    .filter((node) => node.kind === 'examType')
+    .map((node, index) => ({
+      id: node.id,
+      name: node.name,
+      sort: index + 1,
+      enabled: node.enabled,
+      refCount: node.refCount,
+      stage: node.stage,
+      subjects: node.subjects?.length ? [...node.subjects] : undefined,
+      paperCategory: rootCategoryOf(node.id) ?? undefined,
+    }))
+  const competition: DictItem[] = ordered
+    .filter((node) => node.kind === 'competition')
+    .map((node, index) => ({
+      id: node.id,
+      name: node.name,
+      sort: index + 1,
+      enabled: node.enabled,
+      refCount: node.refCount,
+    }))
+  dictStore.examType.splice(0, dictStore.examType.length, ...examType)
+  dictStore.competition.splice(0, dictStore.competition.length, ...competition)
+}
+
+/* 启动时先归一一次：种子是照 dictStore 反推的，命中同构数据；归一后树的顺序即机构端顺序，
+   不会出现「启动是旧顺序、改一次才变成树顺序」的分裂 */
+syncExamTypeDict()
+
+export function listExamTypeNodes(): ExamTypeNode[] {
+  return examTypeNodes.map((node) => ({
+    ...node,
+    subjects: node.subjects ? [...node.subjects] : undefined,
+  }))
+}
+
+export function saveExamTypeNode(input: Partial<ExamTypeNode>): ExamTypeNode {
+  const name = (input.name ?? '').trim()
+  if (!name) throw new Error('名称不能为空')
+
+  if (input.id) {
+    const node = examTypeNodes.find((item) => item.id === input.id)
+    if (!node) throw new Error('节点不存在')
+    /* 分类根是机构端分组口径的锚点，改名 / 改类型都会让子节点在机构端失联 */
+    if (node.kind === 'category') throw new Error('试卷分类根节点不可修改')
+    if (
+      examTypeNodes.some(
+        (item) => item.id !== node.id && item.parentId === node.parentId && item.name === name,
+      )
+    ) {
+      throw new Error('同级下已存在同名项')
+    }
+    node.name = name
+    if (input.kind === 'examType' || input.kind === 'competition') node.kind = input.kind
+    if (node.kind === 'competition') {
+      node.stage = undefined
+      node.subjects = undefined
+    } else {
+      /* 显式传空串表示「改成不限」，所以用 `||` 而不是 `??` */
+      node.stage = input.stage || undefined
+      node.subjects = input.subjects?.length ? [...input.subjects] : undefined
+    }
+    syncExamTypeDict()
+    return node
+  }
+
+  const parentId = input.parentId ?? null
+  if (parentId === null) throw new Error('试卷分类根节点由系统固定，不能新增根节点')
+  const parent = examTypeNodes.find((item) => item.id === parentId)
+  if (!parent) throw new Error('父节点不存在')
+  if (examTypeDepthOf(parentId) >= MAX_EXAM_TYPE_DEPTH) {
+    throw new Error(`考试类型树最多 ${MAX_EXAM_TYPE_DEPTH} 级，无法再添加子节点`)
+  }
+  if (examTypeNodes.some((item) => item.parentId === parentId && item.name === name)) {
+    throw new Error('同级下已存在同名项')
+  }
+  const kind: ExamTypeNodeKind = input.kind === 'competition' ? 'competition' : 'examType'
+  const node: ExamTypeNode = {
+    id: nextId(examTypeNodes),
+    parentId,
+    name,
+    kind,
+    enabled: true,
+    refCount: 0,
+    stage: kind === 'examType' ? input.stage || undefined : undefined,
+    subjects: kind === 'examType' && input.subjects?.length ? [...input.subjects] : undefined,
+  }
+  examTypeNodes.push(node)
+  syncExamTypeDict()
+  return node
+}
+
+export function toggleExamTypeNode(id: number): boolean {
+  const node = examTypeNodes.find((item) => item.id === id)
+  if (!node) throw new Error('节点不存在')
+  const next = !node.enabled
+  /* 整棵子树同步启停：父节点停用而子节点仍启用，机构端会拿到悬空项 */
+  const stack = [node.id]
+  while (stack.length) {
+    const currentId = stack.pop()!
+    const current = examTypeNodes.find((item) => item.id === currentId)
+    if (!current) continue
+    current.enabled = next
+    examTypeNodes.filter((item) => item.parentId === currentId).forEach((child) => stack.push(child.id))
+  }
+  syncExamTypeDict()
+  return next
+}
+
+export function deleteExamTypeNode(id: number): void {
+  const node = examTypeNodes.find((item) => item.id === id)
+  if (!node) throw new Error('节点不存在')
+  if (node.kind === 'category') throw new Error('试卷分类根节点不可删除')
+  if (examTypeNodes.some((item) => item.parentId === id)) throw new Error('请先删除或移走子节点')
+  if (node.refCount > 0) throw new Error(`该项已被 ${node.refCount} 道题目引用，仅可停用`)
+  examTypeNodes.splice(examTypeNodes.indexOf(node), 1)
+  syncExamTypeDict()
 }
 
 /* ================= 知识点树 ================= */

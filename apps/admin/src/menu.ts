@@ -17,7 +17,7 @@ export const menus: MenuItem[] = [
     icon: 'building',
     children: [
       { path: '/tenant/list', title: '机构列表' },
-      { path: '/tenant/apply', title: '入驻审核' },
+      { path: '/tenant/apply', title: '机构入驻审核' },
       { path: '/tenant/package', title: '套餐管理' },
     ],
   },
@@ -29,6 +29,7 @@ export const menus: MenuItem[] = [
       { path: '/dict/base', title: '基础字典' },
       { path: '/dict/knowledge', title: '知识点树' },
       { path: '/dict/textbook', title: '教材版本' },
+      { path: '/dict/exam-type', title: '考试类型' },
     ],
   },
   {

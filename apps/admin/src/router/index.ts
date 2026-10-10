@@ -27,7 +27,7 @@ const routes: RouteRecordRaw[] = [
         path: 'tenant/apply',
         name: 'tenant-apply',
         component: () => import('@/views/tenant/ApplyListView.vue'),
-        meta: { title: '入驻审核' },
+        meta: { title: '机构入驻审核' },
       },
       {
         path: 'tenant/list',
@@ -65,6 +65,12 @@ const routes: RouteRecordRaw[] = [
         name: 'dict-textbook',
         component: () => import('@/views/dict/TextbookView.vue'),
         meta: { title: '教材版本' },
+      },
+      {
+        path: 'dict/exam-type',
+        name: 'dict-exam-type',
+        component: () => import('@/views/dict/ExamTypeTreeView.vue'),
+        meta: { title: '考试类型' },
       },
       // 内容运营（P-03）
       {

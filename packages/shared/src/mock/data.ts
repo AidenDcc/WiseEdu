@@ -99,7 +99,7 @@ export const adminOverview = {
   },
   pendingApplies: [
     {
-      applyNo: 'AP20260913001',
+      code: 'T20260913001',
       orgName: '博思培优教育',
       orgType: '培训机构',
       stages: '初中 / 高中',
@@ -110,7 +110,7 @@ export const adminOverview = {
       overtime: false,
     },
     {
-      applyNo: 'AP20260912004',
+      code: 'T20260912004',
       orgName: '临江市第三中学',
       orgType: '公立学校',
       stages: '初中',
@@ -121,7 +121,7 @@ export const adminOverview = {
       overtime: true,
     },
     {
-      applyNo: 'AP20260912002',
+      code: 'T20260912002',
       orgName: '启航外国语学校',
       orgType: '民办学校',
       stages: '小学 / 初中',

@@ -55,6 +55,8 @@ export type {
   DictTypeKey,
   DictItem,
   KnowledgeNode,
+  ExamTypeNode,
+  ExamTypeNodeKind,
   TextbookVersion,
   AiModelType,
   AiModel,
@@ -159,6 +161,7 @@ export { default as katex } from './utils/katex'
 /* 字典 / AI 配置元数据（页面下拉与说明用） */
 export {
   DICT_TYPES,
+  ADMIN_DICT_TYPES,
   PROMPT_SCENES,
   PROMPT_VARIABLES,
   AI_MODEL_TYPE_TEXT,

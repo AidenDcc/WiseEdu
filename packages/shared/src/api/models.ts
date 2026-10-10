@@ -13,7 +13,8 @@ export interface AdminOverview {
     aiCalls: number[]
   }
   pendingApplies: Array<{
-    applyNo: string
+    /** 机构编码：与入驻审核列表的「机构编号」同一口径（`T` 开头），不用申请单号 */
+    code: string
     orgName: string
     orgType: string
     stages: string
@@ -101,6 +102,11 @@ export interface CertFile {
 export interface TenantApply {
   id: number
   applyNo: string
+  /**
+   * 机构编号：申请创建时生成（`T` + 日期 + 序号），审核通过开通租户时**原样沿用**为
+   * 租户 `code` —— 同一机构从申请到租户全程只有一个编号，列表的「机构编号」列读它。
+   */
+  code: string
   orgName: string
   orgType: string
   stages: string[]
@@ -116,6 +122,9 @@ export interface TenantApply {
   submittedAt: string
   waitingHours: number
   status: ApplyStatus
+  /** 审核时间 / 操作人：通过或驳回时盖章，待审核为空（审核留痕） */
+  reviewedAt?: string
+  reviewer?: string
   rejectReason?: string
 }
 
@@ -188,10 +197,18 @@ export interface TenantDetailModel {
     materialCount: number
     staffCount: number
   }
+  /* 近 6 个自然月（「半年」那张图），是下面 aiDaily 的后 6 段 */
   aiMonthly: {
     months: string[]
     calls: number[]
   }
+  /* 按天的调用量，覆盖近 12 个自然月（比 aiMonthly 的 6 个月宽，详情页的月份日历拿它标「有数据」）。
+     每项都摊满该月天数：下标 i 即该月第 i+1 日，当月的未来日子补 0。
+     两种粒度共用同一份月总量，所以各天之和（0 不加分）恰好等于该月的月值 */
+  aiDaily: Array<{
+    month: string
+    calls: number[]
+  }>
 }
 
 /* ================ 全局字典（FR-PT-015 / 016） ================ */
@@ -212,7 +229,7 @@ export type DictTypeKey =
 export interface DictItem {
   id: number
   name: string
-  /** 编码（学科类必填，创建后不可改） */
+  /** 编码（学科 / 年级 / 题型必填，创建后不可改） */
   code?: string
   sort: number
   enabled: boolean
@@ -221,8 +238,9 @@ export interface DictItem {
   /**
    * 类型特有字段：grade=学段；term=学年/学期/起止；questionType=作答类型；difficulty=系数。
    *
-   * examType 也用它表示**适配学段**（见 `PAPER_CATEGORIES`）：留空 = 全学段通用，
-   * 有值 = 只在机构端选到该学段时才出现在试卷类型树 / 筛选条件里。
+   * examType 的字典项由「考试类型」树投影写入（见 `ExamTypeNode`），这里的
+   * `stage` 在它上面表示**适配学段**：留空 = 全学段通用，有值 = 只在机构端选到该学段时
+   * 才出现在试卷类型树 / 筛选条件里。管理端不再直接编辑它。
    */
   stage?: string
   year?: string
@@ -232,22 +250,28 @@ export interface DictItem {
   answerType?: string
   coefficient?: number
   /**
-   * 适用学科：questionType = 学科专属题型，examType = 适配学科。
+   * 适用学科：questionType = 学科专属题型，examType = 适配学科（同样由「考试类型」树投影写入）。
    * 留空 = 全学科通用；有值 = 只在机构端选到这些学科时才出现。
    * （如「完形填空」只属于英语，「物理竞赛」只在物理下出现。）
    */
   subjects?: string[]
   /**
-   * 试卷分类（仅 examType 使用，取值见 `PAPER_CATEGORIES`）：组卷工作台「试卷」页签
-   * 左侧那棵试卷类型树的第一级。留空 = 不进树（但仍可用于筛选）。
+   * 适配年级（仅 subject 使用）：留空 = 不限年级；有值 = 只在这些年级下可选。
+   * 取值是年级字典项的 name（与 `subjects` 用名字而非 id 同口径）。
+   */
+  grades?: string[]
+  /**
+   * 试卷分类（仅 examType，取值见 `PAPER_CATEGORIES`）：组卷工作台「试卷」页签
+   * 左侧那棵试卷类型树的第一级。由「考试类型」树投影写入 —— 值就是该项所属
+   * 一级根节点的名字，因此不会留空。
    */
   paperCategory?: string
 }
 
 /**
- * 试卷分类：组卷工作台「试卷」页签左树的四个一级分组，也是考试类型字典项
- * 「试卷分类」字段的取值域。定义在这里而不是管理端页面里 —— 管理端下拉、
- * 工作台树的顺序、种子数据的分组共用同一份，各写一份必然对不上。
+ * 试卷分类：组卷工作台「试卷」页签左树的四个一级分组，也是「考试类型」树四个
+ * 一级节点的名字（`ExamTypeNode.name`）。定义在这里而不是管理端页面里 ——
+ * 树的根、工作台树的顺序、种子数据的分组共用同一份，各写一份必然对不上。
  */
 export const PAPER_CATEGORIES = ['同步教学', '阶段测试', '小升初', '竞赛'] as const
 export type PaperCategory = (typeof PAPER_CATEGORIES)[number]
@@ -259,6 +283,33 @@ export interface KnowledgeNode {
   name: string
   subject: string
   enabled: boolean
+}
+
+/**
+ * 考试类型树（最多 5 级）：合并了原先基础字典里的「考试类型」与「杯赛」两个平铺列表。
+ *
+ * 四个一级节点就是 `PAPER_CATEGORIES`（根节点的 `name` 即 `paperCategory` 值），
+ * 它们由机构端组卷「试卷类型树」的分组口径决定，不在本树上增删改。
+ *
+ * `kind` 是合并的关键：竞赛根下同时挂着考试类型（数学竞赛 / 物理竞赛）与杯赛
+ * （华罗庚金杯…），靠它分流回机构端的 `examType` / `competition` 两个只读字典——
+ * 少了这个字段，杯赛会被混进机构端的试卷类型树。
+ */
+export type ExamTypeNodeKind = 'category' | 'examType' | 'competition'
+
+export interface ExamTypeNode {
+  id: number
+  /** null = 四个试卷分类根 */
+  parentId: number | null
+  name: string
+  kind: ExamTypeNodeKind
+  enabled: boolean
+  /** 被题目引用数（>0 时禁止删除，仅可停用） */
+  refCount: number
+  /** 适配学段（仅 kind === 'examType'）：留空 = 全学段通用 */
+  stage?: string
+  /** 适配学科（仅 kind === 'examType'）：留空 = 全学科通用 */
+  subjects?: string[]
 }
 
 /* 教材版本 */

@@ -75,8 +75,8 @@ const poolByExamType = computed(() => {
 })
 
 /* ===== 左树：分类 → 考试类型 =====
- * 分类与归属都来自平台管理端「基础字典 - 考试类型」的配置（`paperCategory` 字段），
- * 这里只按 `PAPER_CATEGORIES` 的顺序归组；没配分类的历史字典项不进树（但仍可用于筛选）。 */
+ * 分类与归属都来自平台管理端「考试类型」树的配置（`paperCategory` 字段，由树的一级节点给出），
+ * 这里只按 `PAPER_CATEGORIES` 的顺序归组；没配分类的历史项不进树（但仍可用于筛选）。 */
 const scopedItems = computed(() => scopedExamTypes(examTypeItems.value, stageOf(props.filter.grade) ?? '', props.filter.subject))
 
 const groups = computed<PaperTypeGroup[]>(() =>

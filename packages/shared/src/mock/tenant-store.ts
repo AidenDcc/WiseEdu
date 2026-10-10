@@ -107,15 +107,24 @@ export type RenewDurationKey = (typeof RENEW_DURATIONS)[number]['key']
 interface ApplySeed {
   id: number
   applyNo: string
+  /** 机构编号：与 applyNo 同源（申请创建时一起生成），通过后成为租户 code */
+  code: string
   orgName: string
   orgType: string
   stages: string[]
   contact: string
   phone: string
   email: string
+  /* 所在地区（省市区连写）与门牌级详细地址。与 TenantSeed 同构 —— 申请通过后
+     approveApply 会把这两项原样搬进租户，所以种子这里不给值，新建的租户地址就是空串 */
+  city: string
+  address: string
   intro: string
   submittedDaysAgo: number
   status: ApplyStatus
+  /** 审核留痕：仅已通过 / 已驳回的种子需要给，天数同样是「相对今天」 */
+  reviewedDaysAgo?: number
+  reviewer?: string
   rejectReason?: string
 }
 
@@ -123,12 +132,15 @@ const APPLY_SEEDS: ApplySeed[] = [
   {
     id: 1,
     applyNo: 'AP202609060001',
+    code: 'T20260906001',
     orgName: '杭州市西湖实验中学',
     orgType: '公立学校',
     stages: ['初中', '高中'],
     contact: '陈建国',
     phone: '13857102266',
     email: 'chenjg@xhsy.edu.cn',
+    city: '浙江省杭州市西湖区',
+    address: '西湖区文二西路 118 号',
     intro: '市属重点中学，在校学生 2300 余人，计划在数学、物理学科试点 AI 组卷与个性化练习。',
     submittedDaysAgo: 3.2,
     status: '待审核',
@@ -136,12 +148,15 @@ const APPLY_SEEDS: ApplySeed[] = [
   {
     id: 2,
     applyNo: 'AP202609080002',
+    code: 'T20260908002',
     orgName: '南京启航教育培训中心',
     orgType: '培训机构',
     stages: ['小学', '初中'],
     contact: '刘思远',
     phone: '15950533188',
     email: 'service@qihang-edu.com',
+    city: '江苏省南京市鼓楼区',
+    address: '鼓楼区中山北路 88 号 5 楼',
     intro: '专注 K12 课后辅导，在读学员 1200 人，希望通过 AI 出题提升讲义更新效率。',
     submittedDaysAgo: 1.6,
     status: '待审核',
@@ -149,12 +164,15 @@ const APPLY_SEEDS: ApplySeed[] = [
   {
     id: 3,
     applyNo: 'AP202609110003',
+    code: 'T20260911003',
     orgName: '成都七中育才附属小学',
     orgType: '公立学校',
     stages: ['小学'],
     contact: '赵晓梅',
     phone: '13688045521',
     email: 'zhaoxm@qcys.edu.cn',
+    city: '四川省成都市锦江区',
+    address: '锦江区滨江东路 66 号',
     intro: '区属实验小学，开展智慧课堂课题研究，需要文档识别入库与协同组卷能力。',
     submittedDaysAgo: 0.5,
     status: '待审核',
@@ -162,12 +180,15 @@ const APPLY_SEEDS: ApplySeed[] = [
   {
     id: 4,
     applyNo: 'AP202609120004',
+    code: 'T20260912004',
     orgName: '深圳湾区国际学校',
     orgType: '民办学校',
     stages: ['小学', '初中', '高中'],
     contact: 'David 郭',
     phone: '13798206677',
     email: 'david.guo@bayarea-is.cn',
+    city: '广东省深圳市南山区',
+    address: '南山区科苑南路 2666 号',
     intro: '双语国际学校，A-Level 与 IB 课程体系，计划搭建校本 AI 题库。',
     submittedDaysAgo: 0.2,
     status: '待审核',
@@ -175,28 +196,42 @@ const APPLY_SEEDS: ApplySeed[] = [
   {
     id: 5,
     applyNo: 'AP202608290005',
+    /* 机构编号刻意用 T20250301001 —— 与租户种子 101 同号：这条申请正是 101 的来源，
+       两处编号一致才看得出「申请 → 审核通过 → 租户」是同一个机构。 */
+    code: 'T20250301001',
     orgName: '武汉光谷第二高级中学',
     orgType: '公立学校',
     stages: ['高中'],
     contact: '何俊',
     phone: '13971304482',
     email: 'hejun@ggez.edu.cn',
+    /* 与租户种子 101（武汉光谷二中）同址：这条申请「已通过」，正是 101 的来源，
+       两处地址保持一致才看得出「申请 → 审核通过 → 租户」的延续 */
+    city: '湖北省武汉市洪山区',
+    address: '洪山区珞喻路 152 号光谷教育园区 3 号楼',
     intro: '省级示范高中，全校推行精细化教学，目标月度组卷 300 套。',
     submittedDaysAgo: 15,
     status: '已通过',
+    reviewedDaysAgo: 14,
+    reviewer: '平台运营',
   },
   {
     id: 6,
     applyNo: 'AP202609010006',
+    code: 'T20260901006',
     orgName: '西安领航考研培训学校',
     orgType: '培训机构',
     stages: ['高中'],
     contact: '马腾',
     phone: '15829217730',
     email: 'mateng@lhky.cn',
+    city: '陕西省西安市雁塔区',
+    address: '雁塔区小寨东路 168 号',
     intro: '考研公共课培训机构。',
     submittedDaysAgo: 12,
     status: '已驳回',
+    reviewedDaysAgo: 11,
+    reviewer: '平台运营',
     rejectReason: '资质材料不完整：缺少办学许可证年审页，请补交后重新提交申请。',
   },
 ]
@@ -204,12 +239,15 @@ const APPLY_SEEDS: ApplySeed[] = [
 export const applies: TenantApply[] = APPLY_SEEDS.map((seed) => ({
   id: seed.id,
   applyNo: seed.applyNo,
+  code: seed.code,
   orgName: seed.orgName,
   orgType: seed.orgType,
   stages: seed.stages,
   contact: seed.contact,
   phone: seed.phone,
   email: seed.email,
+  city: seed.city,
+  address: seed.address,
   intro: seed.intro,
   certFiles: [
     { name: '营业执照.pdf', type: 'pdf', category: 'license' },
@@ -219,6 +257,8 @@ export const applies: TenantApply[] = APPLY_SEEDS.map((seed) => ({
   submittedAt: dateAfter(-seed.submittedDaysAgo),
   waitingHours: Math.round(seed.submittedDaysAgo * 24),
   status: seed.status,
+  reviewedAt: seed.reviewedDaysAgo != null ? dateAfter(-seed.reviewedDaysAgo) : undefined,
+  reviewer: seed.reviewer,
   rejectReason: seed.rejectReason,
 }))
 
@@ -226,15 +266,29 @@ export function listApplies(query: {
   status?: string
   orgType?: string
   keyword?: string
+  /** 覆盖学段，逗号分隔；命中申请里任一学段即可（多选是「或」关系） */
+  stages?: string
+  /** 联系人姓名，模糊匹配 */
+  contact?: string
 }): TenantApply[] {
   let result = [...applies]
   if (query.status) result = result.filter((item) => item.status === query.status)
   if (query.orgType) result = result.filter((item) => item.orgType === query.orgType)
+  if (query.stages) {
+    const wanted = query.stages.split(',').filter(Boolean)
+    result = result.filter((item) => item.stages.some((stage) => wanted.includes(stage)))
+  }
+  if (query.contact) {
+    const contact = query.contact.trim().toLowerCase()
+    result = result.filter((item) => item.contact.toLowerCase().includes(contact))
+  }
   if (query.keyword) {
     const kw = query.keyword.trim().toLowerCase()
     result = result.filter(
       (item) =>
-        item.orgName.toLowerCase().includes(kw) || item.applyNo.toLowerCase().includes(kw),
+        item.orgName.toLowerCase().includes(kw) ||
+        item.applyNo.toLowerCase().includes(kw) ||
+        item.code.toLowerCase().includes(kw),
     )
   }
   /* 待审核优先，其余按提交时间倒序 */
@@ -294,7 +348,7 @@ const TENANT_SEEDS: TenantSeed[] = [
     createdDaysAgo: 560,
     contact: '何俊',
     phone: '13971304482',
-    city: '湖北省武汉市',
+    city: '湖北省武汉市洪山区',
     address: '洪山区珞喻路 152 号光谷教育园区 3 号楼',
     intro: '省级示范高中，全校推行精细化教学，AI 组卷覆盖九大学科。',
     isolationType: 1,
@@ -315,7 +369,7 @@ const TENANT_SEEDS: TenantSeed[] = [
     createdDaysAgo: 670,
     contact: '孙倩',
     phone: '13817894456',
-    city: '上海市',
+    city: '上海市杨浦区',
     address: '杨浦区国权路 383 号',
     intro: '十五年一贯制双语学校，自建校本 AI 题库 4.2 万题。',
     isolationType: 2,
@@ -336,7 +390,7 @@ const TENANT_SEEDS: TenantSeed[] = [
     createdDaysAgo: 445,
     contact: '罗敏',
     phone: '13660401177',
-    city: '广东省广州市',
+    city: '广东省广州市天河区',
     address: '天河区体育东路 122 号羊城国际商贸大厦 18 层',
     intro: 'K12 课外辅导机构，12 个校区共用一个租户。',
     isolationType: 1,
@@ -357,7 +411,7 @@ const TENANT_SEEDS: TenantSeed[] = [
     createdDaysAgo: 5,
     contact: '李文博',
     phone: '13701256633',
-    city: '北京市',
+    city: '北京市海淀区',
     address: '海淀区中关村南大街 12 号',
     intro: '区属实验小学，智慧课堂课题试点校。',
     isolationType: 1,
@@ -378,7 +432,7 @@ const TENANT_SEEDS: TenantSeed[] = [
     createdDaysAgo: 12,
     contact: '周灿',
     phone: '13574822906',
-    city: '湖南省长沙市',
+    city: '湖南省长沙市岳麓区',
     address: '岳麓区麓山南路 932 号',
     intro: '开展跨学科主题教学，需协同组卷与变式训练。',
     isolationType: 1,
@@ -399,7 +453,7 @@ const TENANT_SEEDS: TenantSeed[] = [
     createdDaysAgo: 540,
     contact: '高翔',
     phone: '13983705526',
-    city: '重庆市',
+    city: '重庆市渝北区',
     address: '渝北区龙溪街道金开大道 1001 号',
     intro: '国际化学校，已到期待续费。',
     isolationType: 2,
@@ -420,7 +474,7 @@ const TENANT_SEEDS: TenantSeed[] = [
     createdDaysAgo: 700,
     contact: '范晓芸',
     phone: '15122779034',
-    city: '天津市',
+    city: '天津市河西区',
     address: '河西区友谊路 35 号',
     intro: '中考冲刺培训机构，到期未续费。',
     isolationType: 1,
@@ -441,7 +495,7 @@ const TENANT_SEEDS: TenantSeed[] = [
     createdDaysAgo: 565,
     contact: '吴建平',
     phone: '13915408871',
-    city: '江苏省苏州市',
+    city: '江苏省苏州市苏州工业园区',
     address: '苏州工业园区星海街 155 号',
     intro: '园区直属完全中学，AI 月度额度使用率长期偏高。',
     isolationType: 1,
@@ -462,7 +516,7 @@ const TENANT_SEEDS: TenantSeed[] = [
     createdDaysAgo: 490,
     contact: '姜涛',
     phone: '15865572109',
-    city: '山东省青岛市',
+    city: '山东省青岛市崂山区',
     address: '崂山区松岭路 70 号',
     intro: '因多次违规采集试题被平台停用整改。',
     isolationType: 1,
@@ -484,7 +538,7 @@ const TENANT_SEEDS: TenantSeed[] = [
     createdDaysAgo: 1,
     contact: '陈建国',
     phone: '13857102266',
-    city: '浙江省杭州市',
+    city: '浙江省杭州市西湖区',
     address: '西湖区文一西路 522 号',
     intro: '创建未满 24 小时的新租户（用于演示数据隔离可调整窗口）。',
     isolationType: 1,
@@ -548,6 +602,9 @@ export function listTenants(query: {
   keyword?: string
   expireFrom?: string
   expireTo?: string
+  /** 本月 AI 用量区间，闭区间；口径与列表「本月 AI 用量」列一致（都是 `aiUsed`） */
+  aiMin?: string
+  aiMax?: string
 }): TenantRecord[] {
   let result = [...tenants]
   if (query.status) result = result.filter((item) => item.status === Number(query.status))
@@ -556,6 +613,11 @@ export function listTenants(query: {
   if (query.orgType) result = result.filter((item) => item.orgType === query.orgType)
   if (query.expireFrom) result = result.filter((item) => dateOnly(item.expireTime) >= query.expireFrom!)
   if (query.expireTo) result = result.filter((item) => dateOnly(item.expireTime) <= query.expireTo!)
+  /* 空串已由请求层的 withQuery 滤掉，但 0 是合法下界，所以判 `!== undefined` 而不是真值 */
+  if (query.aiMin !== undefined && query.aiMin !== '')
+    result = result.filter((item) => item.aiUsed >= Number(query.aiMin))
+  if (query.aiMax !== undefined && query.aiMax !== '')
+    result = result.filter((item) => item.aiUsed <= Number(query.aiMax))
   if (query.keyword) {
     const kw = query.keyword.trim().toLowerCase()
     result = result.filter(
@@ -581,10 +643,31 @@ export function paginate<T>(list: T[], page: number, pageSize: number): PageResu
 
 /* ---------------- 业务操作 ---------------- */
 
+/**
+ * 机构编号：`T` + 当天日期 + 3 位序号。
+ *
+ * 序号取**申请与租户两处**同前缀编号的最大值 + 1，只看申请是不够的 —— 租户种子里的编号
+ * （如 T20250301001）本来就是从更早的申请沿用过来的，只数 `applies` 会算出与租户撞号的编号。
+ */
+function nextOrgCode(): string {
+  const prefix = `T${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`
+  const used = [...applies, ...tenants]
+    .map((item) => item.code)
+    .filter((code) => code.startsWith(prefix))
+    .map((code) => Number(code.slice(prefix.length)))
+  return `${prefix}${String(Math.max(0, ...used) + 1).padStart(3, '0')}`
+}
+
+/** 审核留痕：通过 / 驳回都要盖章，列表的「审核时间」与详情里的「操作人」都读这两个字段 */
+function stampReview(apply: TenantApply, reviewer?: string): void {
+  apply.reviewedAt = dateAfter(0)
+  apply.reviewer = reviewer || 'admin'
+}
+
 /** 通过入驻申请（FR-PT-006）：开通租户 + 试用期 + 初始管理员 */
 export function approveApply(
   applyId: number,
-  config: { trialDays: number; packageId: number; adminAccount: string },
+  config: { trialDays: number; packageId: number; adminAccount: string; reviewer?: string },
 ): TenantRecord {
   const apply = applies.find((item) => item.id === applyId)
   if (!apply) throw new Error('申请不存在')
@@ -594,7 +677,8 @@ export function approveApply(
   const expireTime = dateAfter(config.trialDays)
   const tenant: TenantRecord = {
     id: Math.max(...tenants.map((item) => item.id)) + 1,
-    code: `T${new Date().toISOString().slice(0, 10).replace(/-/g, '')}${String(tenants.length + 1).padStart(3, '0')}`,
+    /* 机构编号在申请创建时就定了，开通租户只是沿用 —— 同一机构全程只有一个编号 */
+    code: apply.code,
     name: apply.orgName,
     logoHue: (apply.id * 47) % 360,
     orgType: apply.orgType,
@@ -625,16 +709,18 @@ export function approveApply(
   }
   tenants.push(tenant)
   apply.status = '已通过'
+  stampReview(apply, config.reviewer)
   return tenant
 }
 
 /** 驳回申请（FR-PT-007）：必填原因 */
-export function rejectApply(applyId: number, reason: string): void {
+export function rejectApply(applyId: number, reason: string, reviewer?: string): void {
   const apply = applies.find((item) => item.id === applyId)
   if (!apply) throw new Error('申请不存在')
   if (apply.status !== '待审核') throw new Error('该申请已处理，请刷新列表')
   apply.status = '已驳回'
   apply.rejectReason = reason
+  stampReview(apply, reviewer)
 }
 
 /** 管理端直接新增机构：生成一条待审核的入驻申请 */
@@ -655,6 +741,7 @@ export function createApply(payload: {
     applyNo: `AP${new Date().toISOString().slice(0, 10).replace(/-/g, '')}${String(
       applies.length + 1,
     ).padStart(4, '0')}`,
+    code: nextOrgCode(),
     orgName: payload.orgName,
     orgType: payload.orgType,
     stages: payload.stages,
@@ -796,18 +883,79 @@ export function updateTenantIsolation(
   tenant.storageRegion = storageRegion
 }
 
+/* ---------------- AI 调用量统计（机构详情页签） ----------------
+   两种粒度来自同一份月总量：本月按天、近 6 个月按月。 */
+
+/** 某个月的 AI 调用总量。offset 为距当月的月数（0 = 当月）。
+    当月直接取机构自己的「本月已用」—— 页头、列表页、半年视图当月那根柱、
+    本月视图各天之和必须是同一个数，否则切一下粒度就自相矛盾 */
+function aiMonthTotal(tenant: TenantRecord, offset: number): number {
+  if (offset === 0) return tenant.aiUsed
+  return Math.round(tenant.quotas.aiQuota * (0.12 + ((tenant.id + offset) % 5) * 0.11))
+}
+
+/** 整数哈希 → [0,1)（mulberry32 的核心）。刻意不用 Math.random()：
+    getTenantDetail 每次请求都重跑，随机数会让同一机构刷新两次看到两张不同的图 */
+function seededUnit(seed: number): number {
+  let t = (seed + 0x6d2b79f5) | 0
+  t = Math.imul(t ^ (t >>> 15), t | 1)
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+}
+
+/** 把月总量拆到每一天：形状由 (机构, 年月, 日) 哈希出，先按权重分摊再取整，
+    余数按小数部分从大到小补 1 —— 直接四舍五入会差几个数，切回月视图就对不上 */
+function splitToDays(
+  tenantId: number,
+  year: number,
+  month: number,
+  dayCount: number,
+  total: number,
+): number[] {
+  const weights = Array.from(
+    { length: dayCount },
+    (_, i) => 0.35 + seededUnit(tenantId * 1000003 + year * 1000 + month * 37 + i) * 0.65,
+  )
+  const sum = weights.reduce((acc, w) => acc + w, 0)
+  const exact = weights.map((w) => (w / sum) * total)
+  const calls = exact.map((v) => Math.floor(v))
+  let rest = total - calls.reduce((acc, v) => acc + v, 0)
+  const byFraction = exact
+    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
+    .sort((a, b) => b.frac - a.frac)
+  for (const { i } of byFraction) {
+    if (rest <= 0) break
+    calls[i] += 1
+    rest -= 1
+  }
+  return calls
+}
+
+/** 最近 12 个自然月，每月一组按天数据（详情页的月份日历拿它标「有数据」）。
+    每月都摊满该月天数：当月把总量分摊到「今天」为止，其余补 0 —— 演示时不该出现未来的用量，
+    但横轴要看得见整月，空着的日子画 0 而不是把数组截断 */
+function aiDailySeries(tenant: TenantRecord): Array<{ month: string; calls: number[] }> {
+  const today = new Date()
+  const series: Array<{ month: string; calls: number[] }> = []
+  for (let offset = 11; offset >= 0; offset -= 1) {
+    const first = new Date(today.getFullYear(), today.getMonth() - offset, 1)
+    const year = first.getFullYear()
+    const month = first.getMonth() + 1
+    const dayCount = new Date(year, month, 0).getDate()
+    const elapsed = offset === 0 ? today.getDate() : dayCount
+    const calls = splitToDays(tenant.id, year, month, elapsed, aiMonthTotal(tenant, offset))
+    /* 还没到的日子补 0。补 0 不改变求和，所以「各天之和 = 该月月值」这条仍然成立 */
+    while (calls.length < dayCount) calls.push(0)
+    series.push({ month: `${year}-${String(month).padStart(2, '0')}`, calls })
+  }
+  return series
+}
+
 /** 机构详情（FR-PT-011：4 个页签数据） */
 export function getTenantDetail(id: number): TenantDetailModel {
   const tenant = getTenant(id)
   const seed = tenant.id
-  const monthLabels: string[] = []
-  const calls: number[] = []
-  for (let i = 5; i >= 0; i -= 1) {
-    const d = new Date()
-    d.setMonth(d.getMonth() - i)
-    monthLabels.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
-    calls.push(Math.round(tenant.quotas.aiQuota * (0.12 + ((seed + i) % 5) * 0.11)))
-  }
+  const aiDaily = aiDailySeries(tenant)
   return {
     tenant,
     pkg: getPackage(tenant.packageId),
@@ -817,7 +965,12 @@ export function getTenantDetail(id: number): TenantDetailModel {
       materialCount: 90 + (seed % 7) * 26,
       staffCount: 12 + (seed % 5) * 9,
     },
-    aiMonthly: { months: monthLabels, calls },
+    /* 半年图只画最近 6 个月，取 aiDaily 的后 6 段 —— 月份与调用量都出同一处，两个数组天然对齐 */
+    aiMonthly: {
+      months: aiDaily.slice(-6).map((item) => item.month),
+      calls: [5, 4, 3, 2, 1, 0].map((offset) => aiMonthTotal(tenant, offset)),
+    },
+    aiDaily,
   }
 }
 
