@@ -4,6 +4,8 @@
  */
 import type {
   AdminAccount,
+  AdminMenuItem,
+  AdminRoleRecord,
   AgentCheckItem,
   AgentConfig,
   AiCallLog,
@@ -47,21 +49,26 @@ export const DICT_TYPES: Array<{ key: DictTypeKey; title: string; hint: string }
      hint 保留给机构端与平台端的说明用，不再出现在管理端左栏 */
   { key: 'examType', title: '考试类型', hint: '题目筛选与组卷场景使用；含试卷分类与适配学段 / 学科，由「考试类型」树维护' },
   { key: 'competition', title: '杯赛', hint: '题目筛选维度，非杯赛题留空；由「考试类型」树维护' },
-  { key: 'region', title: '地区', hint: '题目来源地区，用于筛名校真题' },
+  { key: 'region', title: '地区', hint: '题目来源地区，用于筛名校真题；编码为省级行政区划代码' },
   { key: 'copyright', title: '版权信息', hint: '机构端首页页脚文案，一行一条，按排序展示' },
 ]
 
 /**
- * 管理端「基础字典」左栏可见的类型。
+ * 管理端「基础字典」左栏可见的类型：业务字典。
  *
  * examType / competition 已由「考试类型」树接管维护（见 `examTypeNodes`），
- * 不再在基础字典里平铺展示。**但 `DICT_TYPES` 不能跟着删** —— 机构端仍通过
- * `/tenant/dict?type=examType|competition` 读它们（`listDict` → `dictStore`），
- * 那两条数据由树的投影函数持续刷新。
+ * copyright 已迁到「系统数据字典」（见 `SYSTEM_DICT_TYPES`），都不再平铺在这里。
+ *
+ * **但 `DICT_TYPES` 不能跟着删** —— 机构端仍通过 `/tenant/dict?type=examType|competition`
+ * 读它们（`listDict` → `dictStore`），那两条数据由树的投影函数持续刷新；
+ * copyright 也仍由机构端首页页脚读同一份 `dictStore`。
  */
-export const ADMIN_DICT_TYPES = DICT_TYPES.filter(
-  (item) => item.key !== 'examType' && item.key !== 'competition',
+export const BASE_DICT_TYPES = DICT_TYPES.filter(
+  (item) => item.key !== 'examType' && item.key !== 'competition' && item.key !== 'copyright',
 )
+
+/** 管理端「系统数据字典」的类型：系统级、随平台统一展示，机构端只读 */
+export const SYSTEM_DICT_TYPES = DICT_TYPES.filter((item) => item.key === 'copyright')
 
 /**
  * 杯赛 / 地区的取值。字典项与题目种子共用这一份 —— 题目侧按题号轮转取值（见
@@ -83,6 +90,25 @@ export const REGIONS = [
   '陕西', '甘肃', '青海', '宁夏', '新疆',
   '香港', '澳门', '台湾',
 ]
+
+/**
+ * 地区 → 省级行政区划代码（GB/T 2260 前两位）。
+ *
+ * 与 `REGIONS` 分开放而不是改成 `{ name, code }` 数组：`REGIONS` 还被 `seedQuestionMeta`
+ * 按名字轮转取题（那边只要字符串），换成对象会波及题目种子与筛选值域。
+ * 字典侧（`dictStore.region`）从这里取 code —— 两份数据放一起，加地区时不会漏。
+ * `全国` 不是行政区划，给 `00` 作「不分地区」哨兵的占位码。
+ */
+export const REGION_CODES: Record<string, string> = {
+  全国: '00',
+  北京: '11', 天津: '12', 河北: '13', 山西: '14', 内蒙古: '15',
+  辽宁: '21', 吉林: '22', 黑龙江: '23',
+  上海: '31', 江苏: '32', 浙江: '33', 安徽: '34', 福建: '35', 江西: '36', 山东: '37',
+  河南: '41', 湖北: '42', 湖南: '43', 广东: '44', 广西: '45', 海南: '46',
+  重庆: '50', 四川: '51', 贵州: '52', 云南: '53', 西藏: '54',
+  陕西: '61', 甘肃: '62', 青海: '63', 宁夏: '64', 新疆: '65',
+  台湾: '71', 香港: '81', 澳门: '82',
+}
 
 /** 杯赛只挂理科题：文科题挂着「华罗庚金杯」在演示里一眼假 */
 const COMPETITION_SUBJECTS = new Set(['数学', '物理', '化学'])
@@ -183,7 +209,7 @@ export const dictStore: Record<DictTypeKey, DictItem[]> = {
   competition: COMPETITIONS.map((name, i) => ({ id: 81 + i, name, sort: i + 1, enabled: true, refCount: 6 - i })),
   /* refCount 取 `Math.max(1, …)` 而不是裸的递减式：地区有 35 项，越界会算出负数，
      字典管理页会显示成负的引用数 */
-  region: REGIONS.map((name, i) => ({ id: 91 + i, name, sort: i + 1, enabled: true, refCount: Math.max(1, 12 - i) })),
+  region: REGIONS.map((name, i) => ({ id: 91 + i, name, code: REGION_CODES[name], sort: i + 1, enabled: true, refCount: Math.max(1, 12 - i) })),
   /* 页脚文案：refCount 为该文案覆盖的机构数（平台统一展示，停用后机构端页脚不再出现该条） */
   copyright: [
     { id: 71, name: '© 2024-2026 星辰教育科技（杭州）有限公司 版权所有', sort: 1, enabled: true, refCount: 12 },
@@ -198,12 +224,20 @@ function nextId(items: Array<{ id: number }>): number {
   return Math.max(0, ...items.map((item) => item.id)) + 1
 }
 
-/** 需要编码的字典类型；编码创建后不可改（编辑时被 strip 掉），故种子必须自带。 */
-const CODE_TYPES: DictTypeKey[] = ['subject', 'grade', 'questionType']
+/** 需要编码的字典类型；除 `EDITABLE_CODE_TYPES` 外，编码创建后不可改（编辑时被 strip 掉），故种子必须自带。 */
+const CODE_TYPES: DictTypeKey[] = ['subject', 'grade', 'questionType', 'region']
+/**
+ * 编码**允许在编辑时修改**的类型（与上面 `CODE_TYPES` 里的「创建后锁定」区分开）。
+ *
+ * 只有地区：行政区划代码是现实值，录错了得能订正；学科 / 年级 / 题型的编码是库内约定，
+ * 一改就会让历史数据对不上，仍锁死。前端 `DictBaseView` 侧同口径（改一处要改两处）。
+ */
+const EDITABLE_CODE_TYPES: DictTypeKey[] = ['region']
 const CODE_TYPE_LABEL: Partial<Record<DictTypeKey, string>> = {
   subject: '学科',
   grade: '年级',
   questionType: '题型',
+  region: '地区',
 }
 
 export function listDict(type: DictTypeKey): DictItem[] {
@@ -246,9 +280,20 @@ export function saveDictItem(type: DictTypeKey, input: Partial<DictItem>): DictI
     ) {
       throw new Error('难度系数已存在，不可重复')
     }
-    /* 编码创建后不可改：忽略 input.code */
-    const { id: _id, code: _code, ...rest } = input
+    /* 编码：只有地区允许改（校验唯一后写回），其余类型创建后锁定 —— 下面的解构会把
+       `code` 摘出去，`EDITABLE_CODE_TYPES` 之外的类型改不动它。 */
+    if (input.code !== undefined && EDITABLE_CODE_TYPES.includes(type)) {
+      const label = CODE_TYPE_LABEL[type] ?? '字典项'
+      const code = input.code.trim().toUpperCase()
+      if (!code) throw new Error(`${label}编码不能为空`)
+      if (items.some((row) => row.id !== item.id && row.code === code)) {
+        throw new Error(`${label}编码已存在`)
+      }
+      input.code = code
+    }
+    const { id: _id, code, ...rest } = input
     Object.assign(item, rest)
+    if (code !== undefined && EDITABLE_CODE_TYPES.includes(type)) item.code = code
     return item
   }
   /* 新增：编码唯一 / 学期日期重叠 / 系数重复校验 */
@@ -1264,14 +1309,286 @@ export const errorLogs: ErrorLog[] = [
 
 /* ================= 系统管理（FR-PT-033 / 034） ================= */
 
+/* ---------------- 管理端菜单树（菜单管理） ----------------
+ *
+ * 扁平节点 + parentId，与考试类型树同模型。它是左侧边栏的唯一事实源 —— 早先菜单写死在
+ * `apps/admin/src/menu.ts`，改不动也看不见。
+ *
+ * **层级上限 2 级**（顶级分组 + 子菜单），另有「顶级叶子」这一形态（平台工作台）：
+ * 侧边栏（AppLayout）就只渲染这两层，放开第三层会出现「配了却看不到」的节点。
+ */
+export const MAX_ADMIN_MENU_DEPTH = 2
+
+/** 顶级叶子节点（无子节点）自带 icon；分组节点的 icon 也在此给 */
+export const adminMenus: AdminMenuItem[] = [
+  { id: 1, parentId: null, title: '平台工作台', path: '/dashboard', icon: 'dashboard', sort: 1, enabled: true, builtin: true },
+
+  { id: 10, parentId: null, title: '租户管理', path: '/tenant', icon: 'building', sort: 2, enabled: true, builtin: true },
+  { id: 11, parentId: 10, title: '机构列表', path: '/tenant/list', sort: 1, enabled: true, builtin: true },
+  { id: 12, parentId: 10, title: '机构入驻审核', path: '/tenant/apply', sort: 2, enabled: true, builtin: true },
+  { id: 13, parentId: 10, title: '套餐管理', path: '/tenant/package', sort: 3, enabled: true, builtin: true },
+
+  { id: 20, parentId: null, title: '全局字典', path: '/dict', icon: 'book', sort: 3, enabled: true, builtin: true },
+  { id: 21, parentId: 20, title: '基础字典', path: '/dict/base', sort: 1, enabled: true, builtin: true },
+  { id: 22, parentId: 20, title: '知识点树', path: '/dict/knowledge', sort: 2, enabled: true, builtin: true },
+  { id: 23, parentId: 20, title: '教材版本', path: '/dict/textbook', sort: 3, enabled: true, builtin: true },
+  { id: 24, parentId: 20, title: '考试类型', path: '/dict/exam-type', sort: 4, enabled: true, builtin: true },
+
+  { id: 30, parentId: null, title: '内容运营', path: '/content', icon: 'book', sort: 4, enabled: true, builtin: true },
+  { id: 31, parentId: 30, title: '公共题库', path: '/content/questions', sort: 1, enabled: true, builtin: true },
+  { id: 32, parentId: 30, title: '公共试卷库', path: '/content/papers', sort: 2, enabled: true, builtin: true },
+  { id: 33, parentId: 30, title: '内容分发', path: '/content/distribution', sort: 3, enabled: true, builtin: true },
+  { id: 34, parentId: 30, title: '合规抽检', path: '/content/compliance', sort: 4, enabled: true, builtin: true },
+  { id: 35, parentId: 30, title: '反馈工单', path: '/content/feedback', sort: 5, enabled: true, builtin: true },
+
+  { id: 40, parentId: null, title: 'AI 服务配置', path: '/ai', icon: 'cpu', sort: 5, enabled: true, builtin: true },
+  { id: 41, parentId: 40, title: '模型接入管理', path: '/ai/models', sort: 1, enabled: true, builtin: true },
+  { id: 42, parentId: 40, title: '多智能体编排', path: '/ai/agents', sort: 2, enabled: true, builtin: true },
+  { id: 43, parentId: 40, title: '全局 Prompt 模板', path: '/ai/prompts', sort: 3, enabled: true, builtin: true },
+  { id: 44, parentId: 40, title: 'AI 安全治理', path: '/ai/safety', sort: 4, enabled: true, builtin: true },
+  { id: 45, parentId: 40, title: 'AI 计费与能力开关', path: '/ai/billing', sort: 5, enabled: true, builtin: true },
+
+  { id: 50, parentId: null, title: '数据审计', path: '/audit', icon: 'chart', sort: 6, enabled: true, builtin: true },
+  { id: 51, parentId: 50, title: 'AI 调用日志', path: '/audit/ai-logs', sort: 1, enabled: true, builtin: true },
+  { id: 52, parentId: 50, title: '平台资源总库', path: '/audit/resources', sort: 2, enabled: true, builtin: true },
+  { id: 53, parentId: 50, title: '日志审计', path: '/audit/logs', sort: 3, enabled: true, builtin: true },
+  { id: 54, parentId: 50, title: '服务健康监控', path: '/audit/health', sort: 4, enabled: true, builtin: true },
+
+  { id: 60, parentId: null, title: '系统管理', path: '/system', icon: 'sliders', sort: 7, enabled: true, builtin: true },
+  { id: 61, parentId: 60, title: '管理员账号', path: '/system/accounts', sort: 1, enabled: true, builtin: true },
+  { id: 62, parentId: 60, title: '角色权限', path: '/system/roles', sort: 2, enabled: true, builtin: true },
+  { id: 63, parentId: 60, title: '菜单管理', path: '/system/menus', sort: 3, enabled: true, builtin: true },
+  { id: 64, parentId: 60, title: '机构菜单权限', path: '/system/tenant-menus', sort: 4, enabled: true, builtin: true },
+  { id: 65, parentId: 60, title: '系统数据字典', path: '/system/dict', sort: 5, enabled: true, builtin: true },
+  { id: 66, parentId: 60, title: '系统参数', path: '/system/params', sort: 6, enabled: true, builtin: true },
+  { id: 67, parentId: 60, title: '消息模板', path: '/system/messages', sort: 7, enabled: true, builtin: true },
+  { id: 68, parentId: 60, title: '存储与备份', path: '/system/storage', sort: 8, enabled: true, builtin: true },
+]
+
+export function listAdminMenus(): AdminMenuItem[] {
+  return adminMenus.map((item) => ({ ...item })).sort((a, b) => a.sort - b.sort)
+}
+
+/** 节点所在层级（顶级 = 1） */
+function adminMenuDepthOf(id: number): number {
+  let depth = 1
+  let current = adminMenus.find((item) => item.id === id)
+  while (current?.parentId != null) {
+    depth += 1
+    current = adminMenus.find((item) => item.id === current!.parentId)
+  }
+  return depth
+}
+
+/** 是否把 id 挂到 parentId 下会形成环（parentId 是 id 自身或其后代） */
+function wouldCycle(id: number, parentId: number): boolean {
+  let current: number | null = parentId
+  while (current != null) {
+    if (current === id) return true
+    current = adminMenus.find((item) => item.id === current)?.parentId ?? null
+  }
+  return false
+}
+
+export function saveAdminMenuItem(input: Partial<AdminMenuItem>): AdminMenuItem {
+  const title = (input.title ?? '').trim()
+  if (!title) throw new Error('菜单名称不能为空')
+  const path = (input.path ?? '').trim()
+  if (!path) throw new Error('菜单路径不能为空')
+  if (!path.startsWith('/')) throw new Error('菜单路径须以 / 开头')
+
+  if (input.id) {
+    const node = adminMenus.find((item) => item.id === input.id)
+    if (!node) throw new Error('菜单不存在')
+    if (adminMenus.some((item) => item.id !== node.id && item.title === title && item.parentId === node.parentId)) {
+      throw new Error('同级下已存在同名菜单')
+    }
+    if (adminMenus.some((item) => item.id !== node.id && item.path === path)) {
+      throw new Error('菜单路径已存在')
+    }
+    const parentId = input.parentId !== undefined ? input.parentId : node.parentId
+    if (parentId != null) {
+      if (!adminMenus.some((item) => item.id === parentId)) throw new Error('上级菜单不存在')
+      if (wouldCycle(node.id, parentId)) throw new Error('不能把菜单移动到它自己或它的子菜单下')
+      /* 移动后新位置的层级：新父层级 + 1，不能超过上限 */
+      if (adminMenuDepthOf(parentId) + 1 > MAX_ADMIN_MENU_DEPTH) {
+        throw new Error(`菜单最多 ${MAX_ADMIN_MENU_DEPTH} 级，无法移到该上级下`)
+      }
+    }
+    node.title = title
+    node.path = path
+    node.icon = input.icon?.trim() || undefined
+    if (input.sort !== undefined) {
+      const sort = Number(input.sort)
+      if (!Number.isInteger(sort) || sort < 1) throw new Error('排序须为不小于 1 的整数')
+      node.sort = sort
+    }
+    if (input.enabled !== undefined) node.enabled = input.enabled
+    node.parentId = parentId
+    return node
+  }
+
+  const parentId = input.parentId ?? null
+  if (parentId !== null) {
+    const parent = adminMenus.find((item) => item.id === parentId)
+    if (!parent) throw new Error('上级菜单不存在')
+    if (adminMenuDepthOf(parentId) >= MAX_ADMIN_MENU_DEPTH) {
+      throw new Error(`菜单最多 ${MAX_ADMIN_MENU_DEPTH} 级，无法再添加子菜单`)
+    }
+  }
+  if (adminMenus.some((item) => item.title === title && item.parentId === parentId)) {
+    throw new Error('同级下已存在同名菜单')
+  }
+  if (adminMenus.some((item) => item.path === path)) throw new Error('菜单路径已存在')
+  const sort = input.sort !== undefined ? Number(input.sort) : undefined
+  if (sort !== undefined && (!Number.isInteger(sort) || sort < 1)) throw new Error('排序须为不小于 1 的整数')
+  const siblings = adminMenus.filter((item) => item.parentId === parentId)
+  const node: AdminMenuItem = {
+    id: nextId(adminMenus),
+    parentId,
+    title,
+    path,
+    icon: input.icon?.trim() || undefined,
+    sort: sort ?? Math.max(0, ...siblings.map((item) => item.sort)) + 1,
+    enabled: input.enabled ?? true,
+    builtin: false,
+  }
+  adminMenus.push(node)
+  return node
+}
+
+export function toggleAdminMenuItem(id: number): boolean {
+  const node = adminMenus.find((item) => item.id === id)
+  if (!node) throw new Error('菜单不存在')
+  const next = !node.enabled
+  /* 整棵子树同步启停：父节点隐藏而子节点仍启用，侧边栏会落下一个悬空分组 */
+  const stack = [node.id]
+  while (stack.length) {
+    const currentId = stack.pop()!
+    const current = adminMenus.find((item) => item.id === currentId)
+    if (!current) continue
+    current.enabled = next
+    adminMenus.filter((item) => item.parentId === currentId).forEach((child) => stack.push(child.id))
+  }
+  return next
+}
+
+export function deleteAdminMenuItem(id: number): void {
+  const node = adminMenus.find((item) => item.id === id)
+  if (!node) throw new Error('菜单不存在')
+  if (adminMenus.some((item) => item.parentId === id)) throw new Error('请先删除或移走子菜单')
+  adminMenus.splice(adminMenus.indexOf(node), 1)
+}
+
+/* ---------------- 管理端角色（角色权限） ----------------
+ *
+ * `permissions` 存可见菜单的 path；`['*']` = 全部。分组不登记（是否显示分组由组内是否有
+ * 可见叶子推导），所以 `ops` 的种子只列叶子。
+ */
+
+/** 内置超级管理员的 code：账号 `admin` 用它，权限恒为全部且不可编辑（避免把唯一演示账号锁死） */
+export const ADMIN_SUPER_ROLE_CODE = 'super'
+
+/** 「系统管理」分组节点的 id：`ops` 角色的默认权限 = 全部叶子减去它下面的叶子 */
+const SYSTEM_MENU_ID = 60
+
+const adminRoleSeeds: Array<Omit<AdminRoleRecord, 'memberCount'>> = [
+  {
+    id: 1,
+    code: ADMIN_SUPER_ROLE_CODE,
+    name: '超级管理员',
+    desc: '平台全部权限，含系统管理；不可删除、不可停用，权限不可修改。',
+    builtin: true,
+    enabled: true,
+    permissions: ['*'],
+  },
+  {
+    id: 2,
+    code: 'ops',
+    name: '运营专员',
+    desc: '除系统管理外的全部权限，负责租户、内容与 AI 服务日常运营。',
+    builtin: true,
+    enabled: true,
+    /* 除「系统管理」分组下的叶子外的全部叶子。判「叶子」用有无子节点，而不是 `parentId != null`
+       —— 后者会把「平台工作台」这个顶级叶子一起漏掉。 */
+    permissions: adminMenus
+      .filter(
+        (item) =>
+          !adminMenus.some((child) => child.parentId === item.id) && item.parentId !== SYSTEM_MENU_ID,
+      )
+      .map((item) => item.path),
+  },
+]
+
+export function listAdminRoles(): AdminRoleRecord[] {
+  return adminRoleSeeds.map((role) => ({
+    ...role,
+    permissions: [...role.permissions],
+    memberCount: adminAccounts.filter((account) => account.role === role.code).length,
+  }))
+}
+
+export function saveAdminRole(input: Partial<AdminRoleRecord>): AdminRoleRecord {
+  const name = (input.name ?? '').trim()
+  if (!name) throw new Error('角色名称不能为空')
+  /* 权限：内置超级管理员恒为 ['*']，忽略传入值 */
+  const permissions = input.permissions?.length ? [...new Set(input.permissions)] : []
+
+  if (input.id) {
+    const role = adminRoleSeeds.find((item) => item.id === input.id)
+    if (!role) throw new Error('角色不存在')
+    if (adminRoleSeeds.some((item) => item.id !== role.id && item.name === name)) {
+      throw new Error('角色名称已存在')
+    }
+    role.name = name
+    role.desc = (input.desc ?? '').trim()
+    if (input.enabled !== undefined && role.code !== ADMIN_SUPER_ROLE_CODE) role.enabled = input.enabled
+    if (role.code !== ADMIN_SUPER_ROLE_CODE) role.permissions = permissions
+    return { ...role, permissions: [...role.permissions], memberCount: 0 }
+  }
+
+  const code = (input.code ?? '').trim().toLowerCase()
+  if (!/^[a-z][a-z0-9_]{1,19}$/.test(code)) {
+    throw new Error('角色编码须为 2-20 位小写字母 / 数字 / 下划线，且以字母开头')
+  }
+  if (adminRoleSeeds.some((item) => item.code === code)) throw new Error('角色编码已存在')
+  if (!permissions.length) throw new Error('请至少勾选一项菜单权限')
+  const role: Omit<AdminRoleRecord, 'memberCount'> = {
+    id: nextId(adminRoleSeeds),
+    code,
+    name,
+    desc: (input.desc ?? '').trim(),
+    builtin: false,
+    enabled: input.enabled ?? true,
+    permissions,
+  }
+  adminRoleSeeds.push(role)
+  return { ...role, permissions: [...role.permissions], memberCount: 0 }
+}
+
+export function toggleAdminRole(id: number): boolean {
+  const role = adminRoleSeeds.find((item) => item.id === id)
+  if (!role) throw new Error('角色不存在')
+  if (role.code === ADMIN_SUPER_ROLE_CODE) throw new Error('内置超级管理员角色不可停用')
+  role.enabled = !role.enabled
+  return role.enabled
+}
+
+export function deleteAdminRole(id: number): void {
+  const role = adminRoleSeeds.find((item) => item.id === id)
+  if (!role) throw new Error('角色不存在')
+  if (role.builtin) throw new Error('内置角色不可删除')
+  const memberCount = adminAccounts.filter((account) => account.role === role.code).length
+  if (memberCount > 0) throw new Error(`该角色下仍有 ${memberCount} 个管理员，请先调整归属`)
+  adminRoleSeeds.splice(adminRoleSeeds.indexOf(role), 1)
+}
+
 export const adminAccounts: AdminAccount[] = [
   { id: 1, account: 'admin', name: '系统管理员', role: 'super', enabled: true, lastLoginAt: nowStr(-0.5) },
   { id: 2, account: 'ops_wang', name: '王运营', role: 'ops', enabled: true, lastLoginAt: nowStr(-20) },
   { id: 3, account: 'ops_liu', name: '刘运营', role: 'ops', enabled: true, lastLoginAt: nowStr(-74) },
   { id: 4, account: 'ops_chen', name: '陈运营', role: 'ops', enabled: false, lastLoginAt: dateAfter(-60) },
 ]
-
-export const ADMIN_ROLE_TEXT: Record<string, string> = { super: '超级管理员', ops: '运营专员' }
 
 export function listAdmins(): AdminAccount[] {
   return adminAccounts.map((item) => ({ ...item }))

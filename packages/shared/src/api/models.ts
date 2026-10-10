@@ -213,7 +213,13 @@ export interface TenantDetailModel {
 
 /* ================ 全局字典（FR-PT-015 / 016） ================ */
 
-/** copyright：机构端首页页脚文案，每条 name 为一段（版权主体 / 备案号 / 客服方式 …），按排序拼接展示 */
+/**
+ * 字典类型键。
+ *
+ * 管理端按维护入口把类型分成两组（见 admin-store 的 `BASE_DICT_TYPES` / `SYSTEM_DICT_TYPES`）：
+ * 「基础字典」管业务字典，`copyright`（机构端首页页脚文案，每条 name 为一段 —— 版权主体 /
+ * 备案号 / 客服方式 …，按排序拼接展示）单独归「系统数据字典」。
+ */
 export type DictTypeKey =
   | 'subject'
   | 'grade'
@@ -229,7 +235,7 @@ export type DictTypeKey =
 export interface DictItem {
   id: number
   name: string
-  /** 编码（学科 / 年级 / 题型必填，创建后不可改） */
+  /** 编码（学科 / 年级 / 题型 / 地区必填。前三种创建后不可改；地区的行政区划代码允许编辑订正） */
   code?: string
   sort: number
   enabled: boolean
@@ -472,7 +478,14 @@ export interface ErrorLog {
 
 /* ================ 系统管理（FR-PT-033 / 034） ================ */
 
-export type AdminRole = 'super' | 'ops'
+/**
+ * 管理端角色标识 = `AdminRoleRecord.code`。
+ *
+ * 从原先写死的 `'super' | 'ops'` 放宽成 `string`：角色改由「角色权限」页维护，
+ * 值是用户自建的 code，编译期给不出有限集合。`'super'` 仍是内置超级管理员的 code，
+ * 代码里比较它时用 `ADMIN_SUPER_ROLE_CODE` 常量，别散落字面量。
+ */
+export type AdminRole = string
 
 export interface AdminAccount {
   id: number
@@ -481,6 +494,46 @@ export interface AdminAccount {
   role: AdminRole
   enabled: boolean
   lastLoginAt: string
+}
+
+/**
+ * 管理端角色。
+ *
+ * `permissions` 存可见菜单的 `AdminMenuItem.path` 列表；`['*']` 表示不受限（内置超级管理员）。
+ * 分组节点（有 children 的菜单）不在列表里 —— 是否显示分组由「组内是否有可见叶子」推导。
+ */
+export interface AdminRoleRecord {
+  id: number
+  /** 角色标识，账号表的 `role` 存它；创建后不可改 */
+  code: string
+  name: string
+  desc: string
+  /** 内置角色不可删除 */
+  builtin: boolean
+  enabled: boolean
+  permissions: string[]
+  /** 引用该角色的管理员数（>0 时禁止删除） */
+  memberCount: number
+}
+
+/**
+ * 管理端菜单树节点（扁平结构，`parentId` 串起层级，与 `ExamTypeNode` / `KnowledgeNode` 同模型）。
+ *
+ * 分组节点有 `children`（即别的节点以它为 parentId）而无子节点时 `path` 仅作占位。
+ * 它是「菜单管理」页与左侧边栏的**唯一事实源** —— 早先菜单写死在 `apps/admin/src/menu.ts`，
+ * 改不动也看不见。
+ */
+export interface AdminMenuItem {
+  id: number
+  parentId: number | null
+  title: string
+  /** 叶子为路由路径（唯一）；分组节点为分组占位路径 */
+  path: string
+  icon?: string
+  sort: number
+  enabled: boolean
+  /** 种子节点标记（界面上给出「内置」提示） */
+  builtin: boolean
 }
 
 export interface TenantMenuItem {

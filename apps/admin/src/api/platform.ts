@@ -1,6 +1,8 @@
 import { request } from '@aiteach/shared'
 import type {
   AdminAccount,
+  AdminMenuItem,
+  AdminRoleRecord,
   AgentConfig,
   AiCallLog,
   AiModel,
@@ -238,6 +240,42 @@ export function fetchTenantMenus() {
 
 export function saveTenantMenus(items: TenantMenuItem[]) {
   return request<null>('/admin/tenant-menus/save', { method: 'POST', data: { items } })
+}
+
+/* ===== 管理端菜单树（菜单管理） ===== */
+
+export function fetchAdminMenus() {
+  return request<AdminMenuItem[]>('/admin/menus')
+}
+
+export function saveAdminMenuItem(data: Partial<AdminMenuItem>) {
+  return request<AdminMenuItem>('/admin/menus/save', { method: 'POST', data })
+}
+
+export function toggleAdminMenuItem(id: number) {
+  return request<{ enabled: boolean }>('/admin/menus/toggle', { method: 'POST', data: { id } })
+}
+
+export function deleteAdminMenuItem(id: number) {
+  return request<null>('/admin/menus/delete', { method: 'POST', data: { id } })
+}
+
+/* ===== 管理端角色（角色权限） ===== */
+
+export function fetchAdminRoles() {
+  return request<AdminRoleRecord[]>('/admin/roles')
+}
+
+export function saveAdminRole(data: Partial<AdminRoleRecord>) {
+  return request<AdminRoleRecord>('/admin/roles/save', { method: 'POST', data })
+}
+
+export function toggleAdminRole(id: number) {
+  return request<{ enabled: boolean }>('/admin/roles/toggle', { method: 'POST', data: { id } })
+}
+
+export function deleteAdminRole(id: number) {
+  return request<null>('/admin/roles/delete', { method: 'POST', data: { id } })
 }
 
 /* ===== 消息中心 ===== */

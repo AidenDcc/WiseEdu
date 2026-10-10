@@ -1,87 +1,13 @@
 /**
- * 超级管理端菜单（对应 SRS 第 3.2 章 FR-PT 模块划分）。
- * 平台铁律（BR-001）：本端仅全局配置与只读审计，无任何业务操作入口。
+ * 管理端菜单节点：AppLayout 渲染侧边栏、推导面包屑（`buildBreadcrumb`）共用这个结构。
+ *
+ * 菜单**数据**已不在本文件 —— 它由「系统管理 → 菜单管理」维护，存在 Mock 的 `adminMenus`
+ * （`packages/shared/src/mock/admin-store.ts`），经 `useAdminMenus()` 取回并组装成这棵树。
+ * 这里只留类型，供布局与组合式函数使用。
  */
 export interface MenuItem {
   path: string
   title: string
   icon?: string
   children?: MenuItem[]
-}
-
-export const menus: MenuItem[] = [
-  { path: '/dashboard', title: '平台工作台', icon: 'dashboard' },
-  {
-    path: '/tenant',
-    title: '租户管理',
-    icon: 'building',
-    children: [
-      { path: '/tenant/list', title: '机构列表' },
-      { path: '/tenant/apply', title: '机构入驻审核' },
-      { path: '/tenant/package', title: '套餐管理' },
-    ],
-  },
-  {
-    path: '/dict',
-    title: '全局字典',
-    icon: 'book',
-    children: [
-      { path: '/dict/base', title: '基础字典' },
-      { path: '/dict/knowledge', title: '知识点树' },
-      { path: '/dict/textbook', title: '教材版本' },
-      { path: '/dict/exam-type', title: '考试类型' },
-    ],
-  },
-  {
-    path: '/content',
-    title: '内容运营',
-    icon: 'book',
-    children: [
-      { path: '/content/questions', title: '公共题库' },
-      { path: '/content/papers', title: '公共试卷库' },
-      { path: '/content/distribution', title: '内容分发' },
-      { path: '/content/compliance', title: '合规抽检' },
-      { path: '/content/feedback', title: '反馈工单' },
-    ],
-  },
-  {
-    path: '/ai',
-    title: 'AI 服务配置',
-    icon: 'cpu',
-    children: [
-      { path: '/ai/models', title: '模型接入管理' },
-      { path: '/ai/agents', title: '多智能体编排' },
-      { path: '/ai/prompts', title: '全局 Prompt 模板' },
-      { path: '/ai/safety', title: 'AI 安全治理' },
-      { path: '/ai/billing', title: 'AI 计费与能力开关' },
-    ],
-  },
-  {
-    path: '/audit',
-    title: '数据审计',
-    icon: 'chart',
-    children: [
-      { path: '/audit/ai-logs', title: 'AI 调用日志' },
-      { path: '/audit/resources', title: '平台资源总库' },
-      { path: '/audit/logs', title: '日志审计' },
-      { path: '/audit/health', title: '服务健康监控' },
-    ],
-  },
-  {
-    path: '/system',
-    title: '系统管理',
-    icon: 'sliders',
-    children: [
-      { path: '/system/accounts', title: '管理员账号' },
-      { path: '/system/menus', title: '机构菜单权限' },
-      { path: '/system/params', title: '系统参数' },
-      { path: '/system/messages', title: '消息模板' },
-      { path: '/system/storage', title: '存储与备份' },
-    ],
-  },
-]
-
-/** 展平所有叶子节点（含各级标题），供路由注册与标题反查 */
-export function flattenMenus(items: MenuItem[]): MenuItem[] {
-  return items.flatMap((item) => [item, ...(item.children ? flattenMenus(item.children) : [])])
 }

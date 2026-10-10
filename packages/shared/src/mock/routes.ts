@@ -594,7 +594,7 @@ export const mockRoutes: MockRoute[] = [
     path: '/admin/exam-type-nodes/*',
     handler: ({ path, body }) =>
       guard(() => {
-        const [, action] = parseSegments(path, '/admin/exam-type-nodes/')
+        const [action] = parseSegments(path, '/admin/exam-type-nodes/')
         if (action === 'save') return admin.saveExamTypeNode(body as Record<string, never>)
         if (action === 'toggle') return { enabled: admin.toggleExamTypeNode(Number(body.id)) }
         if (action === 'delete') {
@@ -614,7 +614,7 @@ export const mockRoutes: MockRoute[] = [
     path: '/admin/knowledge/*',
     handler: ({ path, body }) =>
       guard(() => {
-        const [, action] = parseSegments(path, '/admin/knowledge/')
+        const [action] = parseSegments(path, '/admin/knowledge/')
         if (action === 'save') return admin.saveKnowledgeNode(body as Record<string, never>)
         if (action === 'toggle') return { enabled: admin.toggleKnowledgeNode(Number(body.id)) }
         if (action === 'delete') {
@@ -634,7 +634,7 @@ export const mockRoutes: MockRoute[] = [
     path: '/admin/textbooks/*',
     handler: ({ path, body }) =>
       guard(() => {
-        const [, action] = parseSegments(path, '/admin/textbooks/')
+        const [action] = parseSegments(path, '/admin/textbooks/')
         if (action === 'save') return admin.saveTextbook(body as Record<string, never>)
         if (action === 'toggle') return { enabled: admin.toggleTextbook(Number(body.id)) }
         if (action === 'delete') {
@@ -656,7 +656,7 @@ export const mockRoutes: MockRoute[] = [
     path: '/admin/ai/models/*',
     handler: ({ path, body }) =>
       guard(() => {
-        const [, action] = parseSegments(path, '/admin/ai/models/')
+        const [action] = parseSegments(path, '/admin/ai/models/')
         if (action === 'save') return admin.saveAiModel(body as Record<string, never>)
         if (action === 'test') return admin.testModelConnection()
         if (action === 'health') return admin.healthCheckModel(Number(body.id))
@@ -674,7 +674,7 @@ export const mockRoutes: MockRoute[] = [
     path: '/admin/ai/agents/*',
     handler: ({ path, body }) =>
       guard(() => {
-        const [, action] = parseSegments(path, '/admin/ai/agents/')
+        const [action] = parseSegments(path, '/admin/ai/agents/')
         if (action === 'save') {
           return admin.saveAgentConfig(body as never)
         }
@@ -692,7 +692,7 @@ export const mockRoutes: MockRoute[] = [
     path: '/admin/prompts/*',
     handler: ({ path, body }) =>
       guard(() => {
-        const [, action] = parseSegments(path, '/admin/prompts/')
+        const [action] = parseSegments(path, '/admin/prompts/')
         if (action === 'save') return admin.savePrompt(body as never)
         if (action === 'default') {
           admin.setDefaultPrompt(Number(body.id))
@@ -745,7 +745,7 @@ export const mockRoutes: MockRoute[] = [
     path: '/admin/logs/*',
     handler: ({ path }) =>
       guard(() => {
-        const [, type] = parseSegments(path, '/admin/logs/')
+        const [type] = parseSegments(path, '/admin/logs/')
         if (type === 'login') return admin.loginLogs
         if (type === 'operation') return admin.operationLogs
         if (type === 'error') return admin.errorLogs
@@ -764,7 +764,7 @@ export const mockRoutes: MockRoute[] = [
     path: '/admin/accounts/*',
     handler: ({ path, body }) =>
       guard(() => {
-        const [, action] = parseSegments(path, '/admin/accounts/')
+        const [action] = parseSegments(path, '/admin/accounts/')
         if (action === 'save') return admin.saveAdmin(body as Record<string, never>)
         if (action === 'toggle') return { enabled: admin.toggleAdmin(Number(body.id)) }
         if (action === 'reset-password') {
@@ -778,6 +778,48 @@ export const mockRoutes: MockRoute[] = [
     method: 'GET',
     path: '/admin/tenant-menus',
     handler: () => guard(() => admin.getTenantMenus()),
+  },
+  /* 管理端菜单树（菜单管理）：驱动左侧边栏，见 admin-store 的 adminMenus */
+  {
+    method: 'GET',
+    path: '/admin/menus',
+    handler: () => guard(() => admin.listAdminMenus()),
+  },
+  {
+    method: 'POST',
+    path: '/admin/menus/*',
+    handler: ({ path, body }) =>
+      guard(() => {
+        const [action] = parseSegments(path, '/admin/menus/')
+        if (action === 'save') return admin.saveAdminMenuItem(body as Record<string, never>)
+        if (action === 'toggle') return { enabled: admin.toggleAdminMenuItem(Number(body.id)) }
+        if (action === 'delete') {
+          admin.deleteAdminMenuItem(Number(body.id))
+          return null
+        }
+        mockFail(404, '接口不存在')
+      }),
+  },
+  /* 管理端角色（角色权限） */
+  {
+    method: 'GET',
+    path: '/admin/roles',
+    handler: () => guard(() => admin.listAdminRoles()),
+  },
+  {
+    method: 'POST',
+    path: '/admin/roles/*',
+    handler: ({ path, body }) =>
+      guard(() => {
+        const [action] = parseSegments(path, '/admin/roles/')
+        if (action === 'save') return admin.saveAdminRole(body as Record<string, never>)
+        if (action === 'toggle') return { enabled: admin.toggleAdminRole(Number(body.id)) }
+        if (action === 'delete') {
+          admin.deleteAdminRole(Number(body.id))
+          return null
+        }
+        mockFail(404, '接口不存在')
+      }),
   },
   {
     method: 'POST',
@@ -896,19 +938,26 @@ export const mockRoutes: MockRoute[] = [
 /**
  * 从 /admin/dict/{type}/... 中解析字典类型。
  *
- * 白名单取 `ADMIN_DICT_TYPES`（不含 examType / competition）：这两类已由「考试类型」树
- * 接管，若旧接口仍可写，写进去的脏数据会被下一次 `syncExamTypeDict()` 悄悄覆盖。
+ * 白名单取「基础字典 + 系统数据字典」的并集（不含 examType / competition）：这两类已由
+ * 「考试类型」树接管，若旧接口仍可写，写进去的脏数据会被下一次 `syncExamTypeDict()` 悄悄覆盖。
  * 机构端不受影响 —— `/tenant/dict` 直接调 `listDict`，不经过这里。
  */
 function parseDictType(path: string): DictTypeKey {
   const segments = path.split('/').filter(Boolean)
   const type = segments[2]
-  const valid: DictTypeKey[] = admin.ADMIN_DICT_TYPES.map((item) => item.key)
+  const valid: DictTypeKey[] = [...admin.BASE_DICT_TYPES, ...admin.SYSTEM_DICT_TYPES].map((item) => item.key)
   if (!valid.includes(type as DictTypeKey)) mockFail(404, `未知字典类型：${type}`)
   return type as DictTypeKey
 }
 
-/** 拆出前缀后的路径段（去掉查询串） */
+/**
+ * 拆出前缀后的路径段（去掉查询串）。前缀要连结尾的 `/` 一起传。
+ *
+ * 两种 URL 形态，别取错下标：
+ * - `/admin/dict/<type>/<action>` → `['subject', 'save']`，取 `[type, action]`；
+ * - `/admin/<模块>/<action>` → `['save']`，取 `[action]`（写成 `[, action]` 会拿到 undefined，
+ *   接口恒报「接口不存在」—— 这族路由曾经全体踩过这个坑）。
+ */
 function parseSegments(path: string, prefix: string): string[] {
   return path.slice(prefix.length).split('/').filter(Boolean)
 }

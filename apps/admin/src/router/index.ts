@@ -1,7 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { clearSession, hasValidSession, isSessionExpired } from '@aiteach/shared'
-import { flattenMenus, menus } from '@/menu'
 import { useAuthStore } from '@/stores/auth'
 
 const routes: RouteRecordRaw[] = [
@@ -167,10 +166,29 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '管理员账号' },
       },
       {
+        path: 'system/roles',
+        name: 'system-roles',
+        component: () => import('@/views/system/RolesView.vue'),
+        meta: { title: '角色权限' },
+      },
+      /* 管理端菜单（驱动左侧边栏），路径 /system/menus；机构端菜单可见性在 /system/tenant-menus */
+      {
         path: 'system/menus',
         name: 'system-menus',
+        component: () => import('@/views/system/MenuManageView.vue'),
+        meta: { title: '菜单管理' },
+      },
+      {
+        path: 'system/tenant-menus',
+        name: 'system-tenant-menus',
         component: () => import('@/views/system/TenantMenusView.vue'),
         meta: { title: '机构菜单权限' },
+      },
+      {
+        path: 'system/dict',
+        name: 'system-dict',
+        component: () => import('@/views/system/SystemDictView.vue'),
+        meta: { title: '系统数据字典' },
       },
       {
         path: 'system/params',
@@ -198,24 +216,9 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/ProfileView.vue'),
         meta: { title: '个人中心' },
       },
-      // 其余菜单统一注册为「开发中」占位页
-      ...flattenMenus(menus)
-        .filter(
-          (item) =>
-            item.path !== '/dashboard' &&
-            !item.path.startsWith('/tenant/') &&
-            !item.path.startsWith('/dict/') &&
-            !item.path.startsWith('/content/') &&
-            !item.path.startsWith('/ai/') &&
-            !item.path.startsWith('/audit/') &&
-            !item.path.startsWith('/system/'),
-        )
-        .map((item) => ({
-          path: item.path.slice(1),
-          name: item.path,
-          component: () => import('@/views/DevelopingView.vue'),
-          meta: { title: item.title },
-        })),
+      /* 菜单数据已移到「系统管理 → 菜单管理」维护（见 useAdminMenus），路由不再由菜单树生成 ——
+         菜单路径是运行时数据，编译期拿不到。上面已显式注册全部内置页面；「菜单管理」里新增的
+         自定义菜单路径会落到下面这条兜底路由，渲染为「开发中」占位页。 */
       { path: ':pathMatch(.*)*', component: () => import('@/views/DevelopingView.vue'), meta: { title: '页面' } },
     ],
   },

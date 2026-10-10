@@ -1,24 +1,30 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast, ApiError, ADMIN_ROLE_TEXT, AppModal, appConfirm } from '@aiteach/shared'
-import type { AdminAccount, AdminRole } from '@aiteach/shared'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { AppIcon, AppPageHeader, showToast, ApiError, ADMIN_SUPER_ROLE_CODE, AppModal, appConfirm } from '@aiteach/shared'
+import type { AdminAccount, AdminRole, AdminRoleRecord } from '@aiteach/shared'
 import AppSwitch from '@/components/ui/AppSwitch.vue'
-import { fetchAdmins, resetAdminPassword, saveAdmin, toggleAdmin } from '@/api/platform'
+import { fetchAdminRoles, fetchAdmins, resetAdminPassword, saveAdmin, toggleAdmin } from '@/api/platform'
 
 const list = ref<AdminAccount[]>([])
+/** 角色候选来自「角色权限」维护的数据，账号归属的角色值是角色的 code */
+const roles = ref<AdminRoleRecord[]>([])
 const loading = ref(false)
+
+const roleName = (code: AdminRole) => roles.value.find((role) => role.code === code)?.name ?? code
+/** 可选角色：停用的不再分配给新账号，但已归属的不影响展示 */
+const selectableRoles = computed(() => roles.value.filter((role) => role.enabled))
 
 async function load() {
   loading.value = true
   try {
-    list.value = await fetchAdmins()
+    ;[list.value, roles.value] = await Promise.all([fetchAdmins(), fetchAdminRoles()])
   } finally {
     loading.value = false
   }
 }
 
 async function onToggle(item: AdminAccount) {
-  if (item.enabled && item.role === 'super' && !(await appConfirm('停用后该账号将无法登录平台端，确认停用？', { type: 'warning' }))) {
+  if (item.enabled && item.role === ADMIN_SUPER_ROLE_CODE && !(await appConfirm('停用后该账号将无法登录平台端，确认停用？', { type: 'warning' }))) {
     return
   }
   try {
@@ -50,7 +56,10 @@ function openCreate() {
   createOpen.value = true
   form.account = ''
   form.name = ''
-  form.role = 'ops'
+  /* 默认选第一个非超级管理员的角色：超管账号已存在，新增大多是普通角色 */
+  form.role = selectableRoles.value.find((role) => role.code !== ADMIN_SUPER_ROLE_CODE)?.code
+    ?? selectableRoles.value[0]?.code
+    ?? ''
   formError.value = ''
 }
 
@@ -114,8 +123,8 @@ onMounted(load)
                 <td class="cell-strong"><code class="account-chip">{{ item.account }}</code></td>
                 <td>{{ item.name }}</td>
                 <td>
-                  <span class="tag" :class="item.role === 'super' ? 'tag-blue' : 'tag-gray'">
-                    {{ ADMIN_ROLE_TEXT[item.role] }}
+                  <span class="tag" :class="item.role === ADMIN_SUPER_ROLE_CODE ? 'tag-blue' : 'tag-gray'">
+                    {{ roleName(item.role) }}
                   </span>
                 </td>
                 <td class="time-cell">{{ item.lastLoginAt }}</td>
@@ -154,10 +163,9 @@ onMounted(load)
       <div class="f-field">
         <label class="f-label">角色<span class="req">*</span></label>
         <select v-model="form.role" class="f-select">
-          <option value="ops">{{ ADMIN_ROLE_TEXT.ops }}</option>
-          <option value="super">{{ ADMIN_ROLE_TEXT.super }}</option>
+          <option v-for="role in selectableRoles" :key="role.code" :value="role.code">{{ role.name }}</option>
         </select>
-        <p class="f-hint">超级管理员：全部权限；运营管理员：除系统管理外的全部权限。</p>
+        <p class="f-hint">角色的可见菜单范围在「系统管理 → 角色权限」里维护。</p>
       </div>
       <p v-if="formError" class="form-err">{{ formError }}</p>
       <template #footer>

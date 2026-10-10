@@ -3,13 +3,16 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AppAvatar, AppIcon, showToast, resolveApiMode, getAppConfig, buildBreadcrumb, appConfirm } from '@aiteach/shared'
 import type { MenuItem } from '@/menu'
-import { menus } from '@/menu'
+import { useAdminMenus } from '@/composables/useAdminMenus'
 import { useAuthStore } from '@/stores/auth'
 import NotificationCenter from '@/components/NotificationCenter.vue'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+
+/* 菜单来自「菜单管理」维护的 Mock 菜单树（见 useAdminMenus），不再是静态常量 */
+const { menus, reload: reloadMenus } = useAdminMenus()
 
 /* ===== 侧边栏折叠（状态记忆） ===== */
 const COLLAPSE_KEY = `aiteach:${getAppConfig().appName}:sidebar-collapsed`
@@ -19,13 +22,22 @@ watch(collapsed, (value) => {
   if (!value) flyout.value = null
 })
 
-/** 分组展开状态：默认展开包含当前路由的分组 */
+/** 分组展开状态：默认展开包含当前路由的分组。菜单是异步取回的，得等它到货再算一次 */
 const expandedKeys = ref<string[]>([])
-for (const item of menus) {
-  if (item.children?.some((child) => route.path.startsWith(child.path))) {
-    expandedKeys.value.push(item.path)
-  }
-}
+watch(
+  menus,
+  (items) => {
+    for (const item of items) {
+      if (
+        item.children?.some((child) => route.path.startsWith(child.path)) &&
+        !expandedKeys.value.includes(item.path)
+      ) {
+        expandedKeys.value.push(item.path)
+      }
+    }
+  },
+  { immediate: true },
+)
 
 function toggleGroup(path: string) {
   const index = expandedKeys.value.indexOf(path)
@@ -42,7 +54,7 @@ const flyout = ref<{ path: string; top: number } | null>(null)
 let flyoutTimer: number | undefined
 
 const flyoutItem = computed(() =>
-  menus.find((item) => item.path === flyout.value?.path),
+  menus.value.find((item) => item.path === flyout.value?.path),
 )
 
 function openFlyout(item: MenuItem, event: MouseEvent) {
@@ -72,7 +84,7 @@ function onGroupHeadClick(item: MenuItem, event: MouseEvent) {
 onBeforeUnmount(() => clearTimeout(flyoutTimer))
 
 /* 页面名不再单独显示，改由面包屑承担（层级取自 menu.ts，路由本身是平铺的） */
-const crumbs = computed(() => buildBreadcrumb(menus, route.path, route.meta.title as string))
+const crumbs = computed(() => buildBreadcrumb(menus.value, route.path, route.meta.title as string))
 const isMockMode = resolveApiMode('/__probe__') === 'mock'
 
 /* ===== 用户菜单 ===== */
@@ -85,7 +97,10 @@ function onDocumentClick(event: MouseEvent) {
   }
 }
 
-onMounted(() => document.addEventListener('click', onDocumentClick))
+onMounted(() => {
+  document.addEventListener('click', onDocumentClick)
+  void reloadMenus()
+})
 onBeforeUnmount(() => document.removeEventListener('click', onDocumentClick))
 
 /* 点击项在 userRef 内部，document 的关闭监听会放过它，得自己收起来 */

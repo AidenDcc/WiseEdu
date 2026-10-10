@@ -72,6 +72,8 @@ export type {
   ErrorLog,
   AdminRole,
   AdminAccount,
+  AdminRoleRecord,
+  AdminMenuItem,
   TenantMenuItem,
   PlatformNotification,
 } from './api/models'
@@ -165,11 +167,14 @@ export { default as katex } from './utils/katex'
 /* 字典 / AI 配置元数据（页面下拉与说明用） */
 export {
   DICT_TYPES,
-  ADMIN_DICT_TYPES,
+  BASE_DICT_TYPES,
+  SYSTEM_DICT_TYPES,
+  REGION_CODES,
+  ADMIN_SUPER_ROLE_CODE,
+  MAX_ADMIN_MENU_DEPTH,
   PROMPT_SCENES,
   PROMPT_VARIABLES,
   AI_MODEL_TYPE_TEXT,
-  ADMIN_ROLE_TEXT,
 } from './mock/admin-store'
 
 /* 机构端业务类型 */
