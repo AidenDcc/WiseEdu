@@ -4,11 +4,10 @@ import { EditorContent, useEditor } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
 import { Mathematics } from '@tiptap/extension-mathematics'
 import { Image } from '@tiptap/extension-image'
+import { FontFamily, FontSize, TextStyle } from '@tiptap/extension-text-style'
+import { TableKit } from '@tiptap/extension-table'
 import { ResizableNodeView } from '@tiptap/core'
 import {
-  ANSWER_PAREN,
-  AppIcon,
-  FILL_BLANK,
   isRichContent,
   normalizeRichHtml,
   resolveMediaSrc,
@@ -18,10 +17,18 @@ import {
 import type { DrawEditorType, OrgMedia } from '@aiteach/shared'
 import FormulaPickerModal from './FormulaPickerModal.vue'
 import MediaPickerModal from './MediaPickerModal.vue'
+import RteToolbar from './rte/RteToolbar.vue'
 import MediaDrawSelectDialog from '@/components/draw/MediaDrawSelectDialog.vue'
 import AiDrawGenerateDialog from '@/components/draw/AiDrawGenerateDialog.vue'
 import DrawEditorHost from '@/components/draw/DrawEditorHost.vue'
 import { DrawSvgImage } from '@/tiptap-extensions/drawSvgImage'
+import { TextDecoration } from '@/tiptap-extensions/textDecoration'
+import { HexColor } from '@/tiptap-extensions/color'
+import { PlainUnderline } from '@/tiptap-extensions/underline'
+import { ListMarker } from '@/tiptap-extensions/listMarker'
+import { Indent } from '@/tiptap-extensions/indent'
+import { PaperTable, RowHeight } from '@/tiptap-extensions/tableSizing'
+import { PaperTableCell, PaperTableHeader } from '@/tiptap-extensions/tableCellStyle'
 import { fetchMediaDetail, uploadMedia } from '@/api/org'
 
 /** 拖拽的最小边长：再小控制点就糊成一个点，也失去了「缩回去」的手感 */
@@ -155,25 +162,8 @@ function toEditorHtml(input: string): string {
   return `<p>${escaped.replace(/\n/g, '<br>')}</p>`
 }
 
-/* ===== 填空下横线 / 括号：录填空题与判断题时最常用的两个符号 =====
- *
- * 两者都插**纯文本字符**，不做带 class 的行内元素 —— sanitizeRichHtml 的属性白名单只有
- * data-type / data-latex / title，class 会在预览与导出（paper-export 的 richHtml）里被剥掉，
- * 落 class 等于只在编辑器里好看。字符口径取仓内既有约定，常量放在共享层
- * （FILL_BLANK / ANSWER_PAREN），录题页判断题干是否已带作答括号时读的是同一个值。 */
-function insertFillBlank() {
-  editor.value?.chain().focus().insertContent(FILL_BLANK).run()
-}
-
-function insertParen() {
-  const instance = editor.value
-  if (!instance) return
-  /* 先记插入点：插入后 selection 会落到括号右侧，光标得手工挪回两个全角空格之间，
-     否则点一下「括号」再打字会跑到括号外面去 */
-  const from = instance.state.selection.from
-  instance.chain().focus().insertContent(ANSWER_PAREN).run()
-  instance.commands.setTextSelection(from + 2)
-}
+/* 填空下横线 / 括号两个按钮跟着工具栏走了（纯编辑器命令，不需要父级状态）：
+   见 components/ui/rte/RteToolbar.vue。 */
 
 /* ===== 公式弹窗 ===== */
 const mathOpen = ref(false)
@@ -369,11 +359,18 @@ const focused = ref(false)
 /**
  * 用冒泡版的 focusin / focusout，而不是 Tiptap 的 onFocus / onBlur：
  * 非冒泡版在「点工具栏按钮」时先是正文 blur —— 工具栏当场收起，按钮也就点不着了。
+ *
+ * 第二种「还在自己身上」的情况：焦点进了工具栏弹层里的输入框（表格面板的列宽 / 行高）。
+ * 弹层是 Teleport 到 body 的，`root.contains()` 认不出来，靠面板上的 data-rte-popover 标记兜住 ——
+ * 少了这一条，点一下列宽输入框整条工具栏就收起来了（见 rte/RtePopover.vue）。
  */
 function onFocusOut(event: FocusEvent) {
-  const next = event.relatedTarget as Node | null
-  /* 焦点仍落在组件内（比如工具栏按钮上）就保持展开 */
-  if (!next || !root.value?.contains(next)) focused.value = false
+  const next = event.relatedTarget as HTMLElement | null
+  if (next) {
+    if (root.value?.contains(next)) return
+    if (typeof next.closest === 'function' && next.closest('[data-rte-popover]')) return
+  }
+  focused.value = false
 }
 
 /* ===== 编辑器实例 ===== */
@@ -390,6 +387,11 @@ const editor = useEditor({
       heading: false,
       codeBlock: false,
       horizontalRule: false,
+      /* 有序列表换成扩展版（多一个序号样式属性），同名扩展不能注册两次，故这里必须关掉 */
+      orderedList: false,
+      /* 下划线也换成扩展版：原版会把 `text-decoration: underline wavy` 一起解析成单下划线，
+         波浪线/双下划线因此会多出一条实线（见 tiptap-extensions/underline.ts） */
+      underline: false,
       link: {
         openOnClick: false,
         autolink: true,
@@ -405,6 +407,28 @@ const editor = useEditor({
       inlineOptions: { onClick: (node, pos) => openMathEdit(node, pos, false) },
       blockOptions: { onClick: (node, pos) => openMathEdit(node, pos, true) },
     }),
+    /* ===== 试卷排版：字体 / 字号 / 颜色 / 下划线样式 / 序号 / 缩进 / 表格 =====
+       字体、字号、颜色、波浪线都落在**同一个** textStyle span 上（Tiptap 的 setMark 会合并 attrs），
+       最终是 `<span style="font-family: …; font-size: 12pt; color: …; text-decoration: underline wavy">`。 */
+    TextStyle,
+    FontFamily,
+    FontSize,
+    /* 字色换成扩展版：官方 Color 读回来的是浏览器归一化后的 rgb(...)，
+       与工具栏色板的 #hex 对不上，也会让 Word 导出认不出（见 tiptap-extensions/color.ts） */
+    HexColor,
+    TextDecoration,
+    PlainUnderline,
+    ListMarker,
+    Indent,
+    /* 表格：四件套全部换成本仓库的扩展版 —— table 多出整表宽度（并接管 TableView 以挂住宽度 / 行高
+       的拖拽手柄）、tableRow 多出行高、tableCell 与 tableHeader 多出底纹。
+       同名扩展不能注册两次 —— 换掉哪个就得在 kit 里关掉哪个。
+       resizable 开列宽拖拽；最后一列不给拖（拖它只改变整表宽度，与整表手柄撞车，容易误操作） */
+    TableKit.configure({ table: false, tableRow: false, tableCell: false, tableHeader: false }),
+    PaperTable.configure({ resizable: true, lastColumnResizable: false }),
+    RowHeight,
+    PaperTableCell,
+    PaperTableHeader,
   ],
   editorProps: {
     attributes: { class: 'rte-content' },
@@ -480,65 +504,22 @@ defineExpose({ isEmpty })
     @focusin="focused = true"
     @focusout="onFocusOut"
   >
-    <!-- mousedown.prevent：工具栏按钮不该抢走正文的焦点与选区。少了它，Safari 上点按钮会先失焦
-         → 工具栏当场收起 → 按钮还没收到 click 就没了。 -->
-    <div v-if="editor" class="rte-toolbar" @mousedown.prevent>
-      <button class="rte-btn is-text bold" :class="{ on: editor.isActive('bold') }" type="button" title="加粗" @click="editor.chain().focus().toggleBold().run()">B</button>
-      <button class="rte-btn is-text italic" :class="{ on: editor.isActive('italic') }" type="button" title="斜体" @click="editor.chain().focus().toggleItalic().run()">I</button>
-      <button class="rte-btn is-text underline" :class="{ on: editor.isActive('underline') }" type="button" title="下划线" @click="editor.chain().focus().toggleUnderline().run()">U</button>
-      <button class="rte-btn is-text strike" :class="{ on: editor.isActive('strike') }" type="button" title="删除线" @click="editor.chain().focus().toggleStrike().run()">S</button>
-
-      <span class="rte-sep" />
-
-      <button class="rte-btn" :class="{ on: editor.isActive('bulletList') }" type="button" title="无序列表" @click="editor.chain().focus().toggleBulletList().run()">
-        <AppIcon name="list-ul" :size="16" />
-      </button>
-      <button class="rte-btn" :class="{ on: editor.isActive('orderedList') }" type="button" title="有序列表" @click="editor.chain().focus().toggleOrderedList().run()">
-        <AppIcon name="list-ol" :size="16" />
-      </button>
-
-      <span class="rte-sep" />
-
-      <button class="rte-btn" type="button" title="插入填空下横线（______）" @click="insertFillBlank">
-        <AppIcon name="minus" :size="16" />
-        <span class="rte-btn-text">填空线</span>
-      </button>
-      <button class="rte-btn" type="button" title="插入作答括号（　　），光标停在括号中间" @click="insertParen">
-        <AppIcon name="parentheses" :size="16" />
-        <span class="rte-btn-text">括号</span>
-      </button>
-
-      <span class="rte-sep" />
-
-      <button class="rte-btn" type="button" title="插入 / 编辑公式" @click="openMathInsert">
-        <AppIcon name="formula" :size="16" />
-        <span class="rte-btn-text">公式</span>
-      </button>
-      <button class="rte-btn" type="button" title="插入图片（可从系统图片库选择，也可上传本地；也支持粘贴 / 拖入）" @click="pickImage">
-        <AppIcon name="image" :size="16" />
-        <span class="rte-btn-text">图片</span>
-      </button>
-      <button class="rte-btn" type="button" title="插入理科配图（几何图 / 化学装置图 / 分子结构式 / 简易示意图，可 AI 生成草稿；双击已插入配图可二次编辑）" @click="openDrawSelect">
-        <AppIcon name="shapes" :size="16" />
-        <span class="rte-btn-text">配图</span>
-      </button>
-
-      <span class="rte-sep" />
-
-      <button class="rte-btn" type="button" title="清除格式" @click="editor.chain().focus().unsetAllMarks().run()">
-        <AppIcon name="eraser" :size="16" />
-      </button>
-      <button class="rte-btn" type="button" title="撤销" :disabled="!editor.can().undo()" @click="editor.chain().focus().undo().run()">
-        <AppIcon name="undo" :size="16" />
-      </button>
-      <button class="rte-btn" type="button" title="重做" :disabled="!editor.can().redo()" @click="editor.chain().focus().redo().run()">
-        <AppIcon name="redo" :size="16" />
-      </button>
-    </div>
+    <!-- 工具栏自身在 rte/RteToolbar.vue 里（按钮样式、弹层都与它同处一个组件）；
+         公式 / 图片 / 配图三个按钮要开的弹窗宿主在这里，所以由它 emit 回来 -->
+    <RteToolbar
+      v-if="editor"
+      :editor="editor"
+      :compact="compact"
+      @math="openMathInsert"
+      @image="pickImage"
+      @draw="openDrawSelect"
+    />
 
     <div class="rte-body-wrap" :style="{ minHeight: `${minHeight}px` }">
       <EditorContent v-if="editor" :editor="editor" class="rte-body" />
-      <span v-if="isEmpty" class="rte-placeholder">{{ placeholder }}</span>
+      <!-- 获得焦点（点进来 / Tab 进来）即隐去占位文案：占位语挺长，光标已经落在这里了还挡着视线，
+           而它的作用（「这块是干什么的」）只在没进来之前才需要。所有用到本组件的地方共用这一条 -->
+      <span v-if="isEmpty && !focused" class="rte-placeholder">{{ placeholder }}</span>
     </div>
 
     <FormulaPickerModal
@@ -596,21 +577,10 @@ defineExpose({ isEmpty })
 }
 .rte:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
 
-.rte-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--border);
-  background: #fbfcfe;
-  border-radius: 9px 9px 0 0;
-  max-height: 120px;
-  transition: max-height 0.16s ease, opacity 0.16s ease;
-}
-.compact .rte-toolbar { padding: 4px 6px; }
-.compact .rte-btn-text { display: none; }
-/* 默认收起，拿到焦点才展开：题干 + 4 个选项 + 解答 + 解析共 7 处编辑器，工具栏常显会糊成一片。
+/* 工具栏的展开态样式（flex / 按钮 / 弹层）都在 RteToolbar.vue 里；
+   这里只留「收起」—— 它依赖本组件自己的 .focused，且作用在子组件的根元素上（它带本组件的
+   scope 属性，所以这条选择器仍然命中）。
+   默认收起、拿到焦点才展开：题干 + 4 个选项 + 解答 + 解析共 7 处编辑器，工具栏常显会糊成一片。
    用 max-height 过渡而不是 display:none，避免聚焦瞬间正文往下跳一下。 */
 .rte:not(.focused) .rte-toolbar {
   max-height: 0;
@@ -622,30 +592,6 @@ defineExpose({ isEmpty })
   visibility: hidden;
   overflow: hidden;
 }
-
-.rte-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 30px;
-  padding: 0 8px;
-  border: none;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--ink-2);
-  font-size: 13px;
-  transition: background 0.15s, color 0.15s;
-}
-.rte-btn:hover:not(:disabled) { background: var(--brand-soft); color: var(--brand-deep); }
-.rte-btn.on { background: var(--brand-soft); color: var(--brand-deep); }
-.rte-btn:disabled { color: #c3cad8; cursor: not-allowed; }
-/* B / I / U / S 用字面量而非图标，避免为每个字母画一套路径 */
-.rte-btn.is-text { font-size: 14px; font-weight: 700; min-width: 30px; justify-content: center; }
-.rte-btn.italic { font-style: italic; font-family: Georgia, serif; }
-.rte-btn.underline { text-decoration: underline; }
-.rte-btn.strike { text-decoration: line-through; }
-
-.rte-sep { width: 1px; height: 18px; background: var(--border); margin: 0 5px; }
 
 .rte-body-wrap { position: relative; }
 .rte-placeholder {
@@ -664,13 +610,21 @@ defineExpose({ isEmpty })
   line-height: 1.8;
   color: var(--ink);
   outline: none;
+  /* 下划线离文字太近，抬开一点。text-underline-offset 是继承属性，写在这里即覆盖正文全部
+     （`<u>` 与 span 上的 text-decoration 都吃这一条）。只读端与导出端各有一份同样的声明。 */
+  text-underline-offset: 0.2em;
 }
 .rte-body :deep(.rte-content p) { margin: 0 0 6px; }
 .rte-body :deep(.rte-content p:last-child) { margin-bottom: 0; }
 .rte-body :deep(.rte-content ul),
 .rte-body :deep(.rte-content ol) { padding-left: 22px; margin: 0 0 6px; }
 .rte-body :deep(.rte-content ul) { list-style: disc; }
-.rte-body :deep(.rte-content ol) { list-style: decimal; }
+/* 有序列表的序号样式有两条通路：自定义序号（① / (1) / 一、）落内联 style，原生序号（1 / a / A / i / I）
+   落 `type` 属性。所以这一条只写「没设过序号」的兜底，**`ol[type='a']` 那类补丁千万别加** ——
+   HTML 文档里属性选择器对 `type` 是大小写不敏感地匹配的，`[type='a']` 连 `type="A"` 一起命中，
+   后写的 upper-* 会通吃，**i / a 就永远显示成 I / A**（这个 bug 真出现过）。
+   浏览器的 UA 样式表里那套映射带 `s` 大小写标志，是唯一能区分大小写的地方，让路给它即可。 */
+.rte-body :deep(.rte-content ol:not([type])) { list-style: decimal; }
 .rte-body :deep(.rte-content a) { color: var(--brand-deep); text-decoration: underline; }
 /* 尺寸改由四角控制点表达；圆角保留，与只读渲染端 RichTextViewer 的外观保持一致 */
 .rte-body :deep(.rte-content img) { max-width: 100%; height: auto; border-radius: 8px; }
@@ -679,6 +633,112 @@ defineExpose({ isEmpty })
   padding-left: 10px;
   color: var(--sub);
   margin: 0 0 6px;
+}
+
+/* ===== 表格 =====
+   下面这一组是 prosemirror-tables 参考样式（它的拖拽与选区高亮都依赖这些定位）：
+   `table-layout: fixed` + 单元格 `position: relative` 是拖列边界能落点、`.selectedCell` 能铺满的前提。
+   表格自身宽度不在这里定：整表宽度写内联 `style="width: Npx"`（没设过才是这里的 width: 100%），
+   列宽靠 colgroup，行高靠 tr 的 height，单元格底纹靠 td/th 的 background-color —— 都在行内，
+   优先级更高，正好盖住这里的 width: 100% 与表头那条默认灰底（底纹选「无」时表头会回到这条灰底，
+   这是「没显式设过」的正常含义）。 */
+/* position: relative 是整表宽度拖拽手柄（.rte-table-grip）的锚 —— 手柄绝对定位在 wrapper 里、
+   贴着表格右边缘，横向滚动时跟着表格一起滚，不会漂 */
+.rte-body :deep(.rte-content .tableWrapper) { position: relative; overflow-x: auto; margin: 0 0 6px; }
+.rte-body :deep(.rte-content table) {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  margin: 0;
+}
+.rte-body :deep(.rte-content td),
+.rte-body :deep(.rte-content th) {
+  position: relative;
+  vertical-align: top;
+  min-width: 25px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  /* 单元格里也放段落，保留段落的下边距会导致每格底部都多一截 */
+}
+.rte-body :deep(.rte-content td > p),
+.rte-body :deep(.rte-content th > p) { margin: 0; }
+.rte-body :deep(.rte-content th) { background: #f4f6fa; font-weight: 600; text-align: left; }
+/* 拖列边界时跟在光标下的那条竖线 */
+.rte-body :deep(.rte-content .column-resize-handle) {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--brand);
+  pointer-events: none;
+}
+.rte-body :deep(.rte-content.resize-cursor) { cursor: col-resize; }
+/* 整表宽度的拖拽手柄：由 PaperTableView（tiptap-extensions/tableSizing.ts）挂在 tableWrapper 里，
+   位置随表格宽度同步。挂在表格**内侧**（margin-left 负一个自身宽度）而不是跨越边缘 ——
+   wrapper 是 overflow-x: auto 的滚动容器，探出去一截会凭空多出一条横向滚动条。
+   平时隐形、鼠标进表格才显形，免得每张表旁边都杵着一根竖条。 */
+.rte-body :deep(.rte-table-grip) {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  /* 贴着表格右缘往内让 10px，正好压住最后一列的右边缘，而不是探到表格外面 */
+  margin-left: -10px;
+  cursor: col-resize;
+  opacity: 0;
+  /* 隐形时也不能挡鼠标：opacity: 0 的元素照样吃 pointer 事件，不加这一条最后一列右边缘
+     那 10px 就点不出光标了（想在那儿落光标得点两下） */
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+.rte-body :deep(.tableWrapper:hover .rte-table-grip) { opacity: 1; pointer-events: auto; }
+.rte-body :deep(.rte-table-grip::after) {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 3px;
+  height: 30px;
+  border-radius: 2px;
+  background: var(--brand);
+  transform: translateY(-50%);
+}
+/* 行高的拖拽手柄：同一套路子（PaperTableView 挂的），只是横过来 —— 一条通栏横带，贴着鼠标所在行的
+   下边界。top 由 JS 按行的位置写；显示/隐藏走 is-on 类（相邻两行共用一条边，鼠标一靠近那条边
+   就亮出来）。同样不能常驻吃 pointer 事件：那一带正是某一行的下半截，常驻会让最后几像素点不进光标。 */
+.rte-body :deep(.rte-row-grip) {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 8px;
+  /* 让横带的**中线**落在边界上（top 写的是边界位置） */
+  margin-top: -4px;
+  cursor: row-resize;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+.rte-body :deep(.rte-row-grip.is-on) { opacity: 1; pointer-events: auto; }
+.rte-body :deep(.rte-row-grip::after) {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 30px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--brand);
+  transform: translate(-50%, -50%);
+}
+/* 单元格区域选区（拖动跨格选中时的高亮） */
+.rte-body :deep(.rte-content .selectedCell::after) {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: var(--brand-soft);
+  pointer-events: none;
 }
 
 /* 公式节点：与正文基线对齐，并给出「可点击编辑」的暗示 */

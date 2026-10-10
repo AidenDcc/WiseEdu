@@ -76,7 +76,9 @@ function baseCss(): string {
   return `
     @page { size: A4; margin: 20mm 18mm; }
     * { box-sizing: border-box; }
-    body { font-family: "Songti SC", SimSun, "Noto Serif SC", serif; font-size: 12pt; line-height: 1.75; color: #111; }
+    /* text-underline-offset：下划线离文字太近，抬开一点。写 body 上靠继承覆盖全文
+       —— 编辑器与只读端（RichTextViewer.vue）各有一份同样的声明。 */
+    body { font-family: "Songti SC", SimSun, "Noto Serif SC", serif; font-size: 12pt; line-height: 1.75; color: #111; text-underline-offset: 0.2em; }
     .p-title { font-family: "Heiti SC", "Microsoft YaHei", sans-serif; font-size: 20pt; text-align: center; margin: 0 0 6px; }
     .p-sub { text-align: center; font-size: 10.5pt; color: #444; margin-bottom: 10px; }
     .p-info { border: 1px solid #333; border-radius: 3px; padding: 6px 10px; font-size: 10.5pt; margin-bottom: 16px; }
@@ -119,6 +121,42 @@ function baseCss(): string {
     table.ans td { border: 1px solid #333; padding: 5px 8px; }
     table.ans td.no { width: 90px; text-align: center; font-weight: bold; }
     .foot { margin-top: 18px; text-align: center; font-size: 10pt; color: #888; }
+
+    /* ---- 以下为「题干里的富文本」服务，与编辑器（RichTextEditor.vue）、只读端
+       （packages/shared/src/components/RichTextViewer.vue）三处保持同一套样式。
+       这一份能生效的是**打印窗口**这条路径（真浏览器）；.doc 那条由 Word 解析，
+       不认 @counter-style，①/(1)/一、 会退化成 1.，其余样式 Word 都认。 ---- */
+
+    /* 题目里手插的表格。:not([class]) 是为了避开上面两张自带样式的表（.p-grid / .ans）。
+       table-layout: fixed 才能让 <colgroup><col style="width"> 说了算（auto 会按内容重排），
+       行高则由 <tr style="height"> 给。两者都是编辑器落下来的行内样式。 */
+    table:not([class]) { border-collapse: collapse; table-layout: fixed; width: 100%; margin: 6px 0; }
+    table:not([class]) td,
+    table:not([class]) th { border: 1px solid #333; padding: 4px 8px; vertical-align: top; }
+    table:not([class]) th { background: #f4f6fa; font-weight: bold; }
+    /* 单元格里 Tiptap 一定包一层 <p>，那层默认下边距会把行撑虚 */
+    table:not([class]) td > p,
+    table:not([class]) th > p { margin: 0; }
+
+    /* 序号样式 ①、(1)、一、 的定义。这三个是 @counter-style，**文档级 at-rule** ——
+       导出的 Word / 打印 HTML 是另一份文档，必须在这里再写一份，跟
+       apps/tenant/src/styles/main.css 与 RichTextViewer.vue 里那两份互为指认，改一处要改三处。 */
+    @counter-style circled-number {
+      /* fixed 表：①–⑳ 只到 20，再多按 fallback 退成 21. —— 试卷小题号到不了这个量 */
+      system: fixed;
+      symbols: ① ② ③ ④ ⑤ ⑥ ⑦ ⑧ ⑨ ⑩ ⑪ ⑫ ⑬ ⑭ ⑮ ⑯ ⑰ ⑱ ⑲ ⑳;
+      fallback: decimal;
+      suffix: ' ';
+    }
+    @counter-style paren-number {
+      system: extends decimal;
+      prefix: '(';
+      suffix: ') ';
+    }
+    @counter-style cjk-number {
+      system: extends cjk-ideographic;
+      suffix: '、';
+    }
   `
 }
 

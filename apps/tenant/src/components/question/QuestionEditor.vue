@@ -432,7 +432,7 @@ defineExpose({ validate })
           v-model="draft.stem"
           :subject="draft.subject"
           :min-height="150"
-          placeholder="如：已知二次函数 f(x)=x²-2x-3…（工具栏可插入公式、图片，也支持粘贴 / 拖入图片）"
+          placeholder="请编辑题干"
           @change="emit('change')"
         />
         <p v-if="errors.stem" class="f-err">{{ errors.stem }}</p>

@@ -148,11 +148,15 @@ export {
   toPlainText,
   truncateRich,
   sanitizeRichHtml,
+  sanitizeStyle,
+  toHexColor,
   renderMathIn,
   normalizeRichHtml,
   hasImage,
   FILL_BLANK,
   ANSWER_PAREN,
+  RICH_LIST_MARKERS,
+  RICH_COUNTER_STYLES,
 } from './utils/richtext'
 export { registerMediaSrc, resolveMediaIn, resolveMediaSrc, unregisterMediaSrc } from './utils/media-ref'
 /* 统一 KaTeX 入口：已注册 mhchem（\ce{} 化学式），各渲染点一律从这里取 katex */

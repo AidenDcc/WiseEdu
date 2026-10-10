@@ -375,3 +375,27 @@ div.empty-row { padding: 30px 0 !important; margin: 0; }
   color: #fff;
   font-size: 12px;
 }
+
+/* ===== 富文本有序列表的自定义序号（① / (1) / 一、） =====
+   `@counter-style` 是**文档级 at-rule**，写在组件 scoped 样式里不生效，只能放全局。
+   编辑器给列表落的是内联 `list-style-type: circled-number` 这类值（见 tiptap-extensions/listMarker.ts），
+   符号由下面这三条提供。
+
+   导出的 Word / 打印 HTML 是**另一份文档**，那份 CSS 里必须再写一份（见 utils/paper-export.ts 的
+   baseCss，两处互为指认）。Word 不认 @counter-style，.doc 里这三种序号会退化成 1. —— 已知取舍。 */
+@counter-style circled-number {
+  /* fixed 表：①–⑳ 只到 20，再多按 fallback 退成 21. —— 试卷小题号到不了这个量 */
+  system: fixed;
+  symbols: ① ② ③ ④ ⑤ ⑥ ⑦ ⑧ ⑨ ⑩ ⑪ ⑫ ⑬ ⑭ ⑮ ⑯ ⑰ ⑱ ⑲ ⑳;
+  fallback: decimal;
+  suffix: ' ';
+}
+@counter-style paren-number {
+  system: extends decimal;
+  prefix: '(';
+  suffix: ') ';
+}
+@counter-style cjk-number {
+  system: extends cjk-ideographic;
+  suffix: '、';
+}
