@@ -17,8 +17,13 @@ const props = withDefaults(
      * 打开时出现会被盖住。
      */
     zIndex?: number
+    /**
+     * 内容区改为「弹性列容器」（不自己滚动）。适合内容里有一棵要撑满高度、内部滚动的树
+     * （如教材目录抽屉）：交给子元素 `flex:1` 撑开，自带 `overflow:hidden`。
+     */
+    flexBody?: boolean
   }>(),
-  { width: 560, zIndex: 110 },
+  { width: 560, zIndex: 110, flexBody: false },
 )
 
 const emit = defineEmits<{ close: [] }>()
@@ -51,7 +56,7 @@ onBeforeUnmount(() => {
             <AppIcon name="close" :size="15" />
           </button>
         </header>
-        <div class="drawer-body">
+        <div class="drawer-body" :class="{ 'drawer-body-flex': flexBody }">
           <slot />
         </div>
         <footer v-if="$slots.footer" class="drawer-foot">
@@ -110,6 +115,12 @@ onBeforeUnmount(() => {
   flex: 1;
   overflow-y: auto;
   padding: 20px 24px;
+}
+/* 内容要自己撑满高度时（如内嵌一棵树）：body 只做弹性列容器，滚动交给子元素 */
+.drawer-body-flex {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 /* 与 .modal-foot 一致靠右：全仓抽屉的按钮顺序都是「取消(ghost) → 主操作」，
    即主操作在右。此前缺 justify-content，按钮贴在左边，同一个「取消/确定」在

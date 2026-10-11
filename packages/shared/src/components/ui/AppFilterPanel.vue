@@ -202,6 +202,11 @@ function clearAll() {
   color: var(--sub);
   flex-shrink: 0;
   user-select: none;
+  /* 行高固定：否则「清空」按钮一出现，这一行的最高元素从文字（~17.5px）变成按钮，
+     标题行的 min-height 被撑高一点点，面板下方内容整体下移一下。定死 22px 后
+     （≤ 头部 46px 的内可用高 22px），有 / 无按钮这一行都是 22px，高度不再变化。 */
+  line-height: 22px;
+  min-height: 22px;
 }
 .fp-clear {
   border: none;
@@ -210,7 +215,10 @@ function clearAll() {
   font-family: inherit;
   font-size: 12.5px;
   font-weight: 600;
-  padding: 3px 8px;
+  /* 与 .fp-toggle 行高对齐：高度写死、垂直内边距归零，按钮多高都不会顶高标题行 */
+  height: 22px;
+  line-height: 22px;
+  padding: 0 8px;
   border-radius: 7px;
   transition: background 0.15s;
 }

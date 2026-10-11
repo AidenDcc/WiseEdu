@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# 构建产物的旁路目录（如某些预览/沙箱工具生成的 dist-<时间戳>）
+# 正常构建只写 dist/，这一条只用于兜住游离的外加目录
+dist-*/
 *.local
 .DS_Store
 *.log

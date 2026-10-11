@@ -58,6 +58,7 @@ export type {
   ExamTypeNode,
   ExamTypeNodeKind,
   TextbookVersion,
+  TextbookCatalogNode,
   AiModelType,
   AiModel,
   AgentCheckItem,
@@ -100,6 +101,9 @@ export { fileToSquareDataUrl } from './utils/image'
 export { default as AppPageHeader } from './components/ui/AppPageHeader.vue'
 export { default as AppFilterPanel } from './components/ui/AppFilterPanel.vue'
 export { default as AppFilterChips } from './components/ui/AppFilterChips.vue'
+/* chip 的唯一实现 + 表单选择组：全站 chip 视觉与交互统一走这两个组件 */
+export { default as AppChip } from './components/ui/AppChip.vue'
+export { default as AppChipGroup } from './components/ui/AppChipGroup.vue'
 export { default as AppSearchInput } from './components/ui/AppSearchInput.vue'
 export { default as AppListToolbar } from './components/ui/AppListToolbar.vue'
 export { default as AppTabs } from './components/ui/AppTabs.vue'

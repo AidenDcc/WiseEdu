@@ -53,6 +53,13 @@ export default defineConfig({
       events: fileURLToPath(new URL('./node_modules/events/events.js', import.meta.url)),
     },
   },
+  // 构建产物固定落在 apps/tenant/dist —— 与 .gitignore 的 dist/ 规则一一对应。
+  // 显式写出来是为了避免「临时配置 + --outDir dist-<时间戳>」这类旁路构建
+  // 在工作区留下游离目录（admin 端曾出现过 apps/admin/dist-1791620619）。
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
+  },
   server: {
     port: 5174,
     strictPort: true,

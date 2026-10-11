@@ -9,19 +9,25 @@ import { onMounted, ref } from 'vue'
 import { AppIcon, AppPageHeader, showToast } from '@aiteach/shared'
 import type { OrgSettings, ReviewFlowConfig } from '@aiteach/shared'
 import { fetchOrgSettings, fetchReviewFlows, saveOrgSettings, saveReviewFlow } from '@/api/student'
+import { useBaseData } from '@/composables/useBaseData'
 
 const settings = ref<OrgSettings | null>(null)
 const flows = ref<ReviewFlowConfig[]>([])
 const loading = ref(true)
 const saving = ref(false)
 
-const ALL_SUBJECTS = ['数学', '语文', '英语', '物理', '化学', '生物', '历史', '地理', '政治']
-const ALL_GRADES = ['初一', '初二', '初三', '高一', '高二', '高三']
+/**
+ * 学科 / 年级候选项统一取自机构端基础字典（`useBaseData` 单例，底层就是平台字典 mock），
+ * 与题库、组卷等页面**同源**，避免出现「七年级 / 初一」这种同一概念两种叫法。
+ */
+const { subjects: dictSubjects, grades: dictGrades, ensure } = useBaseData()
 const ALL_TEXTBOOKS = ['人教 A 版', '人教版', '沪教版', '北师大版', '苏教版']
 const STAFF = ['李文博', '孙悦', '王静宜', '周敏', '郑海涛']
 
 async function load() {
   loading.value = true
+  /* 学科 / 年级选项来自基础字典，先确保它已就绪 */
+  await ensure()
   const [settingsData, flowList] = await Promise.all([fetchOrgSettings(), fetchReviewFlows()])
   settings.value = settingsData
   flows.value = flowList
@@ -106,7 +112,7 @@ onMounted(load)
         <div class="check-block">
           <label class="check-label">开设学科</label>
           <div class="subject-checks">
-            <label v-for="subject in ALL_SUBJECTS" :key="subject" class="check-item">
+            <label v-for="subject in dictSubjects" :key="subject" class="check-item">
               <input v-model="settings.subjects" type="checkbox" :value="subject" />
               {{ subject }}
             </label>
@@ -115,7 +121,7 @@ onMounted(load)
         <div class="check-block">
           <label class="check-label">覆盖年级</label>
           <div class="subject-checks">
-            <label v-for="grade in ALL_GRADES" :key="grade" class="check-item">
+            <label v-for="grade in dictGrades" :key="grade" class="check-item">
               <input v-model="settings.grades" type="checkbox" :value="grade" />
               {{ grade }}
             </label>

@@ -282,12 +282,21 @@ export interface DictItem {
 export const PAPER_CATEGORIES = ['同步教学', '阶段测试', '小升初', '竞赛'] as const
 export type PaperCategory = (typeof PAPER_CATEGORIES)[number]
 
-/* 知识点/考点树（最多 6 级） */
+/* 知识点/考点树（最多 5 级） */
 export interface KnowledgeNode {
   id: number
   parentId: number | null
   name: string
+  /**
+   * 知识点编码：平台内唯一，机构端题库 / 组卷靠它匹配知识点。
+   * 只在管理端知识点树的「新增 / 编辑节点」弹窗里展示与维护，树上不展示。
+   */
+  code: string
+  /** 所属学段：小学 / 初中 / 高中 */
+  stage: string
   subject: string
+  /** 同一父节点下的相对顺序，数值越小越靠前 */
+  sort: number
   enabled: boolean
 }
 
@@ -312,13 +321,29 @@ export interface ExamTypeNode {
   enabled: boolean
   /** 被题目引用数（>0 时禁止删除，仅可停用） */
   refCount: number
+  /** 同一父节点下的相对顺序，数值越小越靠前（拖拽 / 上下移后重排，与知识点树同口径） */
+  sort: number
   /** 适配学段（仅 kind === 'examType'）：留空 = 全学段通用 */
   stage?: string
   /** 适配学科（仅 kind === 'examType'）：留空 = 全学科通用 */
   subjects?: string[]
 }
 
-/* 教材版本 */
+/* 教材目录树节点（章节 / 小节，可多级嵌套） */
+export interface TextbookCatalogNode {
+  id: string
+  title: string
+  /**
+   * 是否启用（缺省视为启用）：停用后该节点连同整棵子树在教材目录中不再生效。
+   * 与知识点树的行内开关同口径，便于「教材目录树」与「知识点树」UI / 交互保持一致。
+   */
+  enabled?: boolean
+  children?: TextbookCatalogNode[]
+}
+
+/* 教材版本
+ * 关联 年级 / 学期 / 使用地区（task: 教材版本优化）。
+ * 目录（catalog）通过右侧抽屉录入与查看；封面图（cover）与教材电子版（fileUrl）为非必填的资产。 */
 export interface TextbookVersion {
   id: number
   subject: string
@@ -327,7 +352,22 @@ export interface TextbookVersion {
   hue: number
   sort: number
   enabled: boolean
-  refCount: number
+  /** 关联年级（如「一年级」「高一」） */
+  grade?: string
+  /** 学期：上学期 / 下学期 */
+  term?: string
+  /** 使用地区（多选，如 ['北京', '上海']） */
+  region?: string[]
+  /** 适配年份（多选，列举近 5 年 + 更久之前） */
+  years?: string[]
+  /** 封面图（本地预览用 object URL / data URL） */
+  cover?: string
+  /** 教材电子版 PDF 文件地址（object URL / data URL） */
+  fileUrl?: string
+  /** 教材电子版文件名 */
+  fileName?: string
+  /** 目录树（章节等） */
+  catalog?: TextbookCatalogNode[]
 }
 
 /* ================ AI 服务配置（FR-PT-017 ~ 027） ================ */

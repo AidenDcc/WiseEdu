@@ -25,6 +25,7 @@ import type {
   PublicPaper,
   PublicQuestion,
   TextbookVersion,
+  TextbookCatalogNode,
   TenantMenuItem,
 } from '../api/models'
 import { PAPER_CATEGORIES } from '../api/models'
@@ -125,16 +126,19 @@ export function seedQuestionMeta(id: number, subject: string): { region: string;
 }
 
 export const dictStore: Record<DictTypeKey, DictItem[]> = {
+  /* 适配年级按真实开课情况填：留空 = 不限年级（数学 / 语文贯通小学到高中，不用补）。
+     学科挂不挂得上某个学段，由这份 `grades` 经年级字典的 `stage` 换算出来 ——
+     管理端知识点树的「学科随学段收窄」读的就是它（见 KnowledgeTreeView 的 subjectTabs）。 */
   subject: [
     { id: 1, name: '数学', code: 'MATH', sort: 1, enabled: true, refCount: 9 },
     { id: 2, name: '语文', code: 'CHIN', sort: 2, enabled: true, refCount: 9 },
-    { id: 3, name: '英语', code: 'ENG', sort: 3, enabled: true, refCount: 8 },
-    { id: 4, name: '物理', code: 'PHY', sort: 4, enabled: true, refCount: 6 },
-    { id: 5, name: '化学', code: 'CHEM', sort: 5, enabled: true, refCount: 6 },
-    { id: 6, name: '生物', code: 'BIO', sort: 6, enabled: true, refCount: 7 },
-    { id: 7, name: '政治', code: 'POL', sort: 7, enabled: true, refCount: 6 },
-    { id: 8, name: '历史', code: 'HIST', sort: 8, enabled: true, refCount: 6 },
-    { id: 9, name: '地理', code: 'GEO', sort: 9, enabled: true, refCount: 6 },
+    { id: 3, name: '英语', code: 'ENG', sort: 3, enabled: true, refCount: 8, grades: ['三年级', '四年级', '五年级', '六年级', '七年级', '八年级', '九年级', '高一', '高二', '高三'] },
+    { id: 4, name: '物理', code: 'PHY', sort: 4, enabled: true, refCount: 6, grades: ['八年级', '九年级', '高一', '高二', '高三'] },
+    { id: 5, name: '化学', code: 'CHEM', sort: 5, enabled: true, refCount: 6, grades: ['九年级', '高一', '高二', '高三'] },
+    { id: 6, name: '生物', code: 'BIO', sort: 6, enabled: true, refCount: 7, grades: ['七年级', '八年级', '高一', '高二', '高三'] },
+    { id: 7, name: '政治', code: 'POL', sort: 7, enabled: true, refCount: 6, grades: ['七年级', '八年级', '九年级', '高一', '高二', '高三'] },
+    { id: 8, name: '历史', code: 'HIST', sort: 8, enabled: true, refCount: 6, grades: ['七年级', '八年级', '九年级', '高一', '高二', '高三'] },
+    { id: 9, name: '地理', code: 'GEO', sort: 9, enabled: true, refCount: 6, grades: ['七年级', '八年级', '高一', '高二', '高三'] },
   ],
   /* refCount 为静态演示值：>0 时仅可停用、不可删除 */
   grade: [
@@ -386,6 +390,13 @@ function seedExamTypeNodes(): ExamTypeNode[] {
     const index = PAPER_CATEGORIES.findIndex((item) => item === category)
     return index < 0 ? null : CATEGORY_ROOT_BASE + index
   }
+  /* 同级序号 = 该父节点下已排的节点数 + 1（拖拽 / 上下移后由 moveExamTypeNode 重排） */
+  const sortCursor = new Map<number | null, number>()
+  const nextSort = (parentId: number | null): number => {
+    const value = (sortCursor.get(parentId) ?? 0) + 1
+    sortCursor.set(parentId, value)
+    return value
+  }
   const roots: ExamTypeNode[] = PAPER_CATEGORIES.map((name, index) => ({
     id: CATEGORY_ROOT_BASE + index,
     parentId: null,
@@ -393,27 +404,36 @@ function seedExamTypeNodes(): ExamTypeNode[] {
     kind: 'category',
     enabled: true,
     refCount: 0,
+    sort: index + 1,
   }))
   const examTypes: ExamTypeNode[] = dictStore.examType
     .filter((item) => rootIdOf(item.paperCategory) !== null)
-    .map((item) => ({
+    .map((item) => {
+      const parentId = rootIdOf(item.paperCategory)
+      return {
+        id: item.id,
+        parentId,
+        name: item.name,
+        kind: 'examType' as const,
+        enabled: item.enabled,
+        refCount: item.refCount,
+        sort: nextSort(parentId),
+        stage: item.stage,
+        subjects: item.subjects?.length ? [...item.subjects] : undefined,
+      }
+    })
+  const cups: ExamTypeNode[] = dictStore.competition.map((item) => {
+    const parentId = rootIdOf('竞赛')
+    return {
       id: item.id,
-      parentId: rootIdOf(item.paperCategory),
+      parentId,
       name: item.name,
-      kind: 'examType',
+      kind: 'competition' as const,
       enabled: item.enabled,
       refCount: item.refCount,
-      stage: item.stage,
-      subjects: item.subjects?.length ? [...item.subjects] : undefined,
-    }))
-  const cups: ExamTypeNode[] = dictStore.competition.map((item) => ({
-    id: item.id,
-    parentId: rootIdOf('竞赛'),
-    name: item.name,
-    kind: 'competition',
-    enabled: item.enabled,
-    refCount: item.refCount,
-  }))
+      sort: nextSort(parentId),
+    }
+  })
   return [...roots, ...examTypes, ...cups]
 }
 
@@ -447,17 +467,44 @@ function examTypeDepthOf(id: number): number {
   return depth
 }
 
+/** 同一父节点下的子节点，按 `sort`（同级序号）升序；`sort` 相同再按 id 兜底 */
+function examTypeChildren(parentId: number | null): ExamTypeNode[] {
+  return examTypeNodes
+    .filter((node) => node.parentId === parentId)
+    .sort((a, b) => a.sort - b.sort || a.id - b.id)
+}
+
 /** 前序遍历：树上的展示顺序就是机构端筛选 / 试卷类型树里的顺序 */
 function preorderExamTypeNodes(): ExamTypeNode[] {
   const out: ExamTypeNode[] = []
   const walk = (parentId: number | null) => {
-    for (const node of examTypeNodes.filter((item) => item.parentId === parentId)) {
+    for (const node of examTypeChildren(parentId)) {
       out.push(node)
       walk(node.id)
     }
   }
   walk(null)
   return out
+}
+
+/** 节点所在子树的高度（叶子 = 1）——移动时要保证「落点深度 + 子树高度」不超上限 */
+function examTypeSubtreeHeight(id: number): number {
+  const children = examTypeNodes.filter((item) => item.parentId === id)
+  if (!children.length) return 1
+  return 1 + Math.max(...children.map((child) => examTypeSubtreeHeight(child.id)))
+}
+
+/** candidateId 是否是 rootId 的后代 —— 阻止把节点拖进自己的子树里（成环） */
+function examTypeIsDescendant(rootId: number, candidateId: number): boolean {
+  let cursor = examTypeNodes.find((item) => item.id === candidateId)
+  const seen = new Set<number>()
+  while (cursor?.parentId != null) {
+    if (seen.has(cursor.id)) return false
+    seen.add(cursor.id)
+    if (cursor.parentId === rootId) return true
+    cursor = examTypeNodes.find((item) => item.id === cursor!.parentId)
+  }
+  return false
 }
 
 /**
@@ -553,12 +600,66 @@ export function saveExamTypeNode(input: Partial<ExamTypeNode>): ExamTypeNode {
     kind,
     enabled: true,
     refCount: 0,
+    sort: examTypeChildren(parentId).length + 1,
     stage: kind === 'examType' ? input.stage || undefined : undefined,
     subjects: kind === 'examType' && input.subjects?.length ? [...input.subjects] : undefined,
   }
   examTypeNodes.push(node)
   syncExamTypeDict()
   return node
+}
+
+export interface ExamTypeMoveInput {
+  id: number
+  parentId: number | null
+  beforeId: number | null
+}
+
+/**
+ * 树内移动 / 排序（拖拽与上下移共用）：把 `id` 挪到 `parentId` 下、`beforeId` 之前
+ * （beforeId=null 时置底）。移动后重排同级 `sort`，并同步机构端字典顺序。
+ *
+ * 与 `moveKnowledgeNode` 同构，差别只在「分类根固定」：
+ * - 分类根（id 100~103）不可移动，它们是机构端试卷类型树的分组锚点；
+ * - 不允许落到根层级（parentId=null）——那会造出第二个非分类的根，机构端无法归类。
+ */
+export function moveExamTypeNode(input: ExamTypeMoveInput): ExamTypeNode[] {
+  const node = examTypeNodes.find((item) => item.id === input.id)
+  if (!node) throw new Error('节点不存在')
+  if (node.kind === 'category') throw new Error('试卷分类根节点不可移动')
+  if (input.parentId === node.id) throw new Error('不可将节点移动到其自身下')
+  if (input.parentId != null && examTypeIsDescendant(node.id, input.parentId)) {
+    throw new Error('不可将节点移动到其子节点下')
+  }
+  if (input.parentId == null) throw new Error('试卷分类根节点由系统固定，不能拖到根层级')
+  const parent = examTypeNodes.find((item) => item.id === input.parentId)
+  if (!parent) throw new Error('父节点不存在')
+  const before = input.beforeId == null ? null : examTypeNodes.find((item) => item.id === input.beforeId)
+  if (before?.id === node.id) return listExamTypeNodes()
+
+  const oldParentId = node.parentId
+  const oldState = examTypeNodes.map((item) => ({ node: item, parentId: item.parentId, sort: item.sort }))
+  node.parentId = input.parentId
+  try {
+    if (examTypeDepthOf(input.parentId) + examTypeSubtreeHeight(node.id) > MAX_EXAM_TYPE_DEPTH) {
+      throw new Error(`考试类型树最多 ${MAX_EXAM_TYPE_DEPTH} 级`)
+    }
+    const siblings = examTypeChildren(input.parentId).filter((item) => item.id !== node.id)
+    const position = before ? siblings.findIndex((item) => item.id === before.id) : siblings.length
+    siblings.splice(position < 0 ? siblings.length : position, 0, node)
+    siblings.forEach((item, index) => { item.sort = index + 1 })
+    if (oldParentId !== input.parentId) {
+      examTypeChildren(oldParentId).forEach((item, index) => { item.sort = index + 1 })
+    }
+    syncExamTypeDict()
+  } catch (error) {
+    oldState.forEach(({ node: item, parentId, sort }) => {
+      item.parentId = parentId
+      item.sort = sort
+    })
+    throw error
+  }
+  return listExamTypeNodes()
 }
 
 export function toggleExamTypeNode(id: number): boolean {
@@ -590,136 +691,496 @@ export function deleteExamTypeNode(id: number): void {
 
 /* ================= 知识点树 ================= */
 
-export const knowledgeNodes: KnowledgeNode[] = [
-  { id: 1, parentId: null, name: '函数', subject: '数学', enabled: true },
-  { id: 2, parentId: 1, name: '一次函数', subject: '数学', enabled: true },
-  { id: 3, parentId: 1, name: '二次函数', subject: '数学', enabled: true },
-  { id: 4, parentId: 3, name: '二次函数图像与性质', subject: '数学', enabled: true },
-  { id: 5, parentId: 3, name: '二次函数应用题', subject: '数学', enabled: false },
-  { id: 6, parentId: null, name: '几何', subject: '数学', enabled: true },
-  { id: 7, parentId: 6, name: '平面几何', subject: '数学', enabled: true },
-  { id: 8, parentId: 7, name: '三角形', subject: '数学', enabled: true },
-  { id: 9, parentId: 7, name: '圆', subject: '数学', enabled: true },
-  { id: 10, parentId: null, name: '力学', subject: '物理', enabled: true },
-  { id: 11, parentId: 10, name: '牛顿运动定律', subject: '物理', enabled: true },
-  { id: 12, parentId: 11, name: '匀变速直线运动', subject: '物理', enabled: true },
-  { id: 13, parentId: null, name: '文言文阅读', subject: '语文', enabled: true },
-  { id: 14, parentId: 13, name: '实词虚词', subject: '语文', enabled: true },
-  { id: 15, parentId: 13, name: '断句与翻译', subject: '语文', enabled: true },
-  { id: 16, parentId: null, name: '古代文化常识', subject: '语文', enabled: true },
-  { id: 17, parentId: null, name: '现代文阅读', subject: '语文', enabled: true },
-  { id: 18, parentId: 17, name: '论述类文本', subject: '语文', enabled: true },
-  { id: 19, parentId: 17, name: '文学类文本', subject: '语文', enabled: true },
-  { id: 20, parentId: null, name: '古代诗歌鉴赏', subject: '语文', enabled: true },
-  { id: 21, parentId: null, name: '语言文字运用', subject: '语文', enabled: true },
+/**
+ * 知识点树种子：树是按「学段 + 学科」分棵维护的（同一棵里的节点共享学段 / 学科，
+ * mock 侧 save / move 都会强制这一点），所以这里按 `学段 → 学科 → 节点` 三层组织，
+ * 再由下面的展开逻辑拍平成带 `parentId` 的扁平数组。
+ *
+ * 覆盖口径与学科字典的「适配年级」对齐：小学只有语文 / 数学 / 英语，
+ * 物理、化学等从初中或九年级才出现 —— 切到小学学段时学科页签里就不该有它们。
+ */
+interface KnowledgeSeedNode {
+  name: string
+  /** 演示用：个别节点留成已停用，方便看停用态的展示与整棵子树启停 */
+  disabled?: boolean
+  children?: KnowledgeSeedNode[]
+}
 
-  { id: 22, parentId: 1, name: '指数函数与对数函数', subject: '数学', enabled: true },
-  { id: 23, parentId: 1, name: '三角函数', subject: '数学', enabled: true },
-  { id: 24, parentId: 1, name: '数列', subject: '数学', enabled: true },
-  { id: 25, parentId: 24, name: '等差数列', subject: '数学', enabled: true },
-  { id: 26, parentId: 24, name: '等比数列', subject: '数学', enabled: true },
-  { id: 27, parentId: null, name: '导数及其应用', subject: '数学', enabled: true },
-  { id: 28, parentId: 27, name: '导数的概念', subject: '数学', enabled: true },
-  { id: 29, parentId: 27, name: '导数在函数中的应用', subject: '数学', enabled: true },
-  { id: 30, parentId: 6, name: '立体几何', subject: '数学', enabled: true },
-  { id: 31, parentId: 30, name: '空间向量', subject: '数学', enabled: true },
-  { id: 32, parentId: 6, name: '解析几何', subject: '数学', enabled: true },
-  { id: 33, parentId: 32, name: '抛物线', subject: '数学', enabled: true },
-  { id: 34, parentId: 32, name: '圆锥曲线', subject: '数学', enabled: true },
-  { id: 35, parentId: null, name: '概率与统计', subject: '数学', enabled: true },
+const knowledgeSeed: Array<{ stage: string; subject: string; trees: KnowledgeSeedNode[] }> = [
+  {
+    stage: '小学',
+    subject: '数学',
+    trees: [
+      { name: '数与代数', children: [{ name: '整数运算' }, { name: '小数与分数' }] },
+      { name: '图形与几何', children: [{ name: '平面图形的认识' }, { name: '周长与面积' }] },
+      { name: '统计与概率' },
+      { name: '综合与实践', disabled: true },
+    ],
+  },
+  {
+    stage: '小学',
+    subject: '语文',
+    trees: [
+      { name: '识字与写字' },
+      { name: '阅读理解', children: [{ name: '记叙文阅读' }, { name: '说明文阅读' }] },
+      { name: '习作' },
+      { name: '古诗文积累' },
+    ],
+  },
+  {
+    stage: '小学',
+    subject: '英语',
+    trees: [
+      { name: '词汇与句型' },
+      { name: '日常交际用语' },
+      { name: '基础语法', children: [{ name: '一般现在时' }] },
+    ],
+  },
 
-  { id: 36, parentId: 10, name: '电磁学', subject: '物理', enabled: true },
-  { id: 37, parentId: 36, name: '静电场', subject: '物理', enabled: true },
-  { id: 38, parentId: 36, name: '恒定电流', subject: '物理', enabled: true },
-  { id: 39, parentId: 36, name: '电磁感应', subject: '物理', enabled: true },
+  {
+    stage: '初中',
+    subject: '数学',
+    trees: [
+      { name: '有理数与实数' },
+      { name: '代数式与方程', children: [{ name: '一元一次方程' }, { name: '二元一次方程组' }] },
+      { name: '函数初步', children: [{ name: '一次函数' }, { name: '反比例函数' }] },
+      { name: '图形的性质', children: [{ name: '三角形' }, { name: '四边形' }] },
+      { name: '统计与概率' },
+    ],
+  },
+  {
+    stage: '初中',
+    subject: '语文',
+    trees: [
+      { name: '现代文阅读', children: [{ name: '记叙文阅读' }, { name: '议论文阅读' }] },
+      { name: '文言文阅读', children: [{ name: '实词虚词' }, { name: '断句与翻译' }] },
+      { name: '写作' },
+      { name: '名著阅读' },
+    ],
+  },
+  {
+    stage: '初中',
+    subject: '英语',
+    trees: [
+      { name: '语法专项', children: [{ name: '时态与语态' }, { name: '从句' }] },
+      { name: '完形填空' },
+      { name: '阅读理解' },
+      { name: '书面表达' },
+    ],
+  },
+  {
+    stage: '初中',
+    subject: '物理',
+    trees: [
+      { name: '声与光' },
+      { name: '热学' },
+      { name: '力学', children: [{ name: '简单机械' }, { name: '压强与浮力' }] },
+      { name: '电与磁', children: [{ name: '欧姆定律' }] },
+    ],
+  },
+  {
+    stage: '初中',
+    subject: '化学',
+    trees: [
+      { name: '物质的构成' },
+      { name: '化学方程式' },
+      { name: '酸碱盐' },
+      { name: '化学实验' },
+    ],
+  },
+  {
+    stage: '初中',
+    subject: '生物',
+    trees: [
+      { name: '生物体的结构层次' },
+      { name: '生物与环境' },
+      { name: '生物的多样性' },
+    ],
+  },
+  {
+    stage: '初中',
+    subject: '政治',
+    trees: [
+      { name: '成长的节拍' },
+      { name: '友谊与师长' },
+      { name: '法律与秩序' },
+      { name: '国情与责任' },
+    ],
+  },
+  {
+    stage: '初中',
+    subject: '历史',
+    trees: [
+      { name: '中国古代史', children: [{ name: '秦汉大一统' }, { name: '隋唐盛世' }] },
+      { name: '中国近代史', children: [{ name: '晚清变局' }] },
+      { name: '世界史初步' },
+    ],
+  },
+  {
+    stage: '初中',
+    subject: '地理',
+    trees: [
+      { name: '地球与地图' },
+      { name: '世界地理', children: [{ name: '大洲与大洋' }] },
+      { name: '中国地理' },
+    ],
+  },
 
-  { id: 40, parentId: null, name: '语法专项', subject: '英语', enabled: true },
-  { id: 41, parentId: 40, name: '时态与语态', subject: '英语', enabled: true },
-  { id: 42, parentId: 40, name: '从句', subject: '英语', enabled: true },
-  { id: 43, parentId: 40, name: '非谓语动词', subject: '英语', enabled: true },
-  { id: 44, parentId: null, name: '完形填空', subject: '英语', enabled: true },
-  { id: 45, parentId: null, name: '阅读理解', subject: '英语', enabled: true },
-  { id: 46, parentId: null, name: '书面表达', subject: '英语', enabled: true },
-
-  { id: 47, parentId: null, name: '化学实验基础', subject: '化学', enabled: true },
-  { id: 48, parentId: null, name: '常见无机物及其应用', subject: '化学', enabled: true },
-
-  { id: 49, parentId: null, name: '分子与细胞', subject: '生物', enabled: true },
-  { id: 50, parentId: 49, name: '细胞的结构', subject: '生物', enabled: true },
-  { id: 51, parentId: null, name: '遗传与进化', subject: '生物', enabled: true },
-  { id: 52, parentId: 51, name: '孟德尔遗传定律', subject: '生物', enabled: true },
-  { id: 53, parentId: 51, name: '基因的表达', subject: '生物', enabled: true },
-  { id: 54, parentId: null, name: '稳态与调节', subject: '生物', enabled: true },
-  { id: 55, parentId: null, name: '生物与环境', subject: '生物', enabled: true },
-
-  { id: 56, parentId: null, name: '经济生活', subject: '政治', enabled: true },
-  { id: 57, parentId: 56, name: '价格与消费', subject: '政治', enabled: true },
-  { id: 58, parentId: 56, name: '生产与经营', subject: '政治', enabled: true },
-  { id: 59, parentId: null, name: '政治生活', subject: '政治', enabled: true },
-  { id: 60, parentId: 59, name: '公民与政府', subject: '政治', enabled: true },
-  { id: 61, parentId: null, name: '文化生活', subject: '政治', enabled: true },
-  { id: 62, parentId: null, name: '生活与哲学', subject: '政治', enabled: true },
-
-  { id: 63, parentId: null, name: '中国古代史', subject: '历史', enabled: true },
-  { id: 64, parentId: 63, name: '秦汉大一统', subject: '历史', enabled: true },
-  { id: 65, parentId: 63, name: '明清时期', subject: '历史', enabled: true },
-  { id: 66, parentId: null, name: '中国近现代史', subject: '历史', enabled: true },
-  { id: 67, parentId: 66, name: '晚清变局', subject: '历史', enabled: true },
-  { id: 68, parentId: 66, name: '新民主主义革命', subject: '历史', enabled: true },
-  { id: 69, parentId: null, name: '世界史', subject: '历史', enabled: true },
-  { id: 70, parentId: 69, name: '两次世界大战', subject: '历史', enabled: true },
-
-  { id: 71, parentId: null, name: '自然地理', subject: '地理', enabled: true },
-  { id: 72, parentId: 71, name: '大气运动', subject: '地理', enabled: true },
-  { id: 73, parentId: 71, name: '水循环', subject: '地理', enabled: true },
-  { id: 74, parentId: null, name: '人文地理', subject: '地理', enabled: true },
-  { id: 75, parentId: 74, name: '人口与城市', subject: '地理', enabled: true },
-  { id: 76, parentId: 74, name: '工农业区位', subject: '地理', enabled: true },
-  { id: 77, parentId: null, name: '区域地理', subject: '地理', enabled: true },
+  {
+    stage: '高中',
+    subject: '数学',
+    trees: [
+      { name: '函数', children: [{ name: '指数函数与对数函数' }, { name: '三角函数' }] },
+      { name: '数列', children: [{ name: '等差数列' }, { name: '等比数列' }] },
+      { name: '导数及其应用', children: [{ name: '导数的概念' }, { name: '导数在函数中的应用' }] },
+      { name: '立体几何', children: [{ name: '空间向量' }] },
+      { name: '解析几何', children: [{ name: '圆锥曲线' }, { name: '抛物线' }] },
+      { name: '概率与统计' },
+    ],
+  },
+  {
+    stage: '高中',
+    subject: '语文',
+    trees: [
+      { name: '文言文阅读', children: [{ name: '实词虚词' }, { name: '断句与翻译' }] },
+      { name: '古代诗歌鉴赏' },
+      { name: '现代文阅读', children: [{ name: '论述类文本' }, { name: '文学类文本' }] },
+      { name: '语言文字运用' },
+      { name: '写作' },
+    ],
+  },
+  {
+    stage: '高中',
+    subject: '英语',
+    trees: [
+      { name: '语法专项', children: [{ name: '时态与语态' }, { name: '从句' }, { name: '非谓语动词' }] },
+      { name: '完形填空' },
+      { name: '阅读理解' },
+      { name: '书面表达' },
+    ],
+  },
+  {
+    stage: '高中',
+    subject: '物理',
+    trees: [
+      { name: '力学', children: [{ name: '匀变速直线运动' }, { name: '牛顿运动定律' }, { name: '曲线运动' }] },
+      { name: '电磁学', children: [{ name: '静电场' }, { name: '恒定电流' }, { name: '电磁感应' }] },
+      { name: '热学' },
+      { name: '光学', disabled: true },
+    ],
+  },
+  {
+    stage: '高中',
+    subject: '化学',
+    trees: [
+      { name: '化学实验基础' },
+      { name: '常见无机物及其应用' },
+      { name: '有机化学基础' },
+      { name: '化学反应原理' },
+    ],
+  },
+  {
+    stage: '高中',
+    subject: '生物',
+    trees: [
+      { name: '分子与细胞', children: [{ name: '细胞的结构' }] },
+      { name: '遗传与进化', children: [{ name: '孟德尔遗传定律' }, { name: '基因的表达' }] },
+      { name: '稳态与调节' },
+      { name: '生物与环境' },
+    ],
+  },
+  {
+    stage: '高中',
+    subject: '政治',
+    trees: [
+      { name: '经济生活', children: [{ name: '价格与消费' }, { name: '生产与经营' }] },
+      { name: '政治生活', children: [{ name: '公民与政府' }] },
+      { name: '文化生活' },
+      { name: '生活与哲学' },
+    ],
+  },
+  {
+    stage: '高中',
+    subject: '历史',
+    trees: [
+      { name: '中国古代史', children: [{ name: '秦汉大一统' }, { name: '明清时期' }] },
+      { name: '中国近现代史', children: [{ name: '新民主主义革命' }] },
+      { name: '世界史', children: [{ name: '两次世界大战' }] },
+    ],
+  },
+  {
+    stage: '高中',
+    subject: '地理',
+    trees: [
+      { name: '自然地理', children: [{ name: '大气运动' }, { name: '水循环' }] },
+      { name: '人文地理', children: [{ name: '人口与城市' }, { name: '工农业区位' }] },
+      { name: '区域地理' },
+    ],
+  },
 ]
 
+/** 知识点编码前缀：与学科字典的 `code` 同口径（MATH / CHIN / …），拼三位流水号即为平台内唯一编码 */
+const KNOWLEDGE_CODE_PREFIX: Record<string, string> = {
+  数学: 'MATH',
+  语文: 'CHIN',
+  英语: 'ENG',
+  物理: 'PHY',
+  化学: 'CHEM',
+  生物: 'BIO',
+  政治: 'POL',
+  历史: 'HIST',
+  地理: 'GEO',
+}
+
+export const knowledgeNodes: KnowledgeNode[] = (() => {
+  const nodes: KnowledgeNode[] = []
+  const counters = new Map<string, number>()
+  let nextNodeId = 1
+
+  const push = (parentId: number | null, name: string, stage: string, subject: string, disabled: boolean) => {
+    const seq = (counters.get(subject) ?? 0) + 1
+    counters.set(subject, seq)
+    const node: KnowledgeNode = {
+      id: nextNodeId++,
+      parentId,
+      name,
+      code: `${KNOWLEDGE_CODE_PREFIX[subject] ?? 'KNOW'}-${String(seq).padStart(3, '0')}`,
+      stage,
+      subject,
+      /* 同级序号 = 同一父节点下的已有节点数 + 1（与 normalizeKnowledgeSort 同口径） */
+      sort: nodes.filter((item) => item.parentId === parentId && item.stage === stage && item.subject === subject).length + 1,
+      enabled: !disabled,
+    }
+    nodes.push(node)
+    return node
+  }
+
+  for (const group of knowledgeSeed) {
+    for (const tree of group.trees) {
+      const root = push(null, tree.name, group.stage, group.subject, tree.disabled === true)
+      for (const child of tree.children ?? []) push(root.id, child.name, group.stage, group.subject, child.disabled === true)
+    }
+  }
+  return nodes
+})()
+
+export const MAX_KNOWLEDGE_DEPTH = 5
+
 export function listKnowledge(): KnowledgeNode[] {
+  return knowledgeNodes.map((node) => ({ ...node }))
+}
+
+function knowledgeNodeOf(id: number): KnowledgeNode {
+  const node = knowledgeNodes.find((row) => row.id === id)
+  if (!node) throw new Error('节点不存在')
+  return node
+}
+
+function knowledgeDepthOf(id: number): number {
+  return knowledgeDepthWithParent(knowledgeNodeOf(id).parentId)
+}
+
+function knowledgeDepthWithParent(parentId: number | null): number {
+  let depth = 1
+  const seen = new Set<number>()
+  let current = parentId == null ? undefined : knowledgeNodeOf(parentId)
+  while (current) {
+    if (seen.has(current.id)) throw new Error('知识点树存在循环引用')
+    seen.add(current.id)
+    depth += 1
+    current = current.parentId == null ? undefined : knowledgeNodeOf(current.parentId)
+  }
+  return depth
+}
+
+function knowledgeSubtreeHeight(id: number, ancestors = new Set<number>()): number {
+  if (ancestors.has(id)) throw new Error('知识点树存在循环引用')
+  const nextAncestors = new Set(ancestors)
+  nextAncestors.add(id)
+  const children = knowledgeNodes.filter((node) => node.parentId === id)
+  if (!children.length) return 1
+  return 1 + Math.max(...children.map((child) => knowledgeSubtreeHeight(child.id, nextAncestors)))
+}
+
+/**
+ * 同级节点 = 同一父节点 **且同一棵树**（学段 + 学科相同）。
+ *
+ * 树是按「学段 + 学科」分棵维护的，`parentId === null` 只能说明都是根节点，说明不了是同一棵树：
+ * 「语法专项」在初中英语和高中英语下各有一个，若不按学段 / 学科收窄，两者会被当成同级 ——
+ * 重名校验互相误伤、序号也在几棵树之间混编。
+ */
+function knowledgeChildren(parentId: number | null, stage: string, subject: string): KnowledgeNode[] {
   return knowledgeNodes
+    .filter((node) => node.parentId === parentId && node.stage === stage && node.subject === subject)
+    .sort((a, b) => a.sort - b.sort || a.id - b.id)
+}
+
+function normalizeKnowledgeSort(parentId: number | null, stage: string, subject: string): void {
+  knowledgeChildren(parentId, stage, subject).forEach((node, index) => {
+    node.sort = index + 1
+  })
 }
 
 function isDescendant(rootId: number, maybeChildId: number): boolean {
-  let current = knowledgeNodes.find((node) => node.id === maybeChildId)
-  while (current?.parentId != null) {
+  let current = knowledgeNodeOf(maybeChildId)
+  const seen = new Set<number>()
+  while (current.parentId != null) {
+    if (seen.has(current.id)) throw new Error('知识点树存在循环引用')
+    seen.add(current.id)
     if (current.parentId === rootId) return true
-    current = knowledgeNodes.find((node) => node.id === current!.parentId)
+    current = knowledgeNodes.find((node) => node.id === current.parentId) ?? (() => { throw new Error('父节点不存在') })()
   }
   return false
 }
 
+function validateKnowledgeName(name: unknown, parentId: number | null, stage: string, subject: string, id?: number): string {
+  const normalized = typeof name === 'string' ? name.trim() : ''
+  if (!normalized) throw new Error('节点名称不能为空')
+  if (knowledgeNodes.some((node) => node.id !== id && node.parentId === parentId && node.stage === stage && node.subject === subject && node.name === normalized)) {
+    throw new Error('同级节点名称不可重复')
+  }
+  return normalized
+}
+
+/**
+ * 自动生成知识点编码：`学科前缀-三位序号`（如 MATH-023）。
+ *
+ * 编码由平台自动维护、前端不可编辑（新增 / 编辑都一样），因此这里只负责「不重码」：
+ * 取同前缀已有编码的最大序号 + 1，跨学段 / 学科也不受影响（前缀已按学科区分）。
+ */
+function generateKnowledgeCode(subject: string): string {
+  const prefix = KNOWLEDGE_CODE_PREFIX[subject] ?? 'KNOW'
+  const used = knowledgeNodes
+    .filter((node) => node.code.startsWith(`${prefix}-`))
+    .map((node) => Number(node.code.slice(prefix.length + 1)))
+    .filter((value) => Number.isFinite(value))
+  const next = (used.length ? Math.max(...used) : 0) + 1
+  return `${prefix}-${String(next).padStart(3, '0')}`
+}
+
 export function saveKnowledgeNode(input: Partial<KnowledgeNode>): KnowledgeNode {
-  if (input.parentId != null && input.id != null && isDescendant(input.id, input.parentId)) {
-    throw new Error('不可将节点移动到其子节点下')
+  const id = input.id
+  if (id != null) {
+    const node = knowledgeNodeOf(id)
+    const parentId = input.parentId === undefined ? node.parentId : input.parentId
+    if (parentId != null) {
+      const parent = knowledgeNodeOf(parentId)
+      if (parent.id === node.id || isDescendant(node.id, parent.id)) throw new Error('不可将节点移动到其子节点下')
+      if (parent.stage !== (input.stage ?? node.stage) || parent.subject !== (input.subject ?? node.subject)) {
+        throw new Error('父子节点的学段和学科必须一致')
+      }
+    }
+    const nextStage = input.stage ?? node.stage
+    const nextSubject = input.subject ?? node.subject
+    if (!nextStage || !nextSubject) throw new Error('学段和学科不能为空')
+    if (knowledgeDepthWithParent(parentId) + knowledgeSubtreeHeight(node.id) > MAX_KNOWLEDGE_DEPTH) {
+      throw new Error(`知识点树最多 ${MAX_KNOWLEDGE_DEPTH} 级`)
+    }
+    const oldParentId = node.parentId
+    const oldStage = node.stage
+    const oldSubject = node.subject
+    node.name = validateKnowledgeName(input.name ?? node.name, parentId, nextStage, nextSubject, node.id)
+    /* 编码由平台自动维护，编辑时忽略入参（保证全平台唯一且不可被前端改写） */
+    node.parentId = parentId
+    node.stage = nextStage
+    node.subject = nextSubject
+    if (input.enabled !== undefined) node.enabled = input.enabled
+    const stack = [node.id]
+    const seen = new Set<number>()
+    while (stack.length) {
+      const currentId = stack.pop()!
+      if (seen.has(currentId)) continue
+      seen.add(currentId)
+      knowledgeNodes.filter((item) => item.parentId === currentId).forEach((child) => {
+        child.stage = nextStage
+        child.subject = nextSubject
+        stack.push(child.id)
+      })
+    }
+    normalizeKnowledgeSort(node.parentId, nextStage, nextSubject)
+    if (oldParentId !== parentId || oldStage !== nextStage || oldSubject !== nextSubject) {
+      normalizeKnowledgeSort(oldParentId, oldStage, oldSubject)
+    }
+    return { ...node }
   }
-  if (input.id) {
-    const node = knowledgeNodes.find((row) => row.id === input.id)
-    if (!node) throw new Error('节点不存在')
-    Object.assign(node, input)
-    return node
-  }
+
+  const parentId = input.parentId ?? null
+  const parent = parentId == null ? null : knowledgeNodeOf(parentId)
+  const stage = input.stage ?? parent?.stage
+  const subject = input.subject ?? parent?.subject
+  if (!stage || !subject) throw new Error('学段和学科不能为空')
+  const name = validateKnowledgeName(input.name, parentId, stage, subject)
+  /* 编码自动生成，前端不传也不可改 */
+  const code = generateKnowledgeCode(subject)
   const node: KnowledgeNode = {
     id: nextId(knowledgeNodes),
-    parentId: input.parentId ?? null,
-    name: input.name ?? '未命名节点',
-    subject: input.subject ?? '数学',
+    parentId,
+    name,
+    code,
+    stage,
+    subject,
+    sort: knowledgeChildren(parentId, stage, subject).length + 1,
     enabled: true,
   }
+  if (parent && knowledgeDepthOf(parent.id) + 1 > MAX_KNOWLEDGE_DEPTH) throw new Error(`知识点树最多 ${MAX_KNOWLEDGE_DEPTH} 级`)
   knowledgeNodes.push(node)
-  return node
+  return { ...node }
+}
+
+export interface KnowledgeMoveInput {
+  id: number
+  parentId: number | null
+  beforeId: number | null
+}
+
+export function moveKnowledgeNode(input: KnowledgeMoveInput): KnowledgeNode[] {
+  const node = knowledgeNodeOf(input.id)
+  if (input.parentId === node.id || (input.parentId != null && isDescendant(node.id, input.parentId))) {
+    throw new Error('不可将节点移动到其子节点下')
+  }
+  const parent = input.parentId == null ? null : knowledgeNodeOf(input.parentId)
+  if (parent && (parent.stage !== node.stage || parent.subject !== node.subject)) throw new Error('父子节点的学段和学科必须一致')
+  const before = input.beforeId == null ? null : knowledgeNodeOf(input.beforeId)
+  if (before && (before.parentId !== input.parentId || before.stage !== node.stage || before.subject !== node.subject)) {
+    throw new Error('排序目标不是同级节点')
+  }
+  if (before?.id === node.id) return listKnowledge()
+  const oldParentId = node.parentId
+  const oldState = knowledgeNodes.map((item) => ({
+    node: item,
+    parentId: item.parentId,
+    sort: item.sort,
+  }))
+  node.parentId = input.parentId
+  try {
+    if (knowledgeDepthOf(node.id) + knowledgeSubtreeHeight(node.id) - 1 > MAX_KNOWLEDGE_DEPTH) {
+      throw new Error(`知识点树最多 ${MAX_KNOWLEDGE_DEPTH} 级`)
+    }
+    const siblings = knowledgeChildren(input.parentId, node.stage, node.subject).filter((item) => item.id !== node.id)
+    const position = before ? siblings.findIndex((item) => item.id === before.id) : siblings.length
+    siblings.splice(position < 0 ? siblings.length : position, 0, node)
+    siblings.forEach((item, index) => { item.sort = index + 1 })
+    if (oldParentId !== input.parentId) normalizeKnowledgeSort(oldParentId, node.stage, node.subject)
+  } catch (error) {
+    oldState.forEach(({ node: item, parentId, sort }) => {
+      item.parentId = parentId
+      item.sort = sort
+    })
+    throw error
+  }
+  return listKnowledge()
 }
 
 /** 整棵子树启停用 */
 export function toggleKnowledgeNode(id: number): boolean {
-  const root = knowledgeNodes.find((node) => node.id === id)
-  if (!root) throw new Error('节点不存在')
+  const root = knowledgeNodeOf(id)
   const next = !root.enabled
   const stack = [id]
+  const seen = new Set<number>()
   while (stack.length) {
     const current = stack.pop()!
+    if (seen.has(current)) continue
+    seen.add(current)
     const node = knowledgeNodes.find((row) => row.id === current)
     if (node) node.enabled = next
     knowledgeNodes.filter((row) => row.parentId === current).forEach((child) => stack.push(child.id))
@@ -728,37 +1189,51 @@ export function toggleKnowledgeNode(id: number): boolean {
 }
 
 export function deleteKnowledgeNode(id: number): void {
-  const children = knowledgeNodes.filter((node) => node.parentId === id)
-  if (children.length > 0) throw new Error('请先删除或移走子节点')
-  const index = knowledgeNodes.findIndex((node) => node.id === id)
-  knowledgeNodes.splice(index, 1)
+  knowledgeNodeOf(id)
+  if (knowledgeNodes.some((node) => node.parentId === id)) throw new Error('请先删除或移走子节点')
+  const node = knowledgeNodeOf(id)
+  knowledgeNodes.splice(knowledgeNodes.indexOf(node), 1)
+  normalizeKnowledgeSort(node.parentId, node.stage, node.subject)
 }
 
 /* ================= 教材版本 ================= */
 
+/** 生成一份示例目录树（章 → 节），供种子数据使用 */
+function sampleCatalog(chapters: string[]): TextbookCatalogNode[] {
+  return chapters.map((chapter, ci) => ({
+    id: `c${ci + 1}`,
+    title: chapter,
+    enabled: true,
+    children: [
+      { id: `c${ci + 1}-1`, title: `${chapter}（第 1 节）`, enabled: true },
+      { id: `c${ci + 1}-2`, title: `${chapter}（第 2 节）`, enabled: true },
+    ],
+  }))
+}
+
 export const textbooks: TextbookVersion[] = [
-  { id: 1, subject: '数学', name: '人教版', publisher: '人民教育出版社', hue: 212, sort: 1, enabled: true, refCount: 9 },
-  { id: 2, subject: '数学', name: '北师大版', publisher: '北京师范大学出版社', hue: 268, sort: 2, enabled: true, refCount: 6 },
-  { id: 3, subject: '数学', name: '苏教版', publisher: '江苏凤凰教育出版社', hue: 152, sort: 3, enabled: true, refCount: 3 },
-  { id: 4, subject: '语文', name: '人教版', publisher: '人民教育出版社', hue: 22, sort: 4, enabled: true, refCount: 6 },
-  { id: 5, subject: '语文', name: '部编版', publisher: '人民教育出版社', hue: 330, sort: 5, enabled: true, refCount: 8 },
-  { id: 6, subject: '英语', name: '外研版', publisher: '外语教学与研究出版社', hue: 190, sort: 6, enabled: true, refCount: 6 },
-  { id: 7, subject: '物理', name: '沪科版', publisher: '上海科学技术出版社', hue: 246, sort: 7, enabled: true, refCount: 4 },
-  { id: 8, subject: '数学', name: '人教A版', publisher: '人民教育出版社', hue: 220, sort: 8, enabled: true, refCount: 4 },
-  { id: 9, subject: '数学', name: '苏科版', publisher: '江苏凤凰科学技术出版社', hue: 164, sort: 9, enabled: true, refCount: 3 },
-  { id: 10, subject: '英语', name: '人教版', publisher: '人民教育出版社', hue: 198, sort: 10, enabled: true, refCount: 7 },
-  { id: 11, subject: '英语', name: '人教新起点', publisher: '人民教育出版社', hue: 206, sort: 11, enabled: true, refCount: 2 },
-  { id: 12, subject: '英语', name: '人教PEP', publisher: '人民教育出版社', hue: 214, sort: 12, enabled: true, refCount: 2 },
-  { id: 13, subject: '物理', name: '人教版', publisher: '人民教育出版社', hue: 254, sort: 13, enabled: true, refCount: 5 },
-  { id: 14, subject: '化学', name: '人教版', publisher: '人民教育出版社', hue: 96, sort: 14, enabled: true, refCount: 4 },
-  { id: 15, subject: '化学', name: '鲁科版', publisher: '山东科学技术出版社', hue: 112, sort: 15, enabled: true, refCount: 2 },
-  { id: 16, subject: '化学', name: '鲁教版', publisher: '山东教育出版社', hue: 128, sort: 16, enabled: true, refCount: 1 },
-  { id: 17, subject: '生物', name: '人教版', publisher: '人民教育出版社', hue: 300, sort: 17, enabled: true, refCount: 5 },
-  { id: 18, subject: '生物', name: '苏教版', publisher: '江苏凤凰教育出版社', hue: 318, sort: 18, enabled: true, refCount: 2 },
-  { id: 19, subject: '政治', name: '人教版', publisher: '人民教育出版社', hue: 4, sort: 19, enabled: true, refCount: 4 },
-  { id: 20, subject: '历史', name: '部编版', publisher: '人民教育出版社', hue: 38, sort: 20, enabled: true, refCount: 4 },
-  { id: 21, subject: '地理', name: '人教版', publisher: '人民教育出版社', hue: 136, sort: 21, enabled: true, refCount: 4 },
-  { id: 22, subject: '地理', name: '湘教版', publisher: '湖南教育出版社', hue: 150, sort: 22, enabled: true, refCount: 2 },
+  { id: 1, subject: '数学', name: '人教版', publisher: '人民教育出版社', hue: 212, sort: 1, enabled: true, grade: '高一', term: '上学期', region: ['全国'], years: ['2026', '2025', '2024'], catalog: sampleCatalog(['集合与函数概念', '基本初等函数', '函数的应用']) },
+  { id: 2, subject: '数学', name: '北师大版', publisher: '北京师范大学出版社', hue: 268, sort: 2, enabled: true, grade: '高一', term: '上学期', region: ['北京', '天津'], years: ['2026', '2025'], catalog: sampleCatalog(['生活中的数学', '集合', '函数']) },
+  { id: 3, subject: '数学', name: '苏教版', publisher: '江苏凤凰教育出版社', hue: 152, sort: 3, enabled: true, grade: '高一', term: '下学期', region: ['江苏', '浙江'], years: ['2025', '2024', '2023'] },
+  { id: 4, subject: '语文', name: '人教版', publisher: '人民教育出版社', hue: 22, sort: 4, enabled: true, grade: '高一', term: '上学期', region: ['全国'], years: ['2026', '2025', '2024', '2023'], catalog: sampleCatalog(['现代诗歌诵读', '古代记叙散文', '写人记事散文']) },
+  { id: 5, subject: '语文', name: '部编版', publisher: '人民教育出版社', hue: 330, sort: 5, enabled: true, grade: '高一', term: '上学期', region: ['全国'], years: ['2026', '2025'] },
+  { id: 6, subject: '英语', name: '外研版', publisher: '外语教学与研究出版社', hue: 190, sort: 6, enabled: true, grade: '高一', term: '上学期', region: ['全国'], years: ['2026', '2025', '2024'], catalog: sampleCatalog(['My First Day at Senior High', 'My New Teachers', 'My First Ride on a Train']) },
+  { id: 7, subject: '物理', name: '沪科版', publisher: '上海科学技术出版社', hue: 246, sort: 7, enabled: true, grade: '高一', term: '上学期', region: ['上海'], years: ['2025', '2024'] },
+  { id: 8, subject: '数学', name: '人教A版', publisher: '人民教育出版社', hue: 220, sort: 8, enabled: true, grade: '高二', term: '上学期', region: ['全国'], years: ['2026', '2025'] },
+  { id: 9, subject: '数学', name: '苏科版', publisher: '江苏凤凰科学技术出版社', hue: 164, sort: 9, enabled: true, grade: '八年级', term: '上学期', region: ['江苏'], years: ['2024', '2023', '2022', '更久之前'] },
+  { id: 10, subject: '英语', name: '人教版', publisher: '人民教育出版社', hue: 198, sort: 10, enabled: true, grade: '高一', term: '下学期', region: ['全国'], years: ['2026', '2025', '2024'] },
+  { id: 11, subject: '英语', name: '人教新起点', publisher: '人民教育出版社', hue: 206, sort: 11, enabled: true, grade: '一年级', term: '上学期', region: ['全国'], years: ['2025', '2024', '2023'] },
+  { id: 12, subject: '英语', name: '人教PEP', publisher: '人民教育出版社', hue: 214, sort: 12, enabled: true, grade: '三年级', term: '上学期', region: ['全国'], years: ['2026', '2025', '2024', '2023'] },
+  { id: 13, subject: '物理', name: '人教版', publisher: '人民教育出版社', hue: 254, sort: 13, enabled: true, grade: '高二', term: '上学期', region: ['全国'], years: ['2025', '2024'] },
+  { id: 14, subject: '化学', name: '人教版', publisher: '人民教育出版社', hue: 96, sort: 14, enabled: true, grade: '高一', term: '上学期', region: ['全国'], years: ['2026', '2025'] },
+  { id: 15, subject: '化学', name: '鲁科版', publisher: '山东科学技术出版社', hue: 112, sort: 15, enabled: true, grade: '高一', term: '下学期', region: ['山东'], years: ['2024', '2023'] },
+  { id: 16, subject: '化学', name: '鲁教版', publisher: '山东教育出版社', hue: 128, sort: 16, enabled: true, grade: '九年级', term: '上学期', region: ['山东'], years: ['2023', '2022', '更久之前'] },
+  { id: 17, subject: '生物', name: '人教版', publisher: '人民教育出版社', hue: 300, sort: 17, enabled: true, grade: '高一', term: '上学期', region: ['全国'], years: ['2026', '2025', '2024'] },
+  { id: 18, subject: '生物', name: '苏教版', publisher: '江苏凤凰教育出版社', hue: 318, sort: 18, enabled: true, grade: '高一', term: '下学期', region: ['江苏'], years: ['2025', '2024'] },
+  { id: 19, subject: '政治', name: '人教版', publisher: '人民教育出版社', hue: 4, sort: 19, enabled: true, grade: '高一', term: '上学期', region: ['全国'], years: ['2026', '2025'] },
+  { id: 20, subject: '历史', name: '部编版', publisher: '人民教育出版社', hue: 38, sort: 20, enabled: true, grade: '高一', term: '上学期', region: ['全国'], years: ['2026', '2025', '2024', '2023', '2022'] },
+  { id: 21, subject: '地理', name: '人教版', publisher: '人民教育出版社', hue: 136, sort: 21, enabled: true, grade: '高一', term: '上学期', region: ['全国'], years: ['2026', '2025'] },
+  { id: 22, subject: '地理', name: '湘教版', publisher: '湖南教育出版社', hue: 150, sort: 22, enabled: true, grade: '高一', term: '下学期', region: ['湖南'], years: ['2025', '2024', '更久之前'] },
 ]
 
 export function listTextbooks(): TextbookVersion[] {
@@ -790,7 +1265,14 @@ export function saveTextbook(input: Partial<TextbookVersion>): TextbookVersion {
     hue: Math.floor(Math.random() * 360),
     sort: input.sort ?? textbooks.length + 1,
     enabled: true,
-    refCount: 0,
+    grade: input.grade,
+    term: input.term,
+    region: input.region,
+    years: input.years,
+    cover: input.cover,
+    fileUrl: input.fileUrl,
+    fileName: input.fileName,
+    catalog: input.catalog ?? [],
   }
   textbooks.push(item)
   return item
@@ -806,7 +1288,6 @@ export function toggleTextbook(id: number): boolean {
 export function deleteTextbook(id: number): void {
   const item = textbooks.find((row) => row.id === id)
   if (!item) throw new Error('教材版本不存在')
-  if (item.refCount > 0) throw new Error(`该版本已被 ${item.refCount} 个机构引用，仅可停用`)
   const index = textbooks.findIndex((row) => row.id === id)
   textbooks.splice(index, 1)
 }

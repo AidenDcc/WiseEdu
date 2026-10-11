@@ -596,6 +596,13 @@ export const mockRoutes: MockRoute[] = [
       guard(() => {
         const [action] = parseSegments(path, '/admin/exam-type-nodes/')
         if (action === 'save') return admin.saveExamTypeNode(body as Record<string, never>)
+        if (action === 'move') {
+          return admin.moveExamTypeNode({
+            id: Number(body.id),
+            parentId: body.parentId == null || body.parentId === '' ? null : Number(body.parentId),
+            beforeId: body.beforeId == null || body.beforeId === '' ? null : Number(body.beforeId),
+          })
+        }
         if (action === 'toggle') return { enabled: admin.toggleExamTypeNode(Number(body.id)) }
         if (action === 'delete') {
           admin.deleteExamTypeNode(Number(body.id))
@@ -616,6 +623,13 @@ export const mockRoutes: MockRoute[] = [
       guard(() => {
         const [action] = parseSegments(path, '/admin/knowledge/')
         if (action === 'save') return admin.saveKnowledgeNode(body as Record<string, never>)
+        if (action === 'move') {
+          return admin.moveKnowledgeNode({
+            id: Number(body.id),
+            parentId: body.parentId == null || body.parentId === '' ? null : Number(body.parentId),
+            beforeId: body.beforeId == null || body.beforeId === '' ? null : Number(body.beforeId),
+          })
+        }
         if (action === 'toggle') return { enabled: admin.toggleKnowledgeNode(Number(body.id)) }
         if (action === 'delete') {
           admin.deleteKnowledgeNode(Number(body.id))

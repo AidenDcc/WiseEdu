@@ -62,6 +62,10 @@ export function saveKnowledgeNode(data: Partial<KnowledgeNode>) {
   return request<KnowledgeNode>('/admin/knowledge/save', { method: 'POST', data })
 }
 
+export function moveKnowledgeNode(data: { id: number; parentId: number | null; beforeId: number | null }) {
+  return request<KnowledgeNode[]>('/admin/knowledge/move', { method: 'POST', data })
+}
+
 export function toggleKnowledgeNode(id: number) {
   return request<{ enabled: boolean }>('/admin/knowledge/toggle', { method: 'POST', data: { id } })
 }
@@ -78,6 +82,10 @@ export function fetchExamTypeNodes() {
 
 export function saveExamTypeNode(data: Partial<ExamTypeNode>) {
   return request<ExamTypeNode>('/admin/exam-type-nodes/save', { method: 'POST', data })
+}
+
+export function moveExamTypeNode(data: { id: number; parentId: number | null; beforeId: number | null }) {
+  return request<ExamTypeNode[]>('/admin/exam-type-nodes/move', { method: 'POST', data })
 }
 
 export function toggleExamTypeNode(id: number) {

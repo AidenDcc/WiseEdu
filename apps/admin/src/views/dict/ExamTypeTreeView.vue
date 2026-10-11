@@ -1,9 +1,20 @@
 <script setup lang="ts">
+/**
+ * 考试类型树（与知识点树、教材目录树共用同一套树组件 `AppTreeView`）。
+ *
+ * 与知识点树的差别都通过配置表达：
+ * - 分类根由系统固定 —— 不可编辑 / 删除 / 拖拽，但可以往里加子节点（`rowConfig`）；
+ * - 不允许新增根节点、不允许拖到根层级（`rootLabel=""` / `allowRootLevel=false`）；
+ * - 行标签多出「考试类型 / 杯赛」「仅X学段」「适配学科」；
+ * - 顶部只有「类型」筛选（原搜索框已并入树组件的左上角）。
+ */
 import { computed, onMounted, reactive, ref } from 'vue'
-import { AppFilterPanel, AppIcon, AppListToolbar, AppSearchInput, showToast, ApiError, AppModal, appConfirm } from '@aiteach/shared'
+import { AppFilterPanel, AppModal, ApiError, appConfirm, showToast } from '@aiteach/shared'
 import type { DictItem, ExamTypeNode, ExamTypeNodeKind, FilterRowDef } from '@aiteach/shared'
-import AppSwitch from '@/components/ui/AppSwitch.vue'
-import { deleteExamTypeNode, fetchDict, fetchExamTypeNodes, saveExamTypeNode, toggleExamTypeNode } from '@/api/platform'
+import { deleteExamTypeNode, fetchDict, fetchExamTypeNodes, moveExamTypeNode, saveExamTypeNode, toggleExamTypeNode } from '@/api/platform'
+import AppTreeView from '@/components/tree/AppTreeView.vue'
+import type { TreeRowConfig, TreeTag } from '@/components/tree/tree-utils'
+import { childrenOf, depthOf } from '@/components/tree/tree-utils'
 
 /** 层级上限：与 mock 侧 `MAX_EXAM_TYPE_DEPTH` 同口径（改一处要改两处） */
 const MAX_DEPTH = 5
@@ -24,8 +35,6 @@ const FILTERS = reactive<Record<string, string[]>>({ kind: [] })
 function onFiltersChange(next: Record<string, string[]>) {
   FILTERS.kind = next.kind ?? []
 }
-const keyword = ref('')
-const collapsedIds = ref<number[]>([])
 
 /* 「试卷分类」根不入筛选项：它是分组容器，本身不是可筛选的业务类型 */
 const FILTER_ROWS: FilterRowDef[] = [
@@ -47,19 +56,18 @@ async function load() {
 
 /**
  * 类型筛选：命中节点**连同其祖先**一起保留，否则被选中的子节点会因为父节点被滤掉而
- * 从展平结果里消失（`rows` 是从根往下走的）。分类根则靠「有后代命中」自然保住，
+ * 从展平结果里消失（树是从根往下走的）。分类根则靠「有后代命中」自然保住，
  * 选「杯赛」时会只剩「竞赛」这一支。
  */
 const filtered = computed(() => {
   const kinds = FILTERS.kind
   if (!kinds.length) return nodes.value
-  const childrenOf = (parentId: number | null) =>
-    nodes.value.filter((node) => node.parentId === parentId)
+  const kidsOf = (parentId: number | null) => nodes.value.filter((node) => node.parentId === parentId)
   const keep = new Set<number>()
   /* 返回「子树里是否有命中」，父节点据此决定自己是否保留 */
   const walk = (parentId: number | null): boolean => {
     let hit = false
-    for (const node of childrenOf(parentId)) {
+    for (const node of kidsOf(parentId)) {
       const childHit = walk(node.id)
       if (childHit || kinds.includes(KIND_TEXT[node.kind])) {
         keep.add(node.id)
@@ -72,72 +80,39 @@ const filtered = computed(() => {
   return nodes.value.filter((node) => keep.has(node.id))
 })
 
-interface TreeRow {
-  node: ExamTypeNode
-  depth: number
-  hasChildren: boolean
+/* ===== 交给通用树组件的「考试类型」专属配置 ===== */
+function rowTags(node: ExamTypeNode): TreeTag[] {
+  const tags: TreeTag[] = [{ text: KIND_TEXT[node.kind], tone: node.kind === 'competition' ? 'orange' : 'gray' }]
+  if (node.stage) tags.push({ text: `仅${node.stage}`, tone: 'gray' })
+  if (node.subjects?.length) tags.push({ text: node.subjects.join('、'), tone: 'gray' })
+  return tags
+}
+/** 分类根由系统固定：不可编辑 / 删除 / 拖拽（但可加子节点） */
+function rowConfig(node: ExamTypeNode): TreeRowConfig {
+  return node.kind === 'category' ? { editable: false, draggable: false } : {}
 }
 
-/** 展平为带缩进的行：祖先全部展开才可见；搜索时自动展开命中路径 */
-const rows = computed<TreeRow[]>(() => {
-  const childrenOf = (parentId: number | null) =>
-    filtered.value.filter((node) => node.parentId === parentId)
-  const kw = keyword.value.trim()
-  const matchedIds = new Set<number>()
-  if (kw) {
-    filtered.value.forEach((node) => {
-      if (node.name.includes(kw)) {
-        matchedIds.add(node.id)
-        let current: ExamTypeNode | undefined = node
-        while (current?.parentId != null) {
-          matchedIds.add(current.parentId)
-          current = filtered.value.find((row) => row.id === current!.parentId)
-        }
-      }
-    })
+const moving = ref(false)
+async function onMove(payload: { id: number; parentId: number | null; beforeId: number | null }) {
+  if (moving.value) return
+  moving.value = true
+  try {
+    await moveExamTypeNode(payload)
+    await load()
+  } catch (error) {
+    showToast(error instanceof ApiError ? error.message : '移动失败', 'error')
+  } finally {
+    moving.value = false
   }
-  const result: TreeRow[] = []
-  const walk = (parentId: number | null, depth: number, ancestorsCollapsed: boolean) => {
-    for (const node of childrenOf(parentId)) {
-      const children = childrenOf(node.id)
-      const visible = !ancestorsCollapsed || (kw && matchedIds.has(node.id))
-      const collapsed = collapsedIds.value.includes(node.id) && !(kw && matchedIds.has(node.id))
-      if (visible) {
-        result.push({ node, depth, hasChildren: children.length > 0 })
-      }
-      /* 搜索时强制展开命中路径；否则折叠态沿祖先向下传递 */
-      walk(node.id, depth + 1, kw ? false : ancestorsCollapsed || collapsed)
-    }
-  }
-  /* 首参是「祖先是否已折叠」。根节点没有祖先，故传 false —— 传 true 时
-     `visible = !ancestorsCollapsed` 对每个根节点恒为 false，且该值只增不减，
-     整棵树会永远渲染成「暂无节点」。 */
-  walk(null, 0, false)
-  return result
-})
-
-function expandAll() {
-  collapsedIds.value = []
 }
-
-function collapseAll() {
-  collapsedIds.value = nodes.value.map((node) => node.id)
-}
-
-function toggleCollapse(id: number) {
-  const index = collapsedIds.value.indexOf(id)
-  if (index >= 0) collapsedIds.value.splice(index, 1)
-  else collapsedIds.value.push(id)
-}
-
-function depthOf(id: number): number {
-  let depth = 1
-  let current = nodes.value.find((node) => node.id === id)
-  while (current?.parentId != null) {
-    depth += 1
-    current = nodes.value.find((node) => node.id === current!.parentId)
-  }
-  return depth
+async function onMoveBy(payload: { node: ExamTypeNode; direction: -1 | 1 }) {
+  const { node, direction } = payload
+  const list = childrenOf(filtered.value, node.parentId)
+  const index = list.findIndex((item) => item.id === node.id)
+  const neighbor = list[index + direction]
+  if (!neighbor) return
+  const beforeId = direction < 0 ? neighbor.id : (list[index + direction + 1]?.id ?? null)
+  await onMove({ id: node.id, parentId: node.parentId, beforeId })
 }
 
 async function onToggle(node: ExamTypeNode) {
@@ -179,7 +154,7 @@ const saving = ref(false)
 const isExamType = computed(() => form.kind === 'examType')
 
 function openCreate(parentId: number) {
-  if (depthOf(parentId) >= MAX_DEPTH) {
+  if (depthOf(nodes.value, parentId) >= MAX_DEPTH) {
     showToast(`考试类型树最多 ${MAX_DEPTH} 级，无法再添加子节点`, 'error')
     return
   }
@@ -232,66 +207,27 @@ onMounted(load)
 
 <template>
   <div class="page">
-    <!-- 搜索条件：独立面板，与下方列表分开（对齐机构端列表页布局） -->
-    <AppFilterPanel :rows="FILTER_ROWS" :model-value="FILTERS" @update:model-value="onFiltersChange">
-      <template #extra>
-        <AppSearchInput v-model="keyword" placeholder="搜索名称，自动定位高亮" :width="260" />
-      </template>
-    </AppFilterPanel>
+    <!-- 搜索条件：只有「类型」一项；搜索框已并入树组件左上角 -->
+    <AppFilterPanel :rows="FILTER_ROWS" :model-value="FILTERS" @update:model-value="onFiltersChange" />
 
-    <div class="panel">
-      <AppListToolbar :searchable="false">
-        <template #left>
-          <span class="panel-hint">
-            考试类型与杯赛合并维护，按试卷分类归类，最多 {{ MAX_DEPTH }} 级；停用 / 启用会同步整棵子树。
-          </span>
-        </template>
-        <template #right>
-          <button class="btn btn-ghost btn-sm" @click="expandAll">展开全部</button>
-          <button class="btn btn-ghost btn-sm" @click="collapseAll">收起全部</button>
-        </template>
-      </AppListToolbar>
-
-      <div class="tree-body">
-        <div v-if="rows.length === 0" class="tree-empty">暂无节点</div>
-        <div
-          v-for="row in rows"
-          :key="row.node.id"
-          class="tree-row"
-          :class="{ disabled: !row.node.enabled, hit: keyword.trim() !== '' && row.node.name.includes(keyword.trim()) }"
-          :style="{ paddingLeft: `${14 + row.depth * 26}px` }"
-        >
-          <button
-            class="chev-btn"
-            :class="{ invisible: !row.hasChildren }"
-            type="button"
-            @click="toggleCollapse(row.node.id)"
-          >
-            <AppIcon name="chevron-right" :size="14" />
-          </button>
-          <span class="node-name">{{ row.node.name }}</span>
-          <span class="tag" :class="row.node.kind === 'competition' ? 'tag-orange' : 'tag-gray'">
-            {{ KIND_TEXT[row.node.kind] }}
-          </span>
-          <span v-if="row.node.stage" class="tag tag-gray">仅{{ row.node.stage }}</span>
-          <span v-if="row.node.subjects?.length" class="tag tag-gray">{{ row.node.subjects.join('、') }}</span>
-          <span v-if="row.depth >= MAX_DEPTH - 1" class="tag tag-orange">第 {{ row.depth + 1 }} 级</span>
-          <span v-if="!row.node.enabled" class="tag tag-red">已停用</span>
-
-          <div class="row-ops">
-            <AppSwitch
-              :model-value="row.node.enabled"
-              @update:model-value="onToggle(row.node)"
-            />
-            <button class="mini-btn" type="button" @click="openCreate(row.node.id)">加子节点</button>
-            <!-- 分类根由系统固定：机构端是按这四个名字分组的，改名 / 删除会让子节点在机构端树上失联 -->
-            <template v-if="row.node.kind !== 'category'">
-              <button class="mini-btn" type="button" @click="openEdit(row.node)">编辑</button>
-              <button class="mini-btn danger" type="button" @click="onDelete(row.node)">删除</button>
-            </template>
-          </div>
-        </div>
-      </div>
+    <div class="panel tree-panel">
+      <AppTreeView
+        :nodes="filtered"
+        :max-depth="MAX_DEPTH"
+        search-placeholder="搜索名称，自动定位高亮"
+        empty-text="暂无节点"
+        root-label=""
+        :allow-root-level="false"
+        :show-move="true"
+        :row-tags="rowTags"
+        :row-config="rowConfig"
+        @add-child="(node) => openCreate(node.id)"
+        @edit="openEdit"
+        @remove="onDelete"
+        @toggle="onToggle"
+        @move="onMove"
+        @move-by="onMoveBy"
+      />
 
       <AppModal
         v-if="editing"
@@ -343,48 +279,11 @@ onMounted(load)
 </template>
 
 <style scoped>
-/* 筛选面板已提为列表面板的兄弟节点（自带边框圆角），工具条顶部留白由它自己给 */
-.panel > :deep(.list-toolbar) { padding: 14px 14px 0; }
-.panel-hint { font-size: 12.5px; color: var(--sub); }
-
-.tree-body { padding: 8px 10px 12px; }
-.tree-empty { text-align: center; color: var(--sub); font-size: 13px; padding: 40px 0; }
-.tree-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 12px;
-  border-radius: 10px;
-  font-size: 13.5px;
-  color: var(--ink);
-  transition: background 0.15s;
-}
-.tree-row:hover { background: #f7f9fd; }
-.tree-row.disabled .node-name { color: var(--sub); text-decoration: line-through; }
-.tree-row.hit { background: var(--brand-soft); }
-.chev-btn {
-  width: 22px;
-  height: 22px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--sub);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  transition: background 0.15s;
-}
-.chev-btn:hover { background: #e8ecf4; }
-.chev-btn.invisible { visibility: hidden; }
-.node-name { font-weight: 500; }
-.row-ops {
-  margin-left: auto;
-  display: none;
-  align-items: center;
-  gap: 2px;
-}
-.tree-row:hover .row-ops { display: inline-flex; }
+/* 页面整体不滚动，滚动收进树面板（与知识点树一致） */
+.page { height: calc(100vh - 62px - 44px); min-height: 520px; }
+.tree-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+/* 树组件（AppTreeView）的工具条留出与面板一致的内边距 */
+.tree-panel :deep(.list-toolbar) { padding: 14px 14px 0; }
 .subject-checks { display: flex; flex-wrap: wrap; gap: 6px 16px; }
 .check-item { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
 .form-err { font-size: 12px; color: var(--danger); margin: 4px 0; }
