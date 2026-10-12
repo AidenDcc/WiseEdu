@@ -149,9 +149,11 @@ export interface TenantDictItem {
   enabled: boolean
   /** 学科专属项（如「完形填空」只属于英语、「数学竞赛」只属于数学）；留空即全学科通用 */
   subjects?: string[]
-  /** grade = 该年级所属学段；examType = 适配学段。留空/缺省 = 不限（全学段通用） */
+  /** grade = 该年级所属学段（单值）。留空/缺省 = 不限 */
   stage?: string
-  /** 仅 examType：试卷分类（见 `PAPER_CATEGORIES`），组卷工作台试卷类型树的第一级 */
+  /** 仅 examType / competition（杯赛）：适配学段（多选）。留空/缺省 = 不限（全学段通用） */
+  stages?: string[]
+  /** 仅 examType：试卷分类（= 「考试类型」树一级节点的名字），组卷工作台试卷类型树的第一级 */
   paperCategory?: string
 }
 export function fetchTenantDict(type: string) {

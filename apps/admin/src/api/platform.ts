@@ -20,6 +20,8 @@ import type {
   PublicQuestion,
   TenantMenuItem,
   TextbookVersion,
+  TextbookVolume,
+  TextbookCatalogNode,
 } from '@aiteach/shared'
 
 function withQuery(url: string, params: Record<string, unknown>): string {
@@ -113,6 +115,30 @@ export function toggleTextbook(id: number) {
 
 export function deleteTextbook(id: number) {
   return request<null>('/admin/textbooks/delete', { method: 'POST', data: { id } })
+}
+
+/* ===== 教材分册（挂在教材版本下） ===== */
+
+export function fetchTextbookVolumes(textbookId?: number) {
+  const url = textbookId == null ? '/admin/textbook-volumes' : withQuery('/admin/textbook-volumes', { textbookId })
+  return request<TextbookVolume[]>(url)
+}
+
+export function saveTextbookVolume(data: Partial<TextbookVolume>) {
+  return request<TextbookVolume>('/admin/textbook-volumes/save', { method: 'POST', data })
+}
+
+/** 目录单独保存（新增 / 编辑分册表单里不维护目录） */
+export function saveTextbookCatalog(id: number, catalog: TextbookCatalogNode[]) {
+  return request<null>('/admin/textbook-volumes/catalog', { method: 'POST', data: { id, catalog } })
+}
+
+export function toggleTextbookVolume(id: number) {
+  return request<{ enabled: boolean }>('/admin/textbook-volumes/toggle', { method: 'POST', data: { id } })
+}
+
+export function deleteTextbookVolume(id: number) {
+  return request<null>('/admin/textbook-volumes/delete', { method: 'POST', data: { id } })
 }
 
 /* ===== AI 模型接入（FR-PT-017 ~ 019） ===== */

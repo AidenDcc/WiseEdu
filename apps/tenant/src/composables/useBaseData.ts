@@ -68,10 +68,13 @@ function stageOf(grade: string): string | null {
 /**
  * 考试类型按适配学段 / 学科收窄，与 `scopedQuestionTypes` 同范式（纯函数，便于单测与复用）：
  * 留空的维度视为「通用」，一律放行；`stage` / `subject` 为空串 = 当前作用域不限，也给全部。
+ *
+ * 适配学段是**多选**（管理端「考试类型」树里可同时勾初中 + 高中），所以判的是「交集非空」，
+ * 不是相等 —— 用 `item.stages`，`item.stage` 是年级那种单值语义。
  */
 export function scopedExamTypes(items: TenantDictItem[], stage: string, subject: string): TenantDictItem[] {
   return items
-    .filter((item) => !item.stage || !stage || item.stage === stage)
+    .filter((item) => !item.stages?.length || !stage || item.stages.includes(stage))
     .filter((item) => !subject || !item.subjects?.length || item.subjects.includes(subject))
 }
 

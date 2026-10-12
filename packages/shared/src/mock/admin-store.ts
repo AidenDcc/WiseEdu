@@ -12,6 +12,7 @@ import type {
   AiModel,
   AiModelType,
   AuditRecord,
+  CatalogKnowledge,
   DictItem,
   DictTypeKey,
   ErrorLog,
@@ -25,10 +26,11 @@ import type {
   PublicPaper,
   PublicQuestion,
   TextbookVersion,
+  TextbookVolume,
   TextbookCatalogNode,
   TenantMenuItem,
 } from '../api/models'
-import { PAPER_CATEGORIES } from '../api/models'
+import { MAX_CATALOG_KNOWLEDGE } from '../api/models'
 
 function nowStr(offsetHours = 0): string {
   return new Date(Date.now() + offsetHours * 3600_000).toISOString().slice(0, 19).replace('T', ' ')
@@ -187,30 +189,12 @@ export const dictStore: Record<DictTypeKey, DictItem[]> = {
     { id: 44, name: '较难', coefficient: 0.4, sort: 4, enabled: true, refCount: 6 },
     { id: 45, name: '困难', coefficient: 0.2, sort: 5, enabled: true, refCount: 3 },
   ],
-  /* 试卷分类（paperCategory）= 组卷工作台试卷页签左树的一级分组；见 models.PAPER_CATEGORIES。
-     存量这 10 条**刻意不设 stage / subjects**：它们的名字（期中考试、学业水平考试…）本身就跨学段，
-     锁死在一个学段上反而会让「高一用不了期中考试」这种假限制出现。留空 = 全学段全学科通用。 */
-  examType: [
-    { id: 51, name: '随堂练习', sort: 1, enabled: true, refCount: 8, paperCategory: '同步教学' },
-    { id: 52, name: '单元测试', sort: 2, enabled: true, refCount: 8, paperCategory: '同步教学' },
-    { id: 53, name: '期中考试', sort: 3, enabled: true, refCount: 9, paperCategory: '阶段测试' },
-    { id: 54, name: '期末考试', sort: 4, enabled: true, refCount: 9, paperCategory: '阶段测试' },
-    { id: 55, name: '模拟考试', sort: 5, enabled: true, refCount: 5, paperCategory: '阶段测试' },
-    { id: 56, name: '月考', sort: 6, enabled: true, refCount: 5, paperCategory: '阶段测试' },
-    { id: 57, name: '开学考', sort: 7, enabled: true, refCount: 3, paperCategory: '阶段测试' },
-    { id: 58, name: '学业水平考试', sort: 8, enabled: true, refCount: 2, paperCategory: '阶段测试' },
-    { id: 59, name: '高考真题', sort: 9, enabled: true, refCount: 4, paperCategory: '阶段测试' },
-    { id: 60, name: '专题训练', sort: 10, enabled: true, refCount: 3, paperCategory: '同步教学' },
-    /* 小升初 / 竞赛两类的样本：没有它们，树上的这两个分组就永远是空的。
-       学段 / 学科限定正是这两个分组的意义所在 —— 小学的「小升初真题」不该出现在高一树里。 */
-    { id: 61, name: '小升初真题', sort: 11, enabled: true, refCount: 2, paperCategory: '小升初', stage: '小学' },
-    { id: 62, name: '分班考试', sort: 12, enabled: true, refCount: 2, paperCategory: '小升初', stage: '小学' },
-    { id: 63, name: '数学竞赛', sort: 13, enabled: true, refCount: 3, paperCategory: '竞赛', subjects: ['数学'] },
-    { id: 64, name: '物理竞赛', sort: 14, enabled: true, refCount: 2, paperCategory: '竞赛', subjects: ['物理'] },
-  ],
-  /* 题库筛选维度。refCount 沿用本文件其余字典的「静态演示值」口径（>0 时仅可停用、不可删除），
-     故用递减值填出「每一项都被题引用过」的样子 */
-  competition: COMPETITIONS.map((name, i) => ({ id: 81 + i, name, sort: i + 1, enabled: true, refCount: 6 - i })),
+  /* 试卷分类（paperCategory）= 组卷工作台试卷页签左树的一级分组 = 考试类型树的一级节点名。
+     这两份字典**已经是只读投影**：唯一事实源是下面的 `examTypeNodes` 树（见 syncExamTypeDict），
+     种子在这里留空，模块初始化时按树前序遍历反向填充 —— 分类口径由管理端维护，代码不再持有。 */
+  examType: [],
+  /* 题库筛选维度，同样由树投影写入（杯赛节点 = `kind: 'competition'`） */
+  competition: [],
   /* refCount 取 `Math.max(1, …)` 而不是裸的递减式：地区有 35 项，越界会算出负数，
      字典管理页会显示成负的引用数 */
   region: REGIONS.map((name, i) => ({ id: 91 + i, name, code: REGION_CODES[name], sort: i + 1, enabled: true, refCount: Math.max(1, 12 - i) })),
@@ -369,77 +353,146 @@ export function deleteDictItem(type: DictTypeKey, id: number): void {
  * `dictStore.competition` 退化为它的投影（见 `syncExamTypeDict`）。机构端读字典
  * 仍走 `GET /tenant/dict` → `listDict` → `dictStore`，因此那边一行都不用改。
  *
- * 四个一级节点固定为 `PAPER_CATEGORIES`：机构端组卷「试卷类型树」正是按这四个名字
- * 分组的（见 tenant 的 PapersTab / ListView），根节点改名或删除会让其子节点在机构端
- * 树上失联，所以根不允许改名与删除。
+ * 一级节点（`parentId === null`）就是试卷分类：机构端组卷「试卷类型树」按它们的名字分组
+ * （见 tenant 的 PapersTab / ListView，那边用 `groupByPaperCategory` 现算）。分类口径
+ * 完全归管理端 —— 分组可以改名、增删、拖拽，机构端的树跟着变，代码里没有任何分类常量。
+ * 分组本身只是容器，不投影成可选的考试类型（见 `syncExamTypeDict`）。
  */
 export const MAX_EXAM_TYPE_DEPTH = 5
 
-/** 根节点 id 基数：与字典项 id（51~85）拉开，避免混淆 */
-const CATEGORY_ROOT_BASE = 100
+/**
+ * 考试类型编码前缀：按节点类型区分，拼三位流水号即为平台内唯一编码
+ * （与知识点编码 `MATH-001` 同口径）。
+ */
+const EXAM_TYPE_CODE_PREFIX: Record<ExamTypeNodeKind, string> = {
+  examType: 'ET',
+  competition: 'CUP',
+}
 
 /**
- * 树的种子：把原先平铺的两份字典折成树。
- * - 四个分类根（id 100~103）来自 `PAPER_CATEGORIES`
- * - examType 各条按 `paperCategory` 挂到对应根下，**原样带上 stage / subjects / refCount**
- *   （少了 stage / subjects，机构端「小升初真题只在小学生效」「数学竞赛只在数学生效」就废了）
- * - `COMPETITIONS` 5 条挂到「竞赛」根下，kind = 'competition'
+ * 自动生成考试类型编码：`前缀-三位序号`（如 ET-015、CUP-006）。
+ *
+ * 编码由平台自动维护、前端不可编辑（新增 / 编辑都一样），所以这里只负责「不重码」：
+ * 取同前缀已有编码的最大序号 + 1（与 `generateKnowledgeCode` 同一套写法）。
+ */
+function generateExamTypeCode(kind: ExamTypeNodeKind): string {
+  const prefix = EXAM_TYPE_CODE_PREFIX[kind]
+  const used = examTypeNodes
+    .filter((node) => node.code.startsWith(`${prefix}-`))
+    .map((node) => Number(node.code.slice(prefix.length + 1)))
+    .filter((value) => Number.isFinite(value))
+  const next = (used.length ? Math.max(...used) : 0) + 1
+  return `${prefix}-${String(next).padStart(3, '0')}`
+}
+
+/**
+ * 树的分组定义（一级 = 分组），声明式写出来 —— 分类是这个系统里唯一由平台定义的业务口径，
+ * 摊成「分组 → 节点」两层比从两份平铺字典反推更好读，也便于对着产品给的大纲核对。
+ *
+ * `kind` 缺省 = `examType`（考试），杯赛显式写 `competition`；它决定该节点投影回机构端
+ * 哪份只读字典（`examType` / `competition`）。`stages` / `subjects` 留空 = 该维度不限。
+ */
+interface ExamTypeSeedNode {
+  name: string
+  kind?: ExamTypeNodeKind
+  stages?: string[]
+  subjects?: string[]
+  children?: ExamTypeSeedNode[]
+}
+
+const EXAM_TYPE_SEED: ExamTypeSeedNode[] = [
+  {
+    name: '阶段考试',
+    children: [
+      { name: '开学考' },
+      { name: '月考' },
+      { name: '期中考试' },
+      { name: '期末考试' },
+      { name: '单元测试' },
+      { name: '学业水平考试' },
+    ],
+  },
+  {
+    name: '真题',
+    children: [
+      /* 小升初 = 小学口径，锁在小学学段，免得出现在高一的树里 */
+      { name: '小升初真题', stages: ['小学'] },
+      { name: '中考真题', stages: ['初中'] },
+      { name: '高考真题', stages: ['高中'] },
+      { name: '地方统考真题' },
+    ],
+  },
+  {
+    name: '模拟试卷',
+    children: [{ name: '一模' }, { name: '二模' }, { name: '三模' }, { name: '联考模拟' }, { name: '校本模拟' }],
+  },
+  {
+    name: '竞赛杯赛',
+    children: [
+      /* 学科竞赛（竞赛卷的考试类型）与杯赛（单独的杯赛维度）在机构端是两份字典，靠 kind 分流；
+         杯赛名的学科 / 学段限定照名字给（「全国高中数学联赛」不该出现在小学树里）。 */
+      { name: '数学竞赛', subjects: ['数学'] },
+      { name: '物理竞赛', subjects: ['物理'] },
+      { name: '华罗庚金杯', kind: 'competition', subjects: ['数学'] },
+      { name: '希望杯', kind: 'competition', subjects: ['数学'] },
+      { name: '全国高中数学联赛', kind: 'competition', stages: ['高中'], subjects: ['数学'] },
+      { name: '全国初中数学联赛', kind: 'competition', stages: ['初中'], subjects: ['数学'] },
+      { name: '全国中学生英语能力竞赛', kind: 'competition', subjects: ['英语'] },
+    ],
+  },
+  {
+    name: '专项练习',
+    children: [{ name: '专题训练' }, { name: '易错题' }, { name: '限时训练' }, { name: '课后作业' }],
+  },
+]
+
+/** 节点 id 基数：与字典项 id（学科 1~、年级 21~、难度 41~）错开一段，便于肉眼区分 */
+const EXAM_TYPE_ID_BASE = 50
+
+/**
+ * 树的种子：把上面的分组定义拍平成带 `parentId` 的扁平数组（`AppTreeView` 认的形状），
+ * 顺带发号：`id` 按前序自增、`code` 按类型前缀自增、`sort` 取同级序号。
+ *
+ * 引用数一律 0：考试类型不按 id 被引用 —— 题干与卷子存的是**名字**（`examType` 是字符串），
+ * 这里给不出真实引用数。给 0 意味着所有节点（含分组）都可以直接删除，与「分类口径完全归
+ * 管理端」一致；「引用数 > 0 只可停用」的守卫照旧作用于其它字典。
  */
 function seedExamTypeNodes(): ExamTypeNode[] {
-  const rootIdOf = (category: string | undefined): number | null => {
-    const index = PAPER_CATEGORIES.findIndex((item) => item === category)
-    return index < 0 ? null : CATEGORY_ROOT_BASE + index
+  const codeCursor = new Map<ExamTypeNodeKind, number>()
+  const nextCode = (kind: ExamTypeNodeKind): string => {
+    const seq = (codeCursor.get(kind) ?? 0) + 1
+    codeCursor.set(kind, seq)
+    return `${EXAM_TYPE_CODE_PREFIX[kind]}-${String(seq).padStart(3, '0')}`
   }
-  /* 同级序号 = 该父节点下已排的节点数 + 1（拖拽 / 上下移后由 moveExamTypeNode 重排） */
-  const sortCursor = new Map<number | null, number>()
-  const nextSort = (parentId: number | null): number => {
-    const value = (sortCursor.get(parentId) ?? 0) + 1
-    sortCursor.set(parentId, value)
-    return value
-  }
-  const roots: ExamTypeNode[] = PAPER_CATEGORIES.map((name, index) => ({
-    id: CATEGORY_ROOT_BASE + index,
-    parentId: null,
-    name,
-    kind: 'category',
-    enabled: true,
-    refCount: 0,
-    sort: index + 1,
-  }))
-  const examTypes: ExamTypeNode[] = dictStore.examType
-    .filter((item) => rootIdOf(item.paperCategory) !== null)
-    .map((item) => {
-      const parentId = rootIdOf(item.paperCategory)
-      return {
-        id: item.id,
+  let idCursor = EXAM_TYPE_ID_BASE
+  const out: ExamTypeNode[] = []
+  const walk = (list: ExamTypeSeedNode[], parentId: number | null) => {
+    list.forEach((item, index) => {
+      const kind: ExamTypeNodeKind = item.kind ?? 'examType'
+      const node: ExamTypeNode = {
+        id: ++idCursor,
         parentId,
         name: item.name,
-        kind: 'examType' as const,
-        enabled: item.enabled,
-        refCount: item.refCount,
-        sort: nextSort(parentId),
-        stage: item.stage,
+        code: nextCode(kind),
+        kind,
+        enabled: true,
+        refCount: 0,
+        sort: index + 1,
+        stages: item.stages?.length ? [...item.stages] : undefined,
         subjects: item.subjects?.length ? [...item.subjects] : undefined,
       }
+      out.push(node)
+      if (item.children?.length) walk(item.children, node.id)
     })
-  const cups: ExamTypeNode[] = dictStore.competition.map((item) => {
-    const parentId = rootIdOf('竞赛')
-    return {
-      id: item.id,
-      parentId,
-      name: item.name,
-      kind: 'competition' as const,
-      enabled: item.enabled,
-      refCount: item.refCount,
-      sort: nextSort(parentId),
-    }
-  })
-  return [...roots, ...examTypes, ...cups]
+  }
+  walk(EXAM_TYPE_SEED, null)
+  return out
 }
+
 
 export const examTypeNodes: ExamTypeNode[] = seedExamTypeNodes()
 
-/** 节点所属的试卷分类根名（不在任何分类根之下时返回 null） */
+/** 节点所属的**分组**名（即它所在的那棵子树的一级节点名）；一级节点自己没有分组，返回 null */
 function rootCategoryOf(id: number): string | null {
   let cursor = examTypeNodes.find((node) => node.id === id)
   const seen = new Set<number>()
@@ -449,11 +502,12 @@ function rootCategoryOf(id: number): string | null {
     const parentId = cursor.parentId
     cursor = examTypeNodes.find((node) => node.id === parentId)
   }
-  return cursor && cursor.kind === 'category' ? cursor.name : null
+  /* 走到一级节点即停：它的名字就是分组名（分组只作为容器，不再投影成考试类型） */
+  return cursor && cursor.parentId === null ? cursor.name : null
 }
 
-/** 节点深度（根 = 1） */
-function examTypeDepthOf(id: number): number {
+/** 节点深度（根 = 1）；传 null 表示「根层级」，深度即 1 */
+function examTypeDepthOf(id: number | null): number {
   let depth = 1
   let cursor = examTypeNodes.find((node) => node.id === id)
   const seen = new Set<number>()
@@ -510,13 +564,17 @@ function examTypeIsDescendant(rootId: number, candidateId: number): boolean {
 /**
  * 把树投影回两份只读字典（`dictStore.examType` / `dictStore.competition`）。
  *
+ * **一级节点（分组）不参与投影**：它是分类容器、本身不是可选的考试类型，投进去只会让
+ * 机构端的试卷类型树在自己的分组下多出一条同名叶子。只有它的后代才会成为可选类型，
+ * 并带上 `paperCategory = 分组名`（机构端据此分组，顺序 = 前序遍历顺序）。
+ *
  * 用 `splice` 原地替换而不是重新赋值：`dictStore` 是个 `const` 对象字面量，
  * 且机构端接口持有的是 `dictStore[type]` 的引用路径，换掉数组会让引用对不上。
  * 每次增删改后都调一次，两边就不会漂移。
  */
 function syncExamTypeDict(): void {
-  const ordered = preorderExamTypeNodes()
-  const examType: DictItem[] = ordered
+  const selectable = preorderExamTypeNodes().filter((node) => node.parentId !== null)
+  const examType: DictItem[] = selectable
     .filter((node) => node.kind === 'examType')
     .map((node, index) => ({
       id: node.id,
@@ -524,11 +582,11 @@ function syncExamTypeDict(): void {
       sort: index + 1,
       enabled: node.enabled,
       refCount: node.refCount,
-      stage: node.stage,
+      stages: node.stages?.length ? [...node.stages] : undefined,
       subjects: node.subjects?.length ? [...node.subjects] : undefined,
       paperCategory: rootCategoryOf(node.id) ?? undefined,
     }))
-  const competition: DictItem[] = ordered
+  const competition: DictItem[] = selectable
     .filter((node) => node.kind === 'competition')
     .map((node, index) => ({
       id: node.id,
@@ -536,18 +594,23 @@ function syncExamTypeDict(): void {
       sort: index + 1,
       enabled: node.enabled,
       refCount: node.refCount,
+      /* 杯赛同样带适配学段 / 学科：华杯赛那种「只在小学生效」的限制要有地方配置。
+         机构端目前只按名字用它们，字段多出来不会影响既有展示。 */
+      stages: node.stages?.length ? [...node.stages] : undefined,
+      subjects: node.subjects?.length ? [...node.subjects] : undefined,
     }))
   dictStore.examType.splice(0, dictStore.examType.length, ...examType)
   dictStore.competition.splice(0, dictStore.competition.length, ...competition)
 }
 
-/* 启动时先归一一次：种子是照 dictStore 反推的，命中同构数据；归一后树的顺序即机构端顺序，
-   不会出现「启动是旧顺序、改一次才变成树顺序」的分裂 */
+/* 启动时投影一次：`dictStore.examType` / `competition` 的种子是空的，全靠这一步填充；
+   顺便保证「启动态」与「改一次之后的态」完全一致（同一条代码路径） */
 syncExamTypeDict()
 
 export function listExamTypeNodes(): ExamTypeNode[] {
   return examTypeNodes.map((node) => ({
     ...node,
+    stages: node.stages ? [...node.stages] : undefined,
     subjects: node.subjects ? [...node.subjects] : undefined,
   }))
 }
@@ -559,8 +622,6 @@ export function saveExamTypeNode(input: Partial<ExamTypeNode>): ExamTypeNode {
   if (input.id) {
     const node = examTypeNodes.find((item) => item.id === input.id)
     if (!node) throw new Error('节点不存在')
-    /* 分类根是机构端分组口径的锚点，改名 / 改类型都会让子节点在机构端失联 */
-    if (node.kind === 'category') throw new Error('试卷分类根节点不可修改')
     if (
       examTypeNodes.some(
         (item) => item.id !== node.id && item.parentId === node.parentId && item.name === name,
@@ -570,23 +631,21 @@ export function saveExamTypeNode(input: Partial<ExamTypeNode>): ExamTypeNode {
     }
     node.name = name
     if (input.kind === 'examType' || input.kind === 'competition') node.kind = input.kind
-    if (node.kind === 'competition') {
-      node.stage = undefined
-      node.subjects = undefined
-    } else {
-      /* 显式传空串表示「改成不限」，所以用 `||` 而不是 `??` */
-      node.stage = input.stage || undefined
-      node.subjects = input.subjects?.length ? [...input.subjects] : undefined
-    }
+    /* 适配学段 / 学科对「考试」与「杯赛」都成立（杯赛也常有学段限制，如只在小学生效），
+       所以两种类型一视同仁地存；空数组 = 改成「不限」。编码由平台自动维护，编辑时忽略入参。 */
+    node.stages = input.stages?.length ? [...input.stages] : undefined
+    node.subjects = input.subjects?.length ? [...input.subjects] : undefined
     syncExamTypeDict()
-    return node
+    return { ...node }
   }
 
   const parentId = input.parentId ?? null
-  if (parentId === null) throw new Error('试卷分类根节点由系统固定，不能新增根节点')
-  const parent = examTypeNodes.find((item) => item.id === parentId)
-  if (!parent) throw new Error('父节点不存在')
-  if (examTypeDepthOf(parentId) >= MAX_EXAM_TYPE_DEPTH) {
+  if (parentId != null && !examTypeNodes.some((item) => item.id === parentId)) {
+    throw new Error('父节点不存在')
+  }
+  /* 根层级放行：新增的根节点就是新分组（分组与普通节点一视同仁），拖到根层级同理。
+     深度按父节点算，根自然是第 1 级。 */
+  if (parentId != null && examTypeDepthOf(parentId) >= MAX_EXAM_TYPE_DEPTH) {
     throw new Error(`考试类型树最多 ${MAX_EXAM_TYPE_DEPTH} 级，无法再添加子节点`)
   }
   if (examTypeNodes.some((item) => item.parentId === parentId && item.name === name)) {
@@ -597,16 +656,18 @@ export function saveExamTypeNode(input: Partial<ExamTypeNode>): ExamTypeNode {
     id: nextId(examTypeNodes),
     parentId,
     name,
+    /* 编码自动生成，前端不传也不可改 */
+    code: generateExamTypeCode(kind),
     kind,
     enabled: true,
     refCount: 0,
     sort: examTypeChildren(parentId).length + 1,
-    stage: kind === 'examType' ? input.stage || undefined : undefined,
-    subjects: kind === 'examType' && input.subjects?.length ? [...input.subjects] : undefined,
+    stages: input.stages?.length ? [...input.stages] : undefined,
+    subjects: input.subjects?.length ? [...input.subjects] : undefined,
   }
   examTypeNodes.push(node)
   syncExamTypeDict()
-  return node
+  return { ...node }
 }
 
 export interface ExamTypeMoveInput {
@@ -619,21 +680,20 @@ export interface ExamTypeMoveInput {
  * 树内移动 / 排序（拖拽与上下移共用）：把 `id` 挪到 `parentId` 下、`beforeId` 之前
  * （beforeId=null 时置底）。移动后重排同级 `sort`，并同步机构端字典顺序。
  *
- * 与 `moveKnowledgeNode` 同构，差别只在「分类根固定」：
- * - 分类根（id 100~103）不可移动，它们是机构端试卷类型树的分组锚点；
- * - 不允许落到根层级（parentId=null）——那会造出第二个非分类的根，机构端无法归类。
+ * 与 `moveKnowledgeNode` 同构。落到根层级（parentId=null）也放行 —— 拖成一级节点
+ * 就等于把一个节点提升成新分组，机构端的试卷类型树会随即多出一个分组。
+ * 唯一的结构性约束是深度上限与「不可移进自己的子树」。
  */
 export function moveExamTypeNode(input: ExamTypeMoveInput): ExamTypeNode[] {
   const node = examTypeNodes.find((item) => item.id === input.id)
   if (!node) throw new Error('节点不存在')
-  if (node.kind === 'category') throw new Error('试卷分类根节点不可移动')
   if (input.parentId === node.id) throw new Error('不可将节点移动到其自身下')
   if (input.parentId != null && examTypeIsDescendant(node.id, input.parentId)) {
     throw new Error('不可将节点移动到其子节点下')
   }
-  if (input.parentId == null) throw new Error('试卷分类根节点由系统固定，不能拖到根层级')
-  const parent = examTypeNodes.find((item) => item.id === input.parentId)
-  if (!parent) throw new Error('父节点不存在')
+  if (input.parentId != null && !examTypeNodes.some((item) => item.id === input.parentId)) {
+    throw new Error('父节点不存在')
+  }
   const before = input.beforeId == null ? null : examTypeNodes.find((item) => item.id === input.beforeId)
   if (before?.id === node.id) return listExamTypeNodes()
 
@@ -682,7 +742,6 @@ export function toggleExamTypeNode(id: number): boolean {
 export function deleteExamTypeNode(id: number): void {
   const node = examTypeNodes.find((item) => item.id === id)
   if (!node) throw new Error('节点不存在')
-  if (node.kind === 'category') throw new Error('试卷分类根节点不可删除')
   if (examTypeNodes.some((item) => item.parentId === id)) throw new Error('请先删除或移走子节点')
   if (node.refCount > 0) throw new Error(`该项已被 ${node.refCount} 道题目引用，仅可停用`)
   examTypeNodes.splice(examTypeNodes.indexOf(node), 1)
@@ -1196,83 +1255,171 @@ export function deleteKnowledgeNode(id: number): void {
   normalizeKnowledgeSort(node.parentId, node.stage, node.subject)
 }
 
-/* ================= 教材版本 ================= */
+/* ================= 教材版本 / 教材分册 ================= */
 
-/** 生成一份示例目录树（章 → 节），供种子数据使用 */
-function sampleCatalog(chapters: string[]): TextbookCatalogNode[] {
+/**
+ * 生成一份示例目录树（章 → 节），供种子数据使用。
+ *
+ * 顺带给每章挂 1~2 个「同学段 + 同学科」的知识点（取知识点树里最前面的几个），
+ * 让「章节 ↔ 知识点」关联在演示数据里是看得见的，而不是一片空白。
+ */
+function sampleCatalog(chapters: string[], stage: string, subject: string): TextbookCatalogNode[] {
+  /* 该学段 + 学科可用的知识点池（数组顺序 = 知识点树先序） */
+  const pool = knowledgeNodes.filter((node) => node.stage === stage && node.subject === subject)
+  const knowledgeOf = (index: number): CatalogKnowledge[] =>
+    pool.length === 0
+      ? []
+      : [pool[(index * 2) % pool.length], pool[(index * 2 + 1) % pool.length]].map((node) => ({ id: node.id, name: node.name }))
   return chapters.map((chapter, ci) => ({
     id: `c${ci + 1}`,
     title: chapter,
     enabled: true,
+    knowledge: knowledgeOf(ci),
     children: [
-      { id: `c${ci + 1}-1`, title: `${chapter}（第 1 节）`, enabled: true },
+      { id: `c${ci + 1}-1`, title: `${chapter}（第 1 节）`, enabled: true, knowledge: knowledgeOf(ci + 1) },
       { id: `c${ci + 1}-2`, title: `${chapter}（第 2 节）`, enabled: true },
     ],
   }))
 }
 
+/**
+ * 教材版本种子：只描述「学段 + 学科 + 版本名称 + 出版社」，年级 / 学期落到分册上。
+ * `stage` 与基础字典的学段口径一致（年级字典的 `stage`）。
+ */
 export const textbooks: TextbookVersion[] = [
-  { id: 1, subject: '数学', name: '人教版', publisher: '人民教育出版社', hue: 212, sort: 1, enabled: true, grade: '高一', term: '上学期', region: ['全国'], years: ['2026', '2025', '2024'], catalog: sampleCatalog(['集合与函数概念', '基本初等函数', '函数的应用']) },
-  { id: 2, subject: '数学', name: '北师大版', publisher: '北京师范大学出版社', hue: 268, sort: 2, enabled: true, grade: '高一', term: '上学期', region: ['北京', '天津'], years: ['2026', '2025'], catalog: sampleCatalog(['生活中的数学', '集合', '函数']) },
-  { id: 3, subject: '数学', name: '苏教版', publisher: '江苏凤凰教育出版社', hue: 152, sort: 3, enabled: true, grade: '高一', term: '下学期', region: ['江苏', '浙江'], years: ['2025', '2024', '2023'] },
-  { id: 4, subject: '语文', name: '人教版', publisher: '人民教育出版社', hue: 22, sort: 4, enabled: true, grade: '高一', term: '上学期', region: ['全国'], years: ['2026', '2025', '2024', '2023'], catalog: sampleCatalog(['现代诗歌诵读', '古代记叙散文', '写人记事散文']) },
-  { id: 5, subject: '语文', name: '部编版', publisher: '人民教育出版社', hue: 330, sort: 5, enabled: true, grade: '高一', term: '上学期', region: ['全国'], years: ['2026', '2025'] },
-  { id: 6, subject: '英语', name: '外研版', publisher: '外语教学与研究出版社', hue: 190, sort: 6, enabled: true, grade: '高一', term: '上学期', region: ['全国'], years: ['2026', '2025', '2024'], catalog: sampleCatalog(['My First Day at Senior High', 'My New Teachers', 'My First Ride on a Train']) },
-  { id: 7, subject: '物理', name: '沪科版', publisher: '上海科学技术出版社', hue: 246, sort: 7, enabled: true, grade: '高一', term: '上学期', region: ['上海'], years: ['2025', '2024'] },
-  { id: 8, subject: '数学', name: '人教A版', publisher: '人民教育出版社', hue: 220, sort: 8, enabled: true, grade: '高二', term: '上学期', region: ['全国'], years: ['2026', '2025'] },
-  { id: 9, subject: '数学', name: '苏科版', publisher: '江苏凤凰科学技术出版社', hue: 164, sort: 9, enabled: true, grade: '八年级', term: '上学期', region: ['江苏'], years: ['2024', '2023', '2022', '更久之前'] },
-  { id: 10, subject: '英语', name: '人教版', publisher: '人民教育出版社', hue: 198, sort: 10, enabled: true, grade: '高一', term: '下学期', region: ['全国'], years: ['2026', '2025', '2024'] },
-  { id: 11, subject: '英语', name: '人教新起点', publisher: '人民教育出版社', hue: 206, sort: 11, enabled: true, grade: '一年级', term: '上学期', region: ['全国'], years: ['2025', '2024', '2023'] },
-  { id: 12, subject: '英语', name: '人教PEP', publisher: '人民教育出版社', hue: 214, sort: 12, enabled: true, grade: '三年级', term: '上学期', region: ['全国'], years: ['2026', '2025', '2024', '2023'] },
-  { id: 13, subject: '物理', name: '人教版', publisher: '人民教育出版社', hue: 254, sort: 13, enabled: true, grade: '高二', term: '上学期', region: ['全国'], years: ['2025', '2024'] },
-  { id: 14, subject: '化学', name: '人教版', publisher: '人民教育出版社', hue: 96, sort: 14, enabled: true, grade: '高一', term: '上学期', region: ['全国'], years: ['2026', '2025'] },
-  { id: 15, subject: '化学', name: '鲁科版', publisher: '山东科学技术出版社', hue: 112, sort: 15, enabled: true, grade: '高一', term: '下学期', region: ['山东'], years: ['2024', '2023'] },
-  { id: 16, subject: '化学', name: '鲁教版', publisher: '山东教育出版社', hue: 128, sort: 16, enabled: true, grade: '九年级', term: '上学期', region: ['山东'], years: ['2023', '2022', '更久之前'] },
-  { id: 17, subject: '生物', name: '人教版', publisher: '人民教育出版社', hue: 300, sort: 17, enabled: true, grade: '高一', term: '上学期', region: ['全国'], years: ['2026', '2025', '2024'] },
-  { id: 18, subject: '生物', name: '苏教版', publisher: '江苏凤凰教育出版社', hue: 318, sort: 18, enabled: true, grade: '高一', term: '下学期', region: ['江苏'], years: ['2025', '2024'] },
-  { id: 19, subject: '政治', name: '人教版', publisher: '人民教育出版社', hue: 4, sort: 19, enabled: true, grade: '高一', term: '上学期', region: ['全国'], years: ['2026', '2025'] },
-  { id: 20, subject: '历史', name: '部编版', publisher: '人民教育出版社', hue: 38, sort: 20, enabled: true, grade: '高一', term: '上学期', region: ['全国'], years: ['2026', '2025', '2024', '2023', '2022'] },
-  { id: 21, subject: '地理', name: '人教版', publisher: '人民教育出版社', hue: 136, sort: 21, enabled: true, grade: '高一', term: '上学期', region: ['全国'], years: ['2026', '2025'] },
-  { id: 22, subject: '地理', name: '湘教版', publisher: '湖南教育出版社', hue: 150, sort: 22, enabled: true, grade: '高一', term: '下学期', region: ['湖南'], years: ['2025', '2024', '更久之前'] },
+  { id: 1, stage: '高中', subject: '数学', name: '人教版', publisher: '人民教育出版社', hue: 212, sort: 1, enabled: true, region: ['全国'], years: ['2026', '2025', '2024'] },
+  { id: 2, stage: '高中', subject: '数学', name: '北师大版', publisher: '北京师范大学出版社', hue: 268, sort: 2, enabled: true, region: ['北京', '天津'], years: ['2026', '2025'] },
+  { id: 3, stage: '高中', subject: '数学', name: '苏教版', publisher: '江苏凤凰教育出版社', hue: 152, sort: 3, enabled: true, region: ['江苏', '浙江'], years: ['2025', '2024', '2023'] },
+  { id: 4, stage: '高中', subject: '语文', name: '人教版', publisher: '人民教育出版社', hue: 22, sort: 4, enabled: true, region: ['全国'], years: ['2026', '2025', '2024', '2023'] },
+  { id: 5, stage: '高中', subject: '语文', name: '部编版', publisher: '人民教育出版社', hue: 330, sort: 5, enabled: true, region: ['全国'], years: ['2026', '2025'] },
+  { id: 6, stage: '高中', subject: '英语', name: '外研版', publisher: '外语教学与研究出版社', hue: 190, sort: 6, enabled: true, region: ['全国'], years: ['2026', '2025', '2024'] },
+  { id: 7, stage: '高中', subject: '物理', name: '沪科版', publisher: '上海科学技术出版社', hue: 246, sort: 7, enabled: true, region: ['上海'], years: ['2025', '2024'] },
+  { id: 8, stage: '高中', subject: '数学', name: '人教A版', publisher: '人民教育出版社', hue: 220, sort: 8, enabled: true, region: ['全国'], years: ['2026', '2025'] },
+  { id: 9, stage: '初中', subject: '数学', name: '苏科版', publisher: '江苏凤凰科学技术出版社', hue: 164, sort: 9, enabled: true, region: ['江苏'], years: ['2024', '2023', '2022', '更久之前'] },
+  { id: 10, stage: '高中', subject: '英语', name: '人教版', publisher: '人民教育出版社', hue: 198, sort: 10, enabled: true, region: ['全国'], years: ['2026', '2025', '2024'] },
+  { id: 11, stage: '小学', subject: '英语', name: '人教新起点', publisher: '人民教育出版社', hue: 206, sort: 11, enabled: true, region: ['全国'], years: ['2025', '2024', '2023'] },
+  { id: 12, stage: '小学', subject: '英语', name: '人教PEP', publisher: '人民教育出版社', hue: 214, sort: 12, enabled: true, region: ['全国'], years: ['2026', '2025', '2024', '2023'] },
+  { id: 13, stage: '高中', subject: '物理', name: '人教版', publisher: '人民教育出版社', hue: 254, sort: 13, enabled: true, region: ['全国'], years: ['2025', '2024'] },
+  { id: 14, stage: '高中', subject: '化学', name: '人教版', publisher: '人民教育出版社', hue: 96, sort: 14, enabled: true, region: ['全国'], years: ['2026', '2025'] },
+  { id: 15, stage: '高中', subject: '化学', name: '鲁科版', publisher: '山东科学技术出版社', hue: 112, sort: 15, enabled: true, region: ['山东'], years: ['2024', '2023'] },
+  { id: 16, stage: '初中', subject: '化学', name: '鲁教版', publisher: '山东教育出版社', hue: 128, sort: 16, enabled: true, region: ['山东'], years: ['2023', '2022', '更久之前'] },
+  { id: 17, stage: '高中', subject: '生物', name: '人教版', publisher: '人民教育出版社', hue: 300, sort: 17, enabled: true, region: ['全国'], years: ['2026', '2025', '2024'] },
+  { id: 18, stage: '高中', subject: '生物', name: '苏教版', publisher: '江苏凤凰教育出版社', hue: 318, sort: 18, enabled: true, region: ['江苏'], years: ['2025', '2024'] },
+  { id: 19, stage: '高中', subject: '政治', name: '人教版', publisher: '人民教育出版社', hue: 4, sort: 19, enabled: true, region: ['全国'], years: ['2026', '2025'] },
+  { id: 20, stage: '高中', subject: '历史', name: '部编版', publisher: '人民教育出版社', hue: 38, sort: 20, enabled: true, region: ['全国'], years: ['2026', '2025', '2024', '2023', '2022'] },
+  { id: 21, stage: '高中', subject: '地理', name: '人教版', publisher: '人民教育出版社', hue: 136, sort: 21, enabled: true, region: ['全国'], years: ['2026', '2025'] },
+  { id: 22, stage: '高中', subject: '地理', name: '湘教版', publisher: '湖南教育出版社', hue: 150, sort: 22, enabled: true, region: ['湖南'], years: ['2025', '2024', '更久之前'] },
 ]
+
+/**
+ * 每个学段默认铺的分册（年级 + 学期）。
+ *
+ * 分册种子按版本所属学段套用这份模板 —— 手写 22 个版本 × 每版 3 册太啰嗦，
+ * 而「学段不同、可用的年级不同」正是这份数据真正要表达的东西。
+ */
+const VOLUME_TEMPLATE: Record<string, Array<{ grade: string; term: string }>> = {
+  小学: [
+    { grade: '一年级', term: '上学期' },
+    { grade: '一年级', term: '下学期' },
+    { grade: '三年级', term: '上学期' },
+  ],
+  初中: [
+    { grade: '八年级', term: '上学期' },
+    { grade: '八年级', term: '下学期' },
+    { grade: '九年级', term: '上学期' },
+  ],
+  高中: [
+    { grade: '高一', term: '上学期' },
+    { grade: '高一', term: '下学期' },
+    { grade: '高二', term: '上学期' },
+  ],
+}
+
+/** 由年级 + 学期拼一个默认册别名（新增分册时也用它预填） */
+export function defaultVolumeAlias(grade: string, term: string): string {
+  return `${grade}${term === '下学期' ? '下册' : '上册'}`
+}
+
+/** 适配学年候选取值域：近 5 年 + 「更久之前」（与搜索条件里的「年份」同一套取值） */
+function volumeYearOptions(): string[] {
+  const year = new Date().getFullYear()
+  const recent = Array.from({ length: 5 }, (_, i) => String(year - i))
+  return [...recent, '更久之前']
+}
+
+/**
+ * 教材分册种子：按版本学段套模板生成，部分册次带目录、部分停用以演示状态列。
+ */
+function seedTextbookVolumes(): TextbookVolume[] {
+  const list: TextbookVolume[] = []
+  let id = 0
+  textbooks.forEach((book, bookIndex) => {
+    const template = VOLUME_TEMPLATE[book.stage] ?? VOLUME_TEMPLATE.高中
+    const years = volumeYearOptions()
+    template.forEach((item, index) => {
+      id += 1
+      /* 每 4 册停用一册（`(bookIndex + index) % 4 === 3`）：状态列不至于全绿 */
+      const enabled = (bookIndex + index) % 4 !== 3
+      /* 只给前两个版本挂目录，避免种子数据过大；其余册留空、由管理端自己录 */
+      const withCatalog = bookIndex < 2 && index === 0
+      list.push({
+        id,
+        textbookId: book.id,
+        alias: defaultVolumeAlias(item.grade, item.term),
+        grade: item.grade,
+        term: item.term,
+        year: years[index % years.length],
+        enabled,
+        sort: index + 1,
+        ...(withCatalog
+          ? { catalog: sampleCatalog([`第 1 章 ${book.subject}入门`, `第 2 章 基础概念`, `第 3 章 综合应用`], book.stage, book.subject) }
+          : {}),
+      })
+    })
+  })
+  return list
+}
+
+export const textbookVolumes: TextbookVolume[] = seedTextbookVolumes()
 
 export function listTextbooks(): TextbookVersion[] {
   return [...textbooks].sort((a, b) => a.sort - b.sort)
 }
 
 export function saveTextbook(input: Partial<TextbookVersion>): TextbookVersion {
+  const name = (input.name ?? '').trim()
+  if (!name) throw new Error('版本名称不能为空')
+  const stage = input.stage ?? ''
+  const subject = input.subject ?? ''
+  if (!stage || !subject) throw new Error('学段与学科不能为空')
+  const duplicated = (id?: number) =>
+    textbooks.some((row) => row.id !== id && row.stage === stage && row.subject === subject && row.name === name)
   if (input.id) {
     const item = textbooks.find((row) => row.id === input.id)
     if (!item) throw new Error('教材版本不存在')
-    if (
-      textbooks.some(
-        (row) => row.id !== item.id && row.subject === input.subject && row.name === input.name,
-      )
-    ) {
-      throw new Error('该学科下已存在同名版本')
-    }
-    Object.assign(item, input)
+    if (duplicated(item.id)) throw new Error('该学段 + 学科下已存在同名版本')
+    Object.assign(item, {
+      stage,
+      subject,
+      name,
+      publisher: (input.publisher ?? item.publisher).trim(),
+      region: input.region,
+      years: input.years,
+    })
     return item
   }
-  if (textbooks.some((row) => row.subject === input.subject && row.name === input.name)) {
-    throw new Error('该学科下已存在同名版本')
-  }
+  if (duplicated()) throw new Error('该学段 + 学科下已存在同名版本')
   const item: TextbookVersion = {
     id: nextId(textbooks),
-    subject: input.subject ?? '数学',
-    name: input.name ?? '',
-    publisher: input.publisher ?? '',
+    stage,
+    subject,
+    name,
+    publisher: (input.publisher ?? '').trim(),
     hue: Math.floor(Math.random() * 360),
     sort: input.sort ?? textbooks.length + 1,
     enabled: true,
-    grade: input.grade,
-    term: input.term,
     region: input.region,
     years: input.years,
-    cover: input.cover,
-    fileUrl: input.fileUrl,
-    fileName: input.fileName,
-    catalog: input.catalog ?? [],
   }
   textbooks.push(item)
   return item
@@ -1286,10 +1433,104 @@ export function toggleTextbook(id: number): boolean {
 }
 
 export function deleteTextbook(id: number): void {
-  const item = textbooks.find((row) => row.id === id)
-  if (!item) throw new Error('教材版本不存在')
   const index = textbooks.findIndex((row) => row.id === id)
+  if (index < 0) throw new Error('教材版本不存在')
+  /* 版本没了，挂在它下面的分册一并清掉 —— 留下孤儿分册在右侧面板里谁也找不到 */
+  for (let i = textbookVolumes.length - 1; i >= 0; i--) {
+    if (textbookVolumes[i].textbookId === id) textbookVolumes.splice(i, 1)
+  }
   textbooks.splice(index, 1)
+}
+
+export function listTextbookVolumes(textbookId?: number): TextbookVolume[] {
+  const list = textbookId == null ? textbookVolumes : textbookVolumes.filter((row) => row.textbookId === textbookId)
+  return [...list].sort((a, b) => a.sort - b.sort)
+}
+
+export function saveTextbookVolume(input: Partial<TextbookVolume>): TextbookVolume {
+  const textbookId = Number(input.textbookId)
+  if (!textbooks.some((row) => row.id === textbookId)) throw new Error('教材版本不存在')
+  const alias = (input.alias ?? '').trim()
+  if (!alias) throw new Error('册别名不能为空')
+  const duplicated = (id?: number) =>
+    textbookVolumes.some((row) => row.id !== id && row.textbookId === textbookId && row.alias === alias)
+  if (input.id) {
+    const item = textbookVolumes.find((row) => row.id === input.id)
+    if (!item) throw new Error('教材分册不存在')
+    if (duplicated(item.id)) throw new Error('该版本下已存在同名分册')
+    Object.assign(item, {
+      alias,
+      grade: input.grade ?? item.grade,
+      term: input.term ?? item.term,
+      year: input.year,
+      cover: input.cover,
+      fileUrl: input.fileUrl,
+      fileName: input.fileName,
+    })
+    return item
+  }
+  if (duplicated()) throw new Error('该版本下已存在同名分册')
+  const item: TextbookVolume = {
+    id: nextId(textbookVolumes),
+    textbookId,
+    alias,
+    grade: input.grade ?? '',
+    term: input.term ?? '',
+    year: input.year,
+    cover: input.cover,
+    fileUrl: input.fileUrl,
+    fileName: input.fileName,
+    catalog: input.catalog ?? [],
+    enabled: true,
+    sort: input.sort ?? textbookVolumes.filter((row) => row.textbookId === textbookId).length + 1,
+  }
+  textbookVolumes.push(item)
+  return item
+}
+
+/**
+ * 目录入库前归一：关联知识点**去重 + 截到上限**，避免绕过 UI 写入超量数据。
+ *
+ * 只做「不会改变用户意图」的整理（同 id 去重、超出上限截断），不校验名称
+ * ——名称是展示用快照，以知识点树为准。
+ */
+function normalizeCatalogNodes(nodes: TextbookCatalogNode[]): TextbookCatalogNode[] {
+  return nodes.map((node) => {
+    const seen = new Set<number>()
+    const knowledge = (node.knowledge ?? [])
+      .filter((item) => {
+        if (seen.has(item.id)) return false
+        seen.add(item.id)
+        return true
+      })
+      .slice(0, MAX_CATALOG_KNOWLEDGE)
+    const next: TextbookCatalogNode = { ...node }
+    if (knowledge.length) next.knowledge = knowledge
+    else delete next.knowledge
+    if (node.children?.length) next.children = normalizeCatalogNodes(node.children)
+    else delete next.children
+    return next
+  })
+}
+
+/** 目录单独保存：只改目录、不碰其它字段（新增分册表单里不维护目录） */
+export function saveTextbookCatalog(id: number, catalog: TextbookCatalogNode[]): void {
+  const item = textbookVolumes.find((row) => row.id === id)
+  if (!item) throw new Error('教材分册不存在')
+  item.catalog = normalizeCatalogNodes(catalog ?? [])
+}
+
+export function toggleTextbookVolume(id: number): boolean {
+  const item = textbookVolumes.find((row) => row.id === id)
+  if (!item) throw new Error('教材分册不存在')
+  item.enabled = !item.enabled
+  return item.enabled
+}
+
+export function deleteTextbookVolume(id: number): void {
+  const index = textbookVolumes.findIndex((row) => row.id === id)
+  if (index < 0) throw new Error('教材分册不存在')
+  textbookVolumes.splice(index, 1)
 }
 
 /* ================= AI 模型接入（FR-PT-017 ~ 019） ================= */

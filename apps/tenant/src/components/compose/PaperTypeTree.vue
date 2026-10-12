@@ -17,7 +17,9 @@ export interface PaperTypeGroup {
 
 <script setup lang="ts">
 /**
- * 试卷类型树：分类（同步教学 / 阶段测试 / 小升初 / 竞赛）→ 考试类型。
+ * 试卷类型树：分组（阶段考试 / 真题 / 模拟试卷 / 竞赛杯赛 / 专项练习…）→ 考试类型。
+ * 分组名与顺序由平台管理端「考试类型」树的一级节点决定（见 `groupByPaperCategory`），
+ * 这里只渲染 —— 分组改名 / 增删都不会让本组件需要改动。
  * 两处在用 —— 组卷工作台「试卷」页签（叫「试卷类型」）与试卷库（叫「考试类型」，见 `title`）。
  *
  * 两级都是**扁平渲染**（一行一个按钮）而不是嵌套 `<ul>`：折叠只是控制叶子行要不要生成，
@@ -79,8 +81,8 @@ function isGroupActive(group: PaperTypeGroup): boolean {
 /**
  * 分类行是否**显示**选中态 = 整组选中，且该分类下确实有多个可选类型。
  *
- * 单叶分类（「竞赛」下只有「数学竞赛」）不算：那一下点中的就是那一片叶子，
- * 高亮跑到父级上等于把用户点的那一行藏起来。
+ * 只剩一个可选类型的分组不算（如按学科收窄后「竞赛杯赛」下只剩「数学竞赛」）：
+ * 那一下点中的就是那一片叶子，高亮跑到父级上等于把用户点的那一行藏起来。
  */
 function isGroupHighlighted(group: PaperTypeGroup): boolean {
   return group.items.length > 1 && isGroupActive(group)
@@ -92,7 +94,7 @@ function groupOfLeaf(name: string): PaperTypeGroup | undefined {
 
 /**
  * 叶子行是否**显示**选中态：自己选中，且不是「整组一起选中」里的一员 ——
- * 点父级选中整个分类时，子级不跟着逐个点亮（否则一行「阶段测试」下面亮着五个子项，
+ * 点父级选中整个分类时，子级不跟着逐个点亮（否则一行分组下面亮着五个子项，
  * 看上去像选了五个东西而不是一个分类），只由父级那一行代表。
  */
 function isLeafHighlighted(name: string): boolean {

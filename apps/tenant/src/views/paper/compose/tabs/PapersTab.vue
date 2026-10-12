@@ -26,7 +26,7 @@
  * 只看 `status === 'approved'` 的卷，与试卷库同口径 —— 草稿 / 待审的卷不该出现在「浏览现成卷」的场景里。
  */
 import { computed, defineAsyncComponent, onMounted, reactive, ref, watch } from 'vue'
-import { AppFilterPanel, PAPER_CATEGORIES, PAPER_SOURCE_OPTIONS } from '@aiteach/shared'
+import { AppFilterPanel, PAPER_SOURCE_OPTIONS, groupByPaperCategory } from '@aiteach/shared'
 import type { FilterRowDef, OrgPaper } from '@aiteach/shared'
 import PaperListPanel from '@/components/paper/PaperListPanel.vue'
 import PaperPreviewModal from '@/components/paper/PaperPreviewModal.vue'
@@ -74,17 +74,16 @@ const poolByExamType = computed(() => {
   return map
 })
 
-/* ===== 左树：分类 → 考试类型 =====
- * 分类与归属都来自平台管理端「考试类型」树的配置（`paperCategory` 字段，由树的一级节点给出），
- * 这里只按 `PAPER_CATEGORIES` 的顺序归组；没配分类的历史项不进树（但仍可用于筛选）。 */
+/* ===== 左树：分组 → 考试类型 =====
+ * 分组与归属都来自平台管理端「考试类型」树（分组名经 `paperCategory` 投影下来），这里只按
+ * 字典里**首次出现的顺序**归组 —— 那份顺序就是管理端树上前序遍历的顺序。平台上给分组改名 /
+ * 增删，这里的树跟着变，代码里没有任何分类常量；没配分类的历史项不进树（但仍可用于筛选）。 */
 const scopedItems = computed(() => scopedExamTypes(examTypeItems.value, stageOf(props.filter.grade) ?? '', props.filter.subject))
 
 const groups = computed<PaperTypeGroup[]>(() =>
-  PAPER_CATEGORIES.map((name) => {
-    const items = scopedItems.value
-      .filter((item) => item.paperCategory === name)
-      .map((item) => ({ name: item.name, count: poolByExamType.value.get(item.name) ?? 0 }))
-    return { name, items, count: items.reduce((sum, item) => sum + item.count, 0) }
+  groupByPaperCategory(scopedItems.value).map((group) => {
+    const items = group.items.map((item) => ({ name: item.name, count: poolByExamType.value.get(item.name) ?? 0 }))
+    return { name: group.name, items, count: items.reduce((sum, item) => sum + item.count, 0) }
   }),
 )
 

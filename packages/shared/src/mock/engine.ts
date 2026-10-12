@@ -1,4 +1,5 @@
 import type { HttpMethod } from '../request/types'
+import { ApiError } from '../request/api-error'
 import { persistMockState } from './persist'
 
 export interface MockContext {
@@ -50,9 +51,7 @@ export async function dispatchMock<T>(
   const route = matchMockRoute(method, path)
   if (!route) {
     console.warn(`[mock] 未注册的接口：${method.toUpperCase()} ${path}`)
-    throw Object.assign(new Error(`Mock 未注册：${method.toUpperCase()} ${path}`), {
-      code: 501,
-    })
+    throw new ApiError(501, `Mock 未注册：${method.toUpperCase()} ${path}`)
   }
 
   const delay = route.delay ?? 200 + Math.random() * 400
@@ -108,7 +107,12 @@ export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/** Mock handler 内抛出的「业务失败」：最终以 { code, message } 形式返回给前端 */
+/** Mock handler 内抛出的「业务失败」。
+ *
+ * 抛 `ApiError` 而不是裸 `Error`：UI 层统一写的是
+ * `error instanceof ApiError ? error.message : '操作失败'`，裸 Error 走到那里只会显示
+ * 兜底文案 —— 「同级下已存在同名项」「请先删除或移走子节点」这些**可行动的原因**全丢了。
+ * 与真实后端（`remoteRequest` 抛的也是 ApiError）保持同型，两条分支的错误处理才一致。 */
 export function mockFail(code: number, message: string): never {
-  throw Object.assign(new Error(message), { code, __mockFail: true })
+  throw new ApiError(code, message)
 }

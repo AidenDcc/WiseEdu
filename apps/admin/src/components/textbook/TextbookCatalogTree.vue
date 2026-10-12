@@ -6,14 +6,21 @@
  * 数组；这里负责两种形态的互转，并把「目录只能拖拽排序、不要上移/下移按钮」等差异
  * 通过 props 表达出来。渲染、拖拽、折叠、搜索逻辑全部复用同一个组件。
  *
+ * 三处目录特有的表达：
+ * - 行内操作走**图标**（`iconActions`）：一行有「关联知识点 / 加子节点 / 编辑 / 停用 / 删除」，
+ *   文字按钮会把行撑爆；
+ * - 章节可**关联知识点**（`showAttach` + 弹窗），最多 `MAX_CATALOG_KNOWLEDGE` 个；
+ * - 名称后显示已关联的知识点名称，超出省略、悬浮看全文（`rowNote`）。
+ *
  * 受控组件：内部持有深拷贝，任何增删改都写回 `modelValue` 并向上 `update:modelValue`。
  * 只用于右侧抽屉（目录单独维护），不再内联进「新增 / 编辑版本」表单。
  */
 import { computed, ref, watch } from 'vue'
 import { AppModal, appConfirm, showToast } from '@aiteach/shared'
-import type { TextbookCatalogNode } from '@aiteach/shared'
+import type { CatalogKnowledge, TextbookCatalogNode } from '@aiteach/shared'
 import AppTreeView from '@/components/tree/AppTreeView.vue'
 import { childrenOf, pathText } from '@/components/tree/tree-utils'
+import CatalogKnowledgeModal from './CatalogKnowledgeModal.vue'
 
 /** 层级上限：与知识点树 / 考试类型树同口径（最多 5 级） */
 const MAX_DEPTH = 5
@@ -25,15 +32,29 @@ interface CatalogFlatNode {
   name: string
   enabled: boolean
   sort: number
+  /** 关联的知识点（任意层级、最多 6 个） */
+  knowledge: CatalogKnowledge[]
 }
 
-const props = defineProps<{ modelValue: TextbookCatalogNode[] }>()
+const props = defineProps<{
+  modelValue: TextbookCatalogNode[]
+  /** 所属教材版本的学段 / 学科：关联知识点时决定加载哪棵树 */
+  stage?: string
+  subject?: string
+}>()
 const emit = defineEmits<{ 'update:modelValue': [value: TextbookCatalogNode[]] }>()
 
 /* ===== 嵌套 ↔ 扁平 ===== */
 function flatten(list: TextbookCatalogNode[], parentId: string | null, out: CatalogFlatNode[] = []): CatalogFlatNode[] {
   list.forEach((node, index) => {
-    out.push({ id: node.id, parentId, name: node.title, enabled: node.enabled !== false, sort: index + 1 })
+    out.push({
+      id: node.id,
+      parentId,
+      name: node.title,
+      enabled: node.enabled !== false,
+      sort: index + 1,
+      knowledge: node.knowledge ?? [],
+    })
     if (node.children?.length) flatten(node.children, node.id, out)
   })
   return out
@@ -46,6 +67,8 @@ function nest(flat: CatalogFlatNode[]): TextbookCatalogNode[] {
         id: item.id,
         title: item.name,
         enabled: item.enabled,
+        /* 没关联知识点就不写这个字段，免得目录 JSON 里全是空数组 */
+        ...(item.knowledge.length ? { knowledge: item.knowledge.map((row) => ({ ...row })) } : {}),
         ...(children.length ? { children } : {}),
       }
     })
@@ -129,6 +152,7 @@ function saveModal() {
       name: title,
       enabled: true,
       sort: siblings.length + 1,
+      knowledge: [],
     }
     flat.value.push(node)
   }
@@ -141,6 +165,27 @@ async function onRemove(node: CatalogFlatNode) {
   flat.value = flat.value.filter((item) => item.id !== node.id)
   commit()
 }
+
+/* ===== 关联知识点 ===== */
+const knowledgeTarget = ref<CatalogFlatNode | null>(null)
+
+function openKnowledge(node: CatalogFlatNode) {
+  knowledgeTarget.value = node
+}
+function onKnowledgeConfirm(list: CatalogKnowledge[]) {
+  if (knowledgeTarget.value) {
+    knowledgeTarget.value.knowledge = list.map((item) => ({ ...item }))
+    commit()
+  }
+  knowledgeTarget.value = null
+}
+
+/** 名称后的附注：把关联的知识点名连起来；太长由组件侧省略，全文交给悬浮 title */
+function rowNote(node: CatalogFlatNode) {
+  if (!node.knowledge.length) return null
+  const names = node.knowledge.map((item) => item.name).join('、')
+  return { text: names, title: `关联知识点（${node.knowledge.length}）：${names}` }
+}
 </script>
 
 <template>
@@ -152,11 +197,16 @@ async function onRemove(node: CatalogFlatNode) {
       empty-text="暂无目录，可新增章节"
       root-label="新增章节"
       :show-move="false"
+      :icon-actions="true"
+      :show-attach="true"
+      attach-title="关联知识点"
+      :row-note="rowNote"
       @create-root="openCreate(null)"
       @add-child="(node) => openCreate(node.id)"
       @edit="openEdit"
       @remove="onRemove"
       @toggle="onToggle"
+      @attach="openKnowledge"
       @move="onMove"
     />
 
@@ -169,6 +219,16 @@ async function onRemove(node: CatalogFlatNode) {
         <button class="btn btn-primary btn-sm" type="button" @click="saveModal">保存</button>
       </template>
     </AppModal>
+
+    <!-- 关联知识点（v-if 挂载：每次打开都是一份新的草稿，取消即丢弃） -->
+    <CatalogKnowledgeModal
+      v-if="knowledgeTarget"
+      :model-value="knowledgeTarget.knowledge"
+      :stage="props.stage ?? ''"
+      :subject="props.subject ?? ''"
+      @close="knowledgeTarget = null"
+      @confirm="onKnowledgeConfirm"
+    />
   </div>
 </template>
 

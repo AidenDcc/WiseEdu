@@ -50,7 +50,7 @@ function seedQuestion(base: PaperBase, row: Seed): OrgQuestion {
     ownerId: base.ownerId,
     owner: base.owner,
     term: '上学期',
-    examType: '模拟考试',
+    examType: '一模',
     useCount: row.id % 19,
     updatedAt: UPDATED,
     ...seedQuestionMeta(row.id, base.subject),

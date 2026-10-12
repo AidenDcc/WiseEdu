@@ -1,287 +1,176 @@
 <script setup lang="ts">
 /**
- * 教材版本（平台管理端字典）。
+ * 教材版本 + 教材分册（平台管理端）。
  *
- * 优化点（教材版本优化）：
- * 1. 不再展示「机构引用」信息；
- * 2. 关联 年级 / 学期 / 使用地区；
- * 3. 搜索条件支持 学科 / 年级 / 学期 / 状态 / 使用地区 / 年份；
- * 4. 列表头提供「版本名称 / 出版社」模糊搜索，右上角为「新增版本」，列表支持分页；
- * 5. 目录（章节等）**不在新增 / 编辑表单里维护**，统一走右侧抽屉（TextbookCatalogDrawer）；
- * 6. 新增表单覆盖 年级 / 学期 / 学科 / 版本名称 / 出版社 / 封面图 / 使用地区 /
- *    适配年份（近 5 年 + 更久之前，多选）/ 教材电子版 PDF（非必填）。
+ * 版式（教材版本优化）：
+ * - 顶部：搜索条件面板（**学科 / 年级 / 适用地区** 三个条件）；
+ * - 下方左侧：**教材版本树**（学段 → 学科 → 版本，固定宽度，UI 对齐机构端知识点树：
+ *   标题 + 搜索 + 行内「数据条数」，学段 / 学科只读、学科可「添加教材」）；
+ * - 下方右侧：**教材分册面板**（当前版本信息 + 详情 + 分册表格 + 新增分册 + 目录抽屉）。
  *
- * 学科 / 年级 / 学期 用 chip 单选（`AppChipGroup`），与搜索条件上的 chip 同一套样式；
- * 年级候选项取自**年级字典**（`fetchDict('grade')`），不在这里写死 —— 避免出现
- * 「教材版本写 初一/初二/初三，别处写 七年级/八年级/九年级」这种同一概念两种叫法。
+ * 搜索条件「左右都筛」：
+ * - 左树：学科 / 适用地区按**版本**匹配，年级按「该版本下存在命中分册」匹配；
+ * - 右表：再按**年级**对分册二次筛选（学科、适用地区是版本级属性，右侧已被所选版本锁定）。
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { AppChipGroup, AppFilterPanel, AppIcon, AppListToolbar, hueColor, showToast, ApiError, AppModal, appConfirm } from '@aiteach/shared'
-import type { DictItem, FilterRowDef, TextbookVersion } from '@aiteach/shared'
-import AppSwitch from '@/components/ui/AppSwitch.vue'
-import AppPagination from '@/components/ui/AppPagination.vue'
-import TextbookCatalogDrawer from '@/components/textbook/TextbookCatalogDrawer.vue'
-import { deleteTextbook, fetchDict, fetchTextbooks, saveTextbook, toggleTextbook } from '@/api/platform'
+import { ApiError, AppChipGroup, AppFilterPanel, AppModal, appConfirm, showToast } from '@aiteach/shared'
+import type { DictItem, FilterRowDef, TextbookVersion, TextbookVolume } from '@aiteach/shared'
+import TextbookVersionTree from '@/components/textbook/TextbookVersionTree.vue'
+import TextbookVolumePanel from '@/components/textbook/TextbookVolumePanel.vue'
+import {
+  deleteTextbook,
+  fetchDict,
+  fetchTextbookVolumes,
+  fetchTextbooks,
+  saveTextbook,
+  toggleTextbook,
+} from '@/api/platform'
 
 /* ===== 选项常量 ===== */
-const TERMS = ['上学期', '下学期']
-/** 使用地区（多选） */
+/** 适用地区（多选） */
 const REGIONS = [
   '全国', '北京', '上海', '天津', '重庆', '河北', '山西', '辽宁', '吉林', '黑龙江',
   '江苏', '浙江', '安徽', '福建', '江西', '山东', '河南', '湖北', '湖南', '广东',
   '海南', '四川', '贵州', '云南', '陕西', '甘肃', '青海', '内蒙古', '广西', '西藏', '宁夏', '新疆',
 ]
-/** 适配年份：近 5 年 + 更久之前（多选） */
-const CURRENT_YEAR = new Date().getFullYear()
+/** 修订年份：近 5 年 + 更久之前（多选） */
 const YEARS = computed(() => {
-  const recent: string[] = []
-  for (let i = 0; i < 5; i++) recent.push(String(CURRENT_YEAR - i))
-  recent.push('更久之前')
-  return recent
+  const year = new Date().getFullYear()
+  return [...Array.from({ length: 5 }, (_, i) => String(year - i)), '更久之前']
 })
-/** 状态筛选项 */
-const STATUS_OPTIONS = ['正常', '已停用']
 
-const subjects = ref<DictItem[]>([])
+/* ===== 数据 ===== */
+const versions = ref<TextbookVersion[]>([])
+const volumes = ref<TextbookVolume[]>([])
 const grades = ref<DictItem[]>([])
-const list = ref<TextbookVersion[]>([])
+const subjects = ref<DictItem[]>([])
 const loading = ref(false)
+const activeVersionId = ref<number | null>(null)
 
-/* 启用中的字典候选（学科 / 年级），与「使用地区 / 年份」一起供 chip 选择 */
 const enabledSubjects = computed(() => subjects.value.filter((item) => item.enabled).map((item) => item.name))
-/** 年级：字典顺序（一~六年级 / 七~九年级 / 高一~高三），首项补「不限定」 */
 const enabledGrades = computed(() => grades.value.filter((item) => item.enabled).map((item) => item.name))
-const gradeOptions = computed(() => ['不限定', ...enabledGrades.value])
-const termOptions = ['不限定', ...TERMS]
 
-/* ===== 筛选（独立面板：学科 / 年级 / 学期 / 状态 / 使用地区 / 年份） ===== */
-const FILTERS = reactive<Record<string, string[]>>({ subject: [], grade: [], term: [], status: [], region: [], year: [] })
+/* ===== 搜索条件（左右都筛） ===== */
+const FILTERS = reactive<Record<string, string[]>>({ subject: [], grade: [], region: [] })
 
 function onFiltersChange(next: Record<string, string[]>) {
   FILTERS.subject = next.subject ?? []
   FILTERS.grade = next.grade ?? []
-  FILTERS.term = next.term ?? []
-  FILTERS.status = next.status ?? []
   FILTERS.region = next.region ?? []
-  FILTERS.year = next.year ?? []
 }
 
 const FILTER_ROWS = computed<FilterRowDef[]>(() => [
   { key: 'subject', label: '学科', options: enabledSubjects.value, multiple: false },
   { key: 'grade', label: '年级', options: enabledGrades.value, multiple: false },
-  { key: 'term', label: '学期', options: TERMS, multiple: false },
-  { key: 'status', label: '状态', options: STATUS_OPTIONS, multiple: false },
-  { key: 'region', label: '使用地区', options: REGIONS, multiple: true, collapsible: true },
-  { key: 'year', label: '适配年份', options: YEARS.value, multiple: true },
+  { key: 'region', label: '适用地区', options: REGIONS, multiple: true, collapsible: true },
 ])
 
-/** 列表头搜索：版本名称 / 出版社 模糊匹配 */
-const keyword = ref('')
-
-/** 命中任一选中地区 / 年份即算匹配（多选条件下取交集） */
+/** 多选条件下「命中任一」即算匹配 */
 function intersect(source: string[] | undefined, selected: string[]) {
   if (!selected.length) return true
   return (source ?? []).some((value) => selected.includes(value))
 }
 
-const filtered = computed(() => {
+/** 左侧版本树的数据源：学科 / 适用地区按版本匹配，年级要求该版本下有命中分册 */
+const filteredVersions = computed(() => {
   const subject = FILTERS.subject[0]
   const grade = FILTERS.grade[0]
-  const term = FILTERS.term[0]
-  const status = FILTERS.status[0]
-  const kw = keyword.value.trim().toLowerCase()
-  return list.value.filter((item) => {
+  return versions.value.filter((item) => {
     if (subject && item.subject !== subject) return false
-    if (grade && item.grade !== grade) return false
-    if (term && item.term !== term) return false
-    if (status === '正常' && !item.enabled) return false
-    if (status === '已停用' && item.enabled) return false
     if (!intersect(item.region, FILTERS.region)) return false
-    if (!intersect(item.years, FILTERS.year)) return false
-    if (kw) {
-      const hit = item.name.toLowerCase().includes(kw) || item.publisher.toLowerCase().includes(kw)
-      if (!hit) return false
-    }
+    if (grade && !volumes.value.some((volume) => volume.textbookId === item.id && volume.grade === grade)) return false
     return true
   })
 })
 
-/* ===== 分页 ===== */
-const page = ref(1)
-const pageSize = 10
-const total = computed(() => filtered.value.length)
-const paged = computed(() => filtered.value.slice((page.value - 1) * pageSize, page.value * pageSize))
+/** 选中版本若被条件筛掉了，自动落到第一个可见版本；一个都没有则回到空态 */
+watch(
+  () => filteredVersions.value.map((item) => item.id).join(','),
+  () => {
+    const list = filteredVersions.value
+    if (!list.some((item) => item.id === activeVersionId.value)) {
+      activeVersionId.value = list[0]?.id ?? null
+    }
+  },
+  { immediate: true },
+)
 
-/* 条件变化回到第 1 页；数据量变小（删除 / 过滤）时把页码夹回有效范围 */
-watch([() => JSON.stringify(FILTERS), keyword], () => { page.value = 1 })
-watch(total, () => {
-  const max = Math.max(1, Math.ceil(total.value / pageSize))
-  if (page.value > max) page.value = max
+const activeVersion = computed(() => filteredVersions.value.find((item) => item.id === activeVersionId.value) ?? null)
+
+/** 右侧分册表的数据源：在所选版本的分册上再按年级收一层 */
+const activeVolumes = computed(() => {
+  if (activeVersionId.value == null) return []
+  const grade = FILTERS.grade[0]
+  return volumes.value.filter((item) => {
+    if (item.textbookId !== activeVersionId.value) return false
+    if (grade && item.grade !== grade) return false
+    return true
+  })
 })
 
+/* ===== 加载 ===== */
 async function load() {
   loading.value = true
   try {
-    ;[subjects.value, grades.value, list.value] = await Promise.all([
-      fetchDict('subject'),
-      fetchDict('grade'),
+    ;[versions.value, volumes.value, grades.value, subjects.value] = await Promise.all([
       fetchTextbooks(),
+      fetchTextbookVolumes(),
+      fetchDict('grade'),
+      fetchDict('subject'),
     ])
   } finally {
     loading.value = false
   }
 }
-
-async function onToggle(item: TextbookVersion) {
-  try {
-    const result = await toggleTextbook(item.id)
-    showToast(result.enabled ? '已启用' : '已停用', 'success')
-    load()
-  } catch (error) {
-    showToast(error instanceof ApiError ? error.message : '操作失败', 'error')
-  }
+/** 分册面板增删改后只重拉分册（版本树不受影响） */
+async function reloadVolumes() {
+  volumes.value = await fetchTextbookVolumes()
 }
 
-async function onDelete(item: TextbookVersion) {
-  if (!(await appConfirm(`确认删除「${item.subject} · ${item.grade ?? ''}${item.name}」？`, { type: 'danger' }))) return
-  try {
-    await deleteTextbook(item.id)
-    showToast('已删除', 'success')
-    load()
-  } catch (error) {
-    showToast(error instanceof ApiError ? error.message : '删除失败', 'error')
-  }
-}
-
-/* ===== 目录抽屉（录入 / 查看，与知识点树同 UI / 交互） ===== */
-const catalogTarget = ref<TextbookVersion | null>(null)
-function openCatalog(item: TextbookVersion) {
-  catalogTarget.value = item
-}
-function onCatalogClose() {
-  catalogTarget.value = null
-  /* 目录可能在抽屉里改过，重新拉一次列表 */
-  load()
-}
-
-/* ===== 新增 / 编辑（目录不在此维护） ===== */
+/* ===== 版本：新增 / 编辑（学段、学科由左侧树带入，只读） ===== */
 const editing = ref<TextbookVersion | 'new' | null>(null)
-const form = reactive({
-  subject: '',
-  name: '',
-  publisher: '',
-  grade: '',
-  term: '',
-  region: [] as string[],
-  years: [] as string[],
-  cover: '',
-  fileUrl: '',
-  fileName: '',
-})
+const form = reactive({ stage: '', subject: '', name: '', publisher: '', region: [] as string[], years: [] as string[] })
 const formError = ref('')
 const saving = ref(false)
 
-/* 单选 chip 的受控值是「长度 0/1 的数组」，这里与表单里的字符串互转 */
-const subjectModel = computed<string[]>({
-  get: () => (form.subject ? [form.subject] : []),
-  set: (value) => { form.subject = value[0] ?? enabledSubjects.value[0] ?? '' },
-})
-const gradeModel = computed<string[]>({
-  get: () => [form.grade || '不限定'],
-  set: (value) => { const next = value[0] ?? '不限定'; form.grade = next === '不限定' ? '' : next },
-})
-const termModel = computed<string[]>({
-  get: () => [form.term || '不限定'],
-  set: (value) => { const next = value[0] ?? '不限定'; form.term = next === '不限定' ? '' : next },
-})
-
-function resetForm() {
-  form.subject = enabledSubjects.value[0] ?? '数学'
+function openCreate(payload: { stage: string; subject: string }) {
+  editing.value = 'new'
+  form.stage = payload.stage
+  form.subject = payload.subject
   form.name = ''
   form.publisher = ''
-  form.grade = ''
-  form.term = ''
   form.region = []
   form.years = []
-  form.cover = ''
-  form.fileUrl = ''
-  form.fileName = ''
   formError.value = ''
 }
-
-function openCreate() {
-  editing.value = 'new'
-  resetForm()
-}
-
 function openEdit(item: TextbookVersion) {
   editing.value = item
+  form.stage = item.stage
   form.subject = item.subject
   form.name = item.name
   form.publisher = item.publisher
-  form.grade = item.grade ?? ''
-  form.term = item.term ?? ''
   form.region = item.region ? [...item.region] : []
   form.years = item.years ? [...item.years] : []
-  form.cover = item.cover ?? ''
-  form.fileUrl = item.fileUrl ?? ''
-  form.fileName = item.fileName ?? ''
   formError.value = ''
 }
 
-function onCoverChange(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-  const reader = new FileReader()
-  reader.onload = () => {
-    form.cover = reader.result as string
-  }
-  reader.readAsDataURL(file)
-  input.value = ''
-}
-
-function removeCover() {
-  form.cover = ''
-}
-
-function onFileChange(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-  form.fileName = file.name
-  form.fileUrl = URL.createObjectURL(file)
-  input.value = ''
-}
-
-function removeFile() {
-  form.fileName = ''
-  form.fileUrl = ''
-}
-
-async function save() {
-  if (!form.name.trim()) {
-    formError.value = '版本名称不能为空'
-    return
-  }
+async function saveVersion() {
+  if (!form.name.trim()) { formError.value = '版本名称不能为空'; return }
   saving.value = true
   try {
-    await saveTextbook({
+    const saved = await saveTextbook({
       id: editing.value instanceof Object ? editing.value.id : undefined,
+      stage: form.stage,
       subject: form.subject,
       name: form.name.trim(),
       publisher: form.publisher.trim(),
-      grade: form.grade || undefined,
-      term: form.term || undefined,
       region: form.region.length ? form.region : undefined,
       years: form.years.length ? form.years : undefined,
-      cover: form.cover || undefined,
-      fileUrl: form.fileUrl || undefined,
-      fileName: form.fileName || undefined,
     })
     showToast('已保存', 'success')
     editing.value = null
-    load()
+    await load()
+    activeVersionId.value = saved.id
   } catch (error) {
     formError.value = error instanceof ApiError ? error.message : '保存失败，请重试'
   } finally {
@@ -289,101 +178,76 @@ async function save() {
   }
 }
 
+async function onToggleVersion(item: TextbookVersion) {
+  try {
+    const result = await toggleTextbook(item.id)
+    showToast(result.enabled ? '已启用' : '已停用', 'success')
+    await load()
+  } catch (error) {
+    showToast(error instanceof ApiError ? error.message : '操作失败', 'error')
+  }
+}
+
+async function onRemoveVersion(item: TextbookVersion) {
+  if (!(await appConfirm(`确认删除教材版本「${item.stage} · ${item.subject} · ${item.name}」？其下分册将一并删除。`, { type: 'danger' }))) return
+  try {
+    await deleteTextbook(item.id)
+    showToast('已删除', 'success')
+    await load()
+  } catch (error) {
+    showToast(error instanceof ApiError ? error.message : '删除失败', 'error')
+  }
+}
+
 onMounted(load)
 </script>
 
 <template>
-  <div class="page">
-    <!-- 搜索条件：独立面板，与下方列表分开（对齐机构端列表页布局） -->
+  <div class="page tb-page">
+    <!-- 搜索条件：学科 / 年级 / 适用地区，左右两侧都参与筛选 -->
     <AppFilterPanel :rows="FILTER_ROWS" :model-value="FILTERS" @update:model-value="onFiltersChange" />
 
-    <div class="panel">
-      <!-- 列表头：左侧搜索框（版本名称 / 出版社），右上角「新增版本」 -->
-      <AppListToolbar v-model="keyword" placeholder="搜索版本名称 / 出版社" :search-width="240">
-        <template #right>
-          <button class="btn btn-primary btn-sm" type="button" @click="openCreate">
-            <AppIcon name="plus" :size="15" /> 新增版本
-          </button>
-        </template>
-      </AppListToolbar>
-
-      <div class="data-table-wrap">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>封面</th>
-              <th>学科</th>
-              <th>年级</th>
-              <th>版本名称</th>
-              <th>学期</th>
-              <th>出版社</th>
-              <th>使用地区</th>
-              <th>适配年份</th>
-              <th>目录</th>
-              <th>状态</th>
-              <th style="width: 170px">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-if="loading && list.length === 0">
-              <td colspan="11" class="empty-row">加载中…</td>
-            </tr>
-            <tr v-else-if="filtered.length === 0">
-              <td colspan="11" class="empty-row">暂无教材版本</td>
-            </tr>
-            <template v-else>
-              <tr v-for="item in paged" :key="item.id">
-                <td>
-                  <img v-if="item.cover" :src="item.cover" class="cover-img" alt="封面" />
-                  <span v-else class="cover" :style="{ background: hueColor(item.hue) }">{{ item.name.charAt(0) }}</span>
-                </td>
-                <td>{{ item.subject }}</td>
-                <td>{{ item.grade || '—' }}</td>
-                <td class="cell-strong">{{ item.name }}</td>
-                <td>{{ item.term || '—' }}</td>
-                <td>{{ item.publisher }}</td>
-                <td class="region-cell">{{ item.region?.join('、') || '—' }}</td>
-                <td class="year-cell">{{ item.years?.join('、') || '—' }}</td>
-                <td>
-                  <button class="link-btn" type="button" @click="openCatalog(item)">
-                    {{ item.catalog?.length ? `${item.catalog.length} 章` : '录入' }}
-                  </button>
-                </td>
-                <td><AppSwitch :model-value="item.enabled" @update:model-value="onToggle(item)" /></td>
-                <td>
-                  <div class="op-group">
-                    <button class="mini-btn" type="button" @click="openEdit(item)">编辑</button>
-                    <button class="mini-btn danger" type="button" @click="onDelete(item)">删除</button>
-                  </div>
-                </td>
-              </tr>
-            </template>
-          </tbody>
-        </table>
+    <div class="tb-layout">
+      <!-- 左：教材版本树（固定宽度） -->
+      <div class="panel tree-col">
+        <TextbookVersionTree
+          :versions="filteredVersions"
+          :volumes="volumes"
+          :grades="grades"
+          :subjects="subjects"
+          :active-version-id="activeVersionId"
+          @select="activeVersionId = $event"
+          @create="openCreate"
+          @edit="openEdit"
+          @remove="onRemoveVersion"
+          @toggle="onToggleVersion"
+        />
       </div>
 
-      <AppPagination :total="total" v-model:page="page" :page-size="pageSize" />
+      <!-- 右：教材分册 -->
+      <div class="panel volume-col">
+        <TextbookVolumePanel :version="activeVersion" :volumes="activeVolumes" @changed="reloadVolumes" />
+      </div>
     </div>
 
-    <!-- 新增 / 编辑（目录不在此维护，走右侧抽屉） -->
+    <!-- 新增 / 编辑教材版本（学段、学科由左侧树带入，不可修改） -->
     <AppModal
       v-if="editing"
       :title="editing === 'new' ? '新增教材版本' : '编辑教材版本'"
-      :width="680"
+      :width="640"
       @close="editing = null"
     >
-      <div class="f-field">
-        <label class="f-label">学科<span class="req">*</span></label>
-        <AppChipGroup v-model="subjectModel" :options="enabledSubjects" :multiple="false" :clearable="false" />
+      <div class="form-grid">
+        <div class="f-field">
+          <label class="f-label">学段</label>
+          <div class="f-text">{{ form.stage }}</div>
+        </div>
+        <div class="f-field">
+          <label class="f-label">学科</label>
+          <div class="f-text">{{ form.subject }}</div>
+        </div>
       </div>
-      <div class="f-field">
-        <label class="f-label">年级</label>
-        <AppChipGroup v-model="gradeModel" :options="gradeOptions" :multiple="false" />
-      </div>
-      <div class="f-field">
-        <label class="f-label">学期</label>
-        <AppChipGroup v-model="termModel" :options="termOptions" :multiple="false" />
-      </div>
+      <p class="f-hint scope-hint">学段 / 学科由左侧树带入，在「基础字典」里维护，此处不可修改。</p>
 
       <div class="form-grid">
         <div class="f-field">
@@ -392,109 +256,39 @@ onMounted(load)
         </div>
         <div class="f-field">
           <label class="f-label">出版社</label>
-          <input v-model="form.publisher" class="f-input" placeholder="选填" />
+          <input v-model="form.publisher" class="f-input" placeholder="如：人民教育出版社" />
         </div>
       </div>
-
       <div class="f-field">
-        <label class="f-label">使用地区<span class="muted">（多选）</span></label>
+        <label class="f-label">适用地区<span class="muted">（多选）</span></label>
         <AppChipGroup v-model="form.region" :options="REGIONS" />
       </div>
-
       <div class="f-field">
-        <label class="f-label">适配年份<span class="muted">（多选）</span></label>
-        <AppChipGroup v-model="form.years" :options="YEARS" />
-      </div>
-
-      <div class="f-field">
-        <label class="f-label">封面图</label>
-        <div class="upload-row">
-          <img v-if="form.cover" :src="form.cover" class="cover-preview" alt="封面预览" />
-          <div v-else class="cover-placeholder">
-            <AppIcon name="image" :size="22" />
-            <span>未上传</span>
-          </div>
-          <div class="upload-ops">
-            <label class="upload-btn">
-              选择图片
-              <input type="file" accept="image/*" class="hidden-file" @change="onCoverChange" />
-            </label>
-            <button v-if="form.cover" class="upload-btn ghost" type="button" @click="removeCover">移除</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="f-field">
-        <label class="f-label">教材电子版文件<span class="muted">（非必填 · PDF）</span></label>
-        <div class="upload-row">
-          <span class="file-name">{{ form.fileName || '未上传' }}</span>
-          <div class="upload-ops">
-            <label class="upload-btn">
-              上传 PDF
-              <input type="file" accept="application/pdf" class="hidden-file" @change="onFileChange" />
-            </label>
-            <button v-if="form.fileName" class="upload-btn ghost" type="button" @click="removeFile">移除</button>
-          </div>
-        </div>
+        <label class="f-label">修订年份</label>
+        <AppChipGroup v-model="form.years" :options="YEARS" :multiple="false" />
       </div>
 
       <p v-if="formError" class="form-err">{{ formError }}</p>
       <template #footer>
         <button class="btn btn-ghost btn-sm" type="button" @click="editing = null">取消</button>
-        <button class="btn btn-primary btn-sm" type="button" :disabled="saving" @click="save">
+        <button class="btn btn-primary btn-sm" type="button" :disabled="saving" @click="saveVersion">
           {{ saving ? '保存中…' : '保存' }}
         </button>
       </template>
     </AppModal>
-
-    <!-- 目录抽屉（录入 / 查看） -->
-    <TextbookCatalogDrawer :textbook="catalogTarget" @close="onCatalogClose" />
   </div>
 </template>
 
 <style scoped>
-/* 列表头（AppListToolbar）在 .panel 内留出与面板一致的内边距，
-   与「机构列表」的搜索框 / 新增按钮对齐。 */
-.panel > :deep(.list-toolbar) { padding: 14px 14px 0; }
+/* 页面不再整体滚动：高度锁死，滚动收进左右两栏（小屏靠 min-height 兜底） */
+.tb-page { height: calc(100vh - 62px - 44px); min-height: 520px; }
+.tb-layout { display: flex; gap: 14px; flex: 1; min-height: 0; }
+/* 左：固定宽度版本树（比机构端知识点面板略宽，行内操作图标才不会压住右侧条数） */
+.tree-col { width: 320px; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; }
+/* 右：分册面板自适应 */
+.volume-col { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 
-.cover {
-  width: 32px;
-  height: 42px;
-  border-radius: 6px;
-  color: #fff;
-  font-size: 13px;
-  font-weight: 700;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 3px 8px rgba(28, 36, 52, 0.15);
-}
-.cover-img {
-  width: 32px;
-  height: 42px;
-  border-radius: 6px;
-  object-fit: cover;
-  box-shadow: 0 3px 8px rgba(28, 36, 52, 0.15);
-}
-.region-cell { font-size: 12.5px; max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.year-cell { font-size: 12.5px; color: var(--sub); }
-.link-btn {
-  border: none;
-  background: transparent;
-  color: var(--brand-deep);
-  font-size: 12.5px;
-  cursor: pointer;
-  padding: 0;
-}
-.link-btn:hover { text-decoration: underline; }
-.form-err { font-size: 12px; color: var(--danger); margin: 4px 0; }
-
-/* ===== 表单 ===== */
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px 16px;
-}
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
 .f-field { margin-bottom: 14px; }
 .f-label {
   display: block;
@@ -503,65 +297,10 @@ onMounted(load)
   font-weight: 600;
   margin-bottom: 6px;
 }
-.f-label .req { color: var(--danger); margin-left: 2px; }
 .f-label .muted { color: var(--sub); font-weight: 400; margin-left: 4px; }
-.f-select,
-.f-input {
-  width: 100%;
-  height: 36px;
-  border: 1.5px solid var(--border);
-  border-radius: 9px;
-  padding: 0 12px;
-  font-size: 13px;
-  font-family: inherit;
-  color: var(--ink);
-  background: #fff;
-  outline: none;
-}
-.f-select:focus,
-.f-input:focus { border-color: var(--brand); }
-
-.upload-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-.cover-preview {
-  width: 44px;
-  height: 60px;
-  border-radius: 6px;
-  object-fit: cover;
-  box-shadow: 0 3px 8px rgba(28, 36, 52, 0.15);
-}
-.cover-placeholder {
-  width: 44px;
-  height: 60px;
-  border-radius: 6px;
-  border: 1px dashed var(--border);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  color: var(--sub);
-  font-size: 10px;
-}
-.upload-ops { display: flex; align-items: center; gap: 8px; }
-.upload-btn {
-  display: inline-flex;
-  align-items: center;
-  border: 1.5px solid var(--brand);
-  background: var(--brand-soft);
-  color: var(--brand-deep);
-  font-size: 12.5px;
-  font-weight: 700;
-  padding: 6px 14px;
-  border-radius: 8px;
-  cursor: pointer;
-}
-.upload-btn.ghost {
-  border-color: var(--border);
-  background: #fff;
-  color: var(--sub);
-  font-weight: 600;
-}
-.upload-btn:hover { filter: brightness(0.97); }
-.hidden-file { display: none; }
-.file-name { font-size: 12.5px; color: var(--ink-2); }
+/* 学段 / 学科：只读纯文本（与输入框同高，避免与下方字段错位） */
+.f-text { display: flex; align-items: center; height: 38px; font-size: 13.5px; color: var(--ink); font-weight: 500; }
+/* 紧跟「学段 / 学科」两列之后的说明：收紧上间距，让它明确挂在这两个字段下面 */
+.scope-hint { margin-top: -10px; margin-bottom: 16px; }
+.form-err { font-size: 12px; color: var(--danger); margin: 4px 0; }
 </style>

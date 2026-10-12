@@ -31,6 +31,8 @@ export interface TreeRowConfig {
   addable?: boolean
   /** 是否可作为拖拽源 */
   draggable?: boolean
+  /** 是否显示行内启停用开关（false 时不显示；如「学段 / 学科」这类字典节点） */
+  toggleable?: boolean
 }
 
 /** 某父节点下的子节点，按 `sort` 升序、相同则按原数组顺序（稳定排序） */

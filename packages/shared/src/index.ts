@@ -58,7 +58,9 @@ export type {
   ExamTypeNode,
   ExamTypeNodeKind,
   TextbookVersion,
+  TextbookVolume,
   TextbookCatalogNode,
+  CatalogKnowledge,
   AiModelType,
   AiModel,
   AgentCheckItem,
@@ -199,7 +201,6 @@ export type {
   PaperSection,
   PaperStatus,
   PaperSource,
-  PaperCategory,
   PaperAttachment,
   PaperExtra,
   PaperExtraKind,
@@ -321,7 +322,10 @@ export {
   QUESTION_CORRECTION_TYPES,
   QUESTION_SOURCE_OPTIONS,
   PAPER_SOURCE_OPTIONS,
-  PAPER_CATEGORIES,
+  /* 机构端「试卷类型树」的分组：直接按考试类型项的 `paperCategory` 现算，不再有写死的分类常量 */
+  groupByPaperCategory,
+  /* 教材目录章节最多关联的知识点数（管理端弹窗与 Mock 校验共用） */
+  MAX_CATALOG_KNOWLEDGE,
   /* 年份筛选的档位口径：试卷筛选与智能组卷「优先年份」共用（mock 侧打分也要判哨兵） */
   EARLIER_YEAR,
   RECENT_YEAR_COUNT,

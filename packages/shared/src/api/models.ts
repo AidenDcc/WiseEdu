@@ -244,9 +244,8 @@ export interface DictItem {
   /**
    * 类型特有字段：grade=学段；term=学年/学期/起止；questionType=作答类型；difficulty=系数。
    *
-   * examType 的字典项由「考试类型」树投影写入（见 `ExamTypeNode`），这里的
-   * `stage` 在它上面表示**适配学段**：留空 = 全学段通用，有值 = 只在机构端选到该学段时
-   * 才出现在试卷类型树 / 筛选条件里。管理端不再直接编辑它。
+   * 注意 examType 的**适配学段**不在这里，见下面的 `stages`（多选）。这个 `stage` 是单值，
+   * 只服务于「年级挂靠学段」这类天生单值的场景。
    */
   stage?: string
   year?: string
@@ -255,6 +254,14 @@ export interface DictItem {
   dateTo?: string
   answerType?: string
   coefficient?: number
+  /**
+   * 适配学段（仅 examType，由「考试类型」树投影写入）：留空 = 全学段通用，
+   * 有值 = 只在机构端选到这些学段时才出现在试卷类型树 / 筛选条件里。管理端不直接编辑它。
+   *
+   * 用复数而非 `stage`：适配学段是**多选**（如「中考真题」同时适配初中与高中），
+   * 而 `stage` 已被「年级 → 学段」的单值语义占用。
+   */
+  stages?: string[]
   /**
    * 适用学科：questionType = 学科专属题型，examType = 适配学科（同样由「考试类型」树投影写入）。
    * 留空 = 全学科通用；有值 = 只在机构端选到这些学科时才出现。
@@ -267,20 +274,37 @@ export interface DictItem {
    */
   grades?: string[]
   /**
-   * 试卷分类（仅 examType，取值见 `PAPER_CATEGORIES`）：组卷工作台「试卷」页签
-   * 左侧那棵试卷类型树的第一级。由「考试类型」树投影写入 —— 值就是该项所属
-   * 一级根节点的名字，因此不会留空。
+   * 试卷分类（仅 examType）：组卷工作台「试卷」页签左侧那棵试卷类型树的第一级。
+   * 由「考试类型」树投影写入 —— 值就是该节点所属**一级节点的名字**，因此不会留空
+   * （一级节点自己不是可选类型，不参与投影）。分组怎么分、叫什么，全由管理端决定。
    */
   paperCategory?: string
 }
 
 /**
- * 试卷分类：组卷工作台「试卷」页签左树的四个一级分组，也是「考试类型」树四个
- * 一级节点的名字（`ExamTypeNode.name`）。定义在这里而不是管理端页面里 ——
- * 树的根、工作台树的顺序、种子数据的分组共用同一份，各写一份必然对不上。
+ * 按试卷分类（`paperCategory`）把考试类型分组，供机构端「试卷类型树」直接铺开。
+ *
+ * 为什么不再有一份写死的分类常量：一级分组就是「考试类型」树的一级节点，而它在管理端
+ * 可以改名 / 新增 / 删除（见 `ExamTypeNodeKind`）。常量一旦写死，管理端给分组改个名，
+ * 机构端那棵树就会整棵空掉 —— 顺序也一样，固化顺序等于把分组顺序也锁死在代码里。
+ *
+ * 顺序取「**首次出现的顺序**」：字典是按树的前序遍历投影下来的，同一个分组的项必然
+ * 连续出现，因此首次出现的先后 = 分组在管理端树上的先后。
+ * 没有 `paperCategory` 的历史项不进树（仍可用于筛选），与机构端既有口径一致。
  */
-export const PAPER_CATEGORIES = ['同步教学', '阶段测试', '小升初', '竞赛'] as const
-export type PaperCategory = (typeof PAPER_CATEGORIES)[number]
+export function groupByPaperCategory<T extends { paperCategory?: string }>(
+  items: T[],
+): Array<{ name: string; items: T[] }> {
+  const groups: Array<{ name: string; items: T[] }> = []
+  items.forEach((item) => {
+    const name = item.paperCategory
+    if (!name) return
+    const group = groups.find((row) => row.name === name)
+    if (group) group.items.push(item)
+    else groups.push({ name, items: [item] })
+  })
+  return groups
+}
 
 /* 知识点/考点树（最多 5 级） */
 export interface KnowledgeNode {
@@ -303,31 +327,57 @@ export interface KnowledgeNode {
 /**
  * 考试类型树（最多 5 级）：合并了原先基础字典里的「考试类型」与「杯赛」两个平铺列表。
  *
- * 四个一级节点就是 `PAPER_CATEGORIES`（根节点的 `name` 即 `paperCategory` 值），
- * 它们由机构端组卷「试卷类型树」的分组口径决定，不在本树上增删改。
+ * 一级节点（`parentId === null`）是**分组**：它既是树上的分类（阶段考试 / 真题 / 模拟试卷…），
+ * 也是机构端组卷「试卷类型树」的一级分组（经 `DictItem.paperCategory` 投影下去）。
+ * 分组与其它节点**一视同仁** —— 可改名、可增删、可拖拽、可启停用。早先版本把分组锁成
+ * 系统固定的 `category` 类型（不可改名 / 删除），实际用起来只能靠改 mock 才能调整分类，
+ * 现已放开：分类口径归管理端，代码不再持有任何分类常量。
  *
- * `kind` 是合并的关键：竞赛根下同时挂着考试类型（数学竞赛 / 物理竞赛）与杯赛
+ * `kind` 是合并的关键：竞赛分组下同时挂着考试类型（数学竞赛 / 物理竞赛）与杯赛
  * （华罗庚金杯…），靠它分流回机构端的 `examType` / `competition` 两个只读字典——
  * 少了这个字段，杯赛会被混进机构端的试卷类型树。
  */
-export type ExamTypeNodeKind = 'category' | 'examType' | 'competition'
+export type ExamTypeNodeKind = 'examType' | 'competition'
 
 export interface ExamTypeNode {
   id: number
-  /** null = 四个试卷分类根 */
+  /** null = 顶级节点（分组）。分组是分类容器、本身不是可选的考试类型，不参与字典投影 */
   parentId: number | null
   name: string
+  /**
+   * 节点编码：平台内唯一，机构端匹配试卷分类 / 杯赛靠它。
+   * 与知识点编码同口径 —— 由平台自动生成、前端不可编辑，只在「新增 / 编辑节点」弹窗里展示。
+   */
+  code: string
   kind: ExamTypeNodeKind
   enabled: boolean
   /** 被题目引用数（>0 时禁止删除，仅可停用） */
   refCount: number
   /** 同一父节点下的相对顺序，数值越小越靠前（拖拽 / 上下移后重排，与知识点树同口径） */
   sort: number
-  /** 适配学段（仅 kind === 'examType'）：留空 = 全学段通用 */
-  stage?: string
-  /** 适配学科（仅 kind === 'examType'）：留空 = 全学科通用 */
+  /**
+   * 适配学段：留空 = 全学段通用；有值 = 只在机构端选到这些学段时才出现。
+   * 多选（如「中考真题」可同时适配初中与高中）。
+   */
+  stages?: string[]
+  /** 适配学科：留空 = 全学科通用 */
   subjects?: string[]
 }
+
+/**
+ * 教材目录章节关联的知识点（存**快照**：id 用于回查，name 用于列表直接展示）。
+ *
+ * 为什么不只存 id：目录树是逐行渲染的，若每行都回查一次知识点接口，
+ * 一张目录要发几十个请求；存名称快照后渲染零成本。名称以知识点树为准，
+ * 知识点被改名后由「重新关联」纠正，不做级联同步。
+ */
+export interface CatalogKnowledge {
+  id: number
+  name: string
+}
+
+/** 单个教材目录章节最多关联的知识点数（管理端选择弹窗与 Mock 校验共用同一口径） */
+export const MAX_CATALOG_KNOWLEDGE = 6
 
 /* 教材目录树节点（章节 / 小节，可多级嵌套） */
 export interface TextbookCatalogNode {
@@ -338,28 +388,58 @@ export interface TextbookCatalogNode {
    * 与知识点树的行内开关同口径，便于「教材目录树」与「知识点树」UI / 交互保持一致。
    */
   enabled?: boolean
+  /** 关联的知识点（最多 6 个，任意层级）；缺省 = 未关联 */
+  knowledge?: CatalogKnowledge[]
   children?: TextbookCatalogNode[]
 }
 
-/* 教材版本
- * 关联 年级 / 学期 / 使用地区（task: 教材版本优化）。
- * 目录（catalog）通过右侧抽屉录入与查看；封面图（cover）与教材电子版（fileUrl）为非必填的资产。 */
+/**
+ * 教材版本（修订版次）。
+ *
+ * 平台侧的教材结构是「教材版本 → 教材分册」两层：
+ * - **教材版本**（本接口）只描述「哪个学段、哪个学科、哪个出版社的哪个版本」；
+ *   学段 / 学科 不是自由文本，分别来自基础字典「年级 / 学段」的 `stage` 与「学科」字典
+ *   （管理端只关联展示，不可在教材版本里新增 / 编辑 / 删除它们）；
+ * - **教材分册**（`TextbookVolume`）才承载年级 / 学期 / 封面 / 目录等册次信息。
+ *
+ * 于是同一版本（如「人教版·高中数学」）下可以挂多册（必修一、必修二……）。
+ */
 export interface TextbookVersion {
   id: number
+  /** 学段（来自基础字典：年级字典的 `stage` 汇总，如 小学 / 初中 / 高中） */
+  stage: string
+  /** 学科（来自基础字典「学科」） */
   subject: string
+  /** 版本名称（如「人教版」） */
   name: string
   publisher: string
   hue: number
   sort: number
   enabled: boolean
-  /** 关联年级（如「一年级」「高一」） */
-  grade?: string
-  /** 学期：上学期 / 下学期 */
-  term?: string
-  /** 使用地区（多选，如 ['北京', '上海']） */
+  /** 适用地区（多选，如 ['北京', '上海']） */
   region?: string[]
-  /** 适配年份（多选，列举近 5 年 + 更久之前） */
+  /** 修订年份（多选，列举近 5 年 + 更久之前） */
   years?: string[]
+}
+
+/**
+ * 教材分册：某个教材版本下的一个册次（如「人教版·高中数学·必修第一册」）。
+ *
+ * 册别名 / 年级 / 学期 / 适配学年 由管理端在「新增分册」时录入；目录（catalog）
+ * 通过右侧抽屉单独维护；封面与教材电子版为非必填资产。
+ */
+export interface TextbookVolume {
+  id: number
+  /** 所属教材版本 id */
+  textbookId: number
+  /** 册别名（如「必修第一册」「上册」） */
+  alias: string
+  /** 年级（如「一年级」「高一」，来自年级字典） */
+  grade: string
+  /** 学期：上学期 / 下学期 */
+  term: string
+  /** 适配学年（如「2025-2026」） */
+  year?: string
   /** 封面图（本地预览用 object URL / data URL） */
   cover?: string
   /** 教材电子版 PDF 文件地址（object URL / data URL） */
@@ -368,6 +448,8 @@ export interface TextbookVersion {
   fileName?: string
   /** 目录树（章节等） */
   catalog?: TextbookCatalogNode[]
+  enabled: boolean
+  sort: number
 }
 
 /* ================ AI 服务配置（FR-PT-017 ~ 027） ================ */

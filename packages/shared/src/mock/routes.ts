@@ -658,6 +658,31 @@ export const mockRoutes: MockRoute[] = [
         mockFail(404, '接口不存在')
       }),
   },
+  {
+    method: 'GET',
+    path: '/admin/textbook-volumes',
+    handler: ({ query }) =>
+      guard(() => admin.listTextbookVolumes(query.textbookId ? Number(query.textbookId) : undefined)),
+  },
+  {
+    method: 'POST',
+    path: '/admin/textbook-volumes/*',
+    handler: ({ path, body }) =>
+      guard(() => {
+        const [action] = parseSegments(path, '/admin/textbook-volumes/')
+        if (action === 'save') return admin.saveTextbookVolume(body as Record<string, never>)
+        if (action === 'catalog') {
+          admin.saveTextbookCatalog(Number(body.id), body.catalog as never)
+          return null
+        }
+        if (action === 'toggle') return { enabled: admin.toggleTextbookVolume(Number(body.id)) }
+        if (action === 'delete') {
+          admin.deleteTextbookVolume(Number(body.id))
+          return null
+        }
+        mockFail(404, '接口不存在')
+      }),
+  },
 
   /* ---------------- AI 服务配置（FR-PT-017 ~ 027） ---------------- */
   {

@@ -12,10 +12,10 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
   AppFilterPanel,
   AppIcon,
-  PAPER_CATEGORIES,
   PAPER_SOURCE_OPTIONS,
   appConfirm,
   showToast,
+  groupByPaperCategory,
   AppModal,
 } from '@aiteach/shared'
 import type { FilterRowDef, OrgPaper, OrgQuestion } from '@aiteach/shared'
@@ -133,17 +133,20 @@ const pool = computed(() => papers.value.filter((row) => matches(row, 'examType'
 const filtered = computed(() => papers.value.filter((row) => matches(row)))
 const rows = computed(() => filtered.value.slice((page.value - 1) * 10, page.value * 10))
 
-/* ===== 左侧：考试类型树（分类 → 考试类型） =====
- * 分组与归属来自平台管理端「考试类型」树的 `paperCategory`，这里只按 `PAPER_CATEGORIES`
- * 的顺序归组；没配分类的项不进树 —— 于是筛不到它。这不是漏洞：那棵树的一级节点就是四个
- * 试卷分类、新节点只能挂在某个分类下，配不出没有分类的类型。与组卷工作台试卷页签同一条口径。 */
+/* ===== 左侧：考试类型树（分组 → 考试类型） =====
+ * 分组与归属来自平台管理端「考试类型」树（分组名经 `paperCategory` 投影下来），这里只按
+ * 字典里**首次出现的顺序**归组 —— 那份顺序就是管理端树上前序遍历的顺序。平台上给分组改名 /
+ * 增删，机构端的树跟着变，代码里没有任何分类常量；没配分类的历史项不进树，于是筛不到它。
+ * 与组卷工作台试卷页签同一条口径。 */
 const scopedExamTypeItems = computed(() => {
   const stages = filters.grade.map((grade) => stageOf(grade) ?? '')
   const subjects = filters.subject
   return examTypeItems.value.filter((item) => {
     /* 年级 / 学科都是多选：与「任一选中年级对应的学段」且「任一选中学科」兼容就留下 ——
-       按交集算会把「高一 + 高二」这种多选直接筛成空树。空串 = 该年级不在字典里，视为不限学段。 */
-    const stageOk = stages.length === 0 || stages.includes('') || !item.stage || stages.includes(item.stage)
+       按交集算会把「高一 + 高二」这种多选直接筛成空树。空串 = 该年级不在字典里，视为不限学段。
+       适配学段本身就是多选（见 `item.stages`），与选中集合有交集即命中。 */
+    const stageOk =
+      stages.length === 0 || stages.includes('') || !item.stages?.length || item.stages.some((name) => stages.includes(name))
     const subjectOk =
       subjects.length === 0 || !item.subjects?.length || item.subjects.some((name) => subjects.includes(name))
     return stageOk && subjectOk
@@ -161,11 +164,9 @@ const poolByExamType = computed(() => {
 })
 
 const treeGroups = computed<PaperTypeGroup[]>(() =>
-  PAPER_CATEGORIES.map((name) => {
-    const items = scopedExamTypeItems.value
-      .filter((item) => item.paperCategory === name)
-      .map((item) => ({ name: item.name, count: poolByExamType.value.get(item.name) ?? 0 }))
-    return { name, items, count: items.reduce((sum, item) => sum + item.count, 0) }
+  groupByPaperCategory(scopedExamTypeItems.value).map((group) => {
+    const items = group.items.map((item) => ({ name: item.name, count: poolByExamType.value.get(item.name) ?? 0 }))
+    return { name: group.name, items, count: items.reduce((sum, item) => sum + item.count, 0) }
   }),
 )
 

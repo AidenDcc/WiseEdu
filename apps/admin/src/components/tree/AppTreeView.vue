@@ -8,12 +8,22 @@
  * 添加子节点、上移 / 下移、编辑、删除 —— 通过 `show*` 开关与 `rowConfig` 决定
  * 某个场景展示哪些按钮（如教材目录只留拖拽、考试类型的分类根不可编辑 / 拖拽）。
  *
+ * 「启用 / 停用」用**文字按钮**（不用滑块）：已启用显示「停用」，已停用显示「启用」，
+ * 排在「删除」之前 —— 与 编辑 / 删除 同一套 mini-btn 样式，扫一眼就知道能做什么。
+ *
+ * 行内操作有两种形态（`iconActions`）：文字按钮（知识点树 / 考试类型树，动作字面量清晰）
+ * 或图标按钮（教材目录树，一行动作多、字面量会把行撑爆）。图标形态靠 `title` 悬浮提示兜底。
+ *
+ * 另外两个可选扩展位，都是给教材目录树用的：
+ * - `showAttach`：名称右侧多一个「关联知识点」图标按钮（emit `attach`）；
+ * - `rowNote`：名称之后的省略附注（章节关联的知识点），超出宽度打省略号，
+ *   悬浮看全文靠原生 `title`。
+ *
  * 受控组件：只读取 `nodes`，一切数据变更都 emit 给宿主（宿主自己调 API 或改本地数据）。
  * 内部仅持有视图态（搜索词、折叠集合、拖拽状态）。
  */
 import { computed, ref } from 'vue'
 import { AppIcon, AppListToolbar, AppSearchInput, showToast } from '@aiteach/shared'
-import AppSwitch from '@/components/ui/AppSwitch.vue'
 import type { FlatTreeNode, TreeRowConfig, TreeTag } from './tree-utils'
 import { childrenOf, depthOf, isDescendant } from './tree-utils'
 
@@ -44,8 +54,23 @@ const props = withDefaults(
     indent?: number
     /** 行标签补充（排在「第 N 级 / 已停用」之前） */
     rowTags?: (node: T, depth: number) => TreeTag[]
+    /**
+     * 名称之后的一段附注（教材目录：该章节关联的知识点）。
+     * 返回 null 则该行不显示；`title` 用于鼠标悬浮查看全文（省略号看不全时）。
+     */
+    rowNote?: (node: T, depth: number) => { text: string; title: string } | null
+    /** 行内操作渲染成图标按钮（配 `title` 悬浮提示）；默认 false = 文字按钮 */
+    iconActions?: boolean
+    /** 名称右侧的「关联」动作（教材目录 → 关联知识点） */
+    showAttach?: boolean
+    attachIcon?: string
+    attachTitle?: string
     /** 单行能力（如分类根不可编辑 / 不可拖拽） */
     rowConfig?: (node: T, depth: number) => TreeRowConfig
+    /** 是否允许点击行选中（配合 `activeId` 高亮）—— 仅左侧导航型树需要，默认关 */
+    selectable?: boolean
+    /** 当前选中行的 id（`selectable` 为真时生效） */
+    activeId?: NodeId | null
   }>(),
   {
     maxDepth: 5,
@@ -62,6 +87,13 @@ const props = withDefaults(
     draggable: true,
     allowRootLevel: true,
     indent: 18,
+    selectable: false,
+    activeId: null,
+    rowNote: undefined,
+    iconActions: false,
+    showAttach: false,
+    attachIcon: 'branch',
+    attachTitle: '关联知识点',
   },
 )
 
@@ -71,6 +103,8 @@ const emit = defineEmits<{
   edit: [node: T]
   remove: [node: T]
   toggle: [node: T]
+  attach: [node: T]
+  select: [node: T]
   move: [payload: { id: T['id']; parentId: T['id'] | null; beforeId: T['id'] | null }]
   'move-by': [payload: { node: T; direction: -1 | 1 }]
 }>()
@@ -122,15 +156,59 @@ function configOf(node: T, depth: number): Required<TreeRowConfig> {
     editable: raw.editable !== false,
     addable: raw.addable !== false,
     draggable: raw.draggable !== false,
+    toggleable: raw.toggleable !== false,
   }
+}
+
+/** 行内动作：文字 / 图标两种形态共用一份清单，模板只负责按形态渲染 */
+interface RowAction {
+  key: 'attach' | 'add-child' | 'move-up' | 'move-down' | 'edit' | 'toggle' | 'remove'
+  icon: string
+  label: string
+  /** 删除用红色，其余为主色 */
+  danger?: boolean
+  disabled?: boolean
 }
 
 interface TreeRow {
   node: T
   depth: number
   hasChildren: boolean
+  /** 当前是否处于展开态（供箭头旋转）。搜索命中路径会被强制展开，这里一并反映 */
+  expanded: boolean
   cfg: Required<TreeRowConfig>
   tags: TreeTag[]
+  note: { text: string; title: string } | null
+  actions: RowAction[]
+}
+
+/** 动作清单：顺序即渲染顺序（关联 → 加子节点 → 上移 / 下移 → 编辑 → 停用/启用 → 删除） */
+function actionsOf(node: T, depth: number, cfg: Required<TreeRowConfig>): RowAction[] {
+  const list: RowAction[] = []
+  if (props.showAttach) list.push({ key: 'attach', icon: props.attachIcon, label: props.attachTitle })
+  if (props.showAddChild && cfg.addable) {
+    list.push({ key: 'add-child', icon: 'plus', label: '加子节点', disabled: depth + 1 >= props.maxDepth })
+  }
+  if (props.showMove) {
+    list.push({ key: 'move-up', icon: 'chevron-up', label: '上移', disabled: !canMove(node, -1) })
+    list.push({ key: 'move-down', icon: 'chevron-down', label: '下移', disabled: !canMove(node, 1) })
+  }
+  if (cfg.editable && props.showEdit) list.push({ key: 'edit', icon: 'edit', label: '编辑' })
+  /* 停用 / 启用：按当前状态显示相反动作，排在删除之前 */
+  if (props.showToggle && cfg.toggleable) {
+    list.push({ key: 'toggle', icon: 'power', label: node.enabled ? '停用' : '启用' })
+  }
+  if (cfg.editable && props.showRemove) list.push({ key: 'remove', icon: 'trash', label: '删除', danger: true })
+  return list
+}
+
+function emitAction(key: RowAction['key'], row: TreeRow) {
+  if (key === 'attach') emit('attach', row.node)
+  else if (key === 'add-child') emit('add-child', row.node)
+  else if (key === 'edit') emit('edit', row.node)
+  else if (key === 'toggle') emit('toggle', row.node)
+  else if (key === 'remove') emit('remove', row.node)
+  else emit('move-by', { node: row.node, direction: key === 'move-up' ? -1 : 1 })
 }
 
 /** 展平为带缩进的行：祖先全部展开才可见；搜索时自动展开命中路径 */
@@ -148,7 +226,17 @@ const rows = computed<TreeRow[]>(() => {
         const tags: TreeTag[] = [...(props.rowTags?.(node, depth) ?? [])]
         if (depth + 1 >= props.maxDepth) tags.push({ text: `第 ${depth + 1} 级`, tone: 'orange' })
         if (!node.enabled) tags.push({ text: '已停用', tone: 'red' })
-        result.push({ node, depth, hasChildren: childrenOf(props.nodes, node.id).length > 0, cfg: configOf(node, depth), tags })
+        const cfg = configOf(node, depth)
+        result.push({
+          node,
+          depth,
+          hasChildren: childrenOf(props.nodes, node.id).length > 0,
+          expanded: !collapsed,
+          cfg,
+          tags,
+          note: props.rowNote?.(node, depth) ?? null,
+          actions: actionsOf(node, depth, cfg),
+        })
       }
       walk(node.id, depth + 1, kw ? false : hidden || collapsed, nextSeen)
     }
@@ -243,11 +331,14 @@ function onDrop(event: DragEvent) {
             disabled: !row.node.enabled,
             hit: keyword.trim() !== '' && row.node.name.includes(keyword.trim()),
             dragging: draggingId === row.node.id,
+            selected: selectable && activeId != null && row.node.id === activeId,
+            'is-selectable': selectable,
             'drop-before': dropTarget?.id === row.node.id && dropTarget.position === 'before',
             'drop-after': dropTarget?.id === row.node.id && dropTarget.position === 'after',
             'drop-inside': dropTarget?.id === row.node.id && dropTarget.position === 'inside',
           }"
           :style="{ paddingLeft: `${12 + row.depth * indent}px` }"
+          @click="selectable && emit('select', row.node)"
           @dragover="onDragOver($event, row.node)"
           @drop="onDrop"
         >
@@ -257,32 +348,37 @@ function onDrop(event: DragEvent) {
             type="button"
             :draggable="draggable && row.cfg.draggable && !keyword.trim()"
             title="拖拽移动"
+            @click.stop
             @dragstart="onDragStart($event, row)"
             @dragend="onDragEnd"
           >⠿</button>
-          <button class="chev-btn" :class="{ invisible: !row.hasChildren }" type="button" @click="toggleCollapse(row.node.id)">
+          <button
+            class="chev-btn"
+            :class="{ invisible: !row.hasChildren, expanded: row.expanded }"
+            type="button"
+            :title="row.expanded ? '收起' : '展开'"
+            @click.stop="toggleCollapse(row.node.id)"
+          >
             <AppIcon name="chevron-right" :size="14" />
           </button>
           <span class="node-name">{{ row.node.name }}</span>
+          <!-- 名称后的附注（教材目录：关联的知识点）；超出省略，悬浮看全文 -->
+          <span v-if="row.note" class="node-note" :title="row.note.title">{{ row.note.text }}</span>
           <span v-for="(tag, tagIndex) in row.tags" :key="`${tagIndex}-${tag.text}`" class="tag" :class="`tag-${tag.tone ?? 'gray'}`">{{ tag.text }}</span>
 
-          <div class="row-ops">
-            <AppSwitch v-if="showToggle" :model-value="row.node.enabled" @update:model-value="emit('toggle', row.node)" />
+          <div class="row-ops" @click.stop>
             <button
-              v-if="showAddChild && row.cfg.addable"
-              class="mini-btn"
+              v-for="action in row.actions"
+              :key="action.key"
+              :class="[iconActions ? 'op-icon' : 'mini-btn', action.danger && 'danger']"
               type="button"
-              :disabled="row.depth + 1 >= maxDepth"
-              @click="emit('add-child', row.node)"
-            >加子节点</button>
-            <template v-if="showMove">
-              <button class="mini-btn" type="button" :disabled="!canMove(row.node, -1)" @click="emit('move-by', { node: row.node, direction: -1 })">上移</button>
-              <button class="mini-btn" type="button" :disabled="!canMove(row.node, 1)" @click="emit('move-by', { node: row.node, direction: 1 })">下移</button>
-            </template>
-            <template v-if="row.cfg.editable">
-              <button v-if="showEdit" class="mini-btn" type="button" @click="emit('edit', row.node)">编辑</button>
-              <button v-if="showRemove" class="mini-btn danger" type="button" @click="emit('remove', row.node)">删除</button>
-            </template>
+              :title="iconActions ? action.label : undefined"
+              :disabled="action.disabled"
+              @click="emitAction(action.key, row)"
+            >
+              <AppIcon v-if="iconActions" :name="action.icon" :size="15" />
+              <template v-else>{{ action.label }}</template>
+            </button>
           </div>
         </div>
       </template>
@@ -326,8 +422,11 @@ function onDrop(event: DragEvent) {
 }
 .tree-row:hover { background: #f7f9fd; }
 .tree-row.disabled .node-name { color: var(--sub); text-decoration: line-through; }
+.tree-row.is-selectable { cursor: pointer; }
 .tree-row.hit,
+.tree-row.selected,
 .tree-row.drop-inside { background: var(--brand-soft); }
+.tree-row.selected .node-name { color: var(--brand-deep); font-weight: 600; }
 .tree-row.drop-before::before,
 .tree-row.drop-after::after {
   content: '';
@@ -369,7 +468,23 @@ function onDrop(event: DragEvent) {
 }
 .chev-btn:hover { background: #e8ecf4; }
 .chev-btn.invisible { visibility: hidden; }
-.node-name { font-weight: 500; }
+/* 展开态让箭头指向下方（收起 = 指向右侧）。此前只有图标、没有旋转，
+   展开 / 收起时箭头始终朝右，看不出这行到底是开是合 */
+.chev-btn svg { transition: transform 0.16s; }
+.chev-btn.expanded svg { transform: rotate(90deg); }
+.node-name { font-weight: 500; flex-shrink: 0; }
+/* 名称后的附注（章节关联的知识点）：限宽 + 省略号，全文靠原生 title 悬浮查看。
+   限宽是为了「悬浮露出操作按钮时不再改宽」——否则鼠标扫过整棵目录，附注会跟着伸缩跳动 */
+.node-note {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--sub);
+}
 .row-ops {
   margin-left: auto;
   display: none;
@@ -378,4 +493,24 @@ function onDrop(event: DragEvent) {
 }
 .tree-row:hover .row-ops { display: inline-flex; }
 .row-ops button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* 图标形态的行内操作（教材目录）：一行动作多，用图标 + title 提示 */
+.op-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  padding: 0;
+  color: var(--brand);
+  transition: background 0.15s, color 0.15s;
+}
+.op-icon:hover { background: var(--brand-soft); }
+.op-icon.danger { color: var(--danger); }
+.op-icon.danger:hover { background: var(--danger-soft); }
+.op-icon:disabled { color: #c3cad8; background: transparent; }
 </style>
