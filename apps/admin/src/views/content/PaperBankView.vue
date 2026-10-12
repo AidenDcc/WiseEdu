@@ -1,307 +1,368 @@
 <script setup lang="ts">
 /**
- * 公共试卷库管理（P-03-11/12/13）。
+ * 平台管理端 · 公共试卷库。
  *
- * 平台侧试卷资产的审核与上架；试卷解析拆题入库（P-03-12 AI 增强）在演示中用
- * 「解析入库」按钮体现拆解结果，真实环境接 OCR + 题目结构化服务。
+ * 骨架（筛选面板 + 表格 / 详细列表 + 分页 + 考试类型树）与筛选模型都在
+ * `@aiteach/business-common`，与机构端「试卷库」共用同一份。
+ * 原平台端的版本（学科 / 年级简树 + 审核队列 + 解析入库）已被替换，UI 与机构端逐项一致。
  *
- * 展示方式对齐机构端「试卷库」：左侧教材树（学科 / 年级）+ 右上筛选面板 +
- * 表格 / 详细双视图 + 分页 + 预览抽屉。
+ * 本页只保留「平台端自己的事」：
+ * - 取数：`@/api/bank`（接平台公共库时只改那个文件的 URL，页面与公共组件不动）；
+ * - 平台专属筛选条件：走 `BankFilterBar` 的 `extraRows` / `#extraFilter`。当前与机构端一致，
+ *   故 `EXTRA_ROWS` 为空 —— 将来加「所属机构」「卷源」这类维度时加在这里；
+ * - 操作按钮：走 `PaperListPanel` 的 `#renderOperation`（平台端将来会加「审核」类入口）。
+ *   **当前按「与机构端一致」处理**，所以按钮暂时与机构端相同；
+ * - 弹窗（平行卷 / 导出 / 整卷预览）留在本页：工作台没有导出与删除，塞进公共组件只会退化成 if/else。
+ *
+ * 待办：平台端自己的「试卷审核（通过 / 驳回）」「解析拆题入库」入口尚未恢复。
+ *
+ * ——— 以下是机构端原页面的设计说明，迁移后同样成立 ———
+ * 只展示**已审核通过**的试卷（个人创建的草稿存「我的文件」，编辑从那里进），
+ * 因此列表是只读的 —— 没有「编辑 / 提交审核」入口，仅保留 预览 / 平行卷 / 导出 / 删除。
+ *
+ * 版式与题库管理对齐：左边一棵树、右上筛选条件、右下列表。左边的树是**考试类型树**
+ * （分类 → 考试类型），候选项随年级 / 学科收窄 —— 因此筛选面板里不再有「考试类型」这一行：
+ * 同一个值两处都能改，必然出现「面板里清掉了、树上还亮着」。
  */
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
-  AppFilterPanel,
-  AppListToolbar,
   AppIcon,
-  AppPageHeader,
-  AppSegmented,
-  PLATFORM_CONTENT_STATUS_TEXT,
+  appConfirm,
   showToast,
-  AppDrawer,
+  groupByPaperCategory,
   AppModal,
 } from '@aiteach/shared'
-import type { FilterRowDef, PlatformContentStatus, PlatformPaper } from '@aiteach/shared'
-import AppPagination from '@/components/ui/AppPagination.vue'
-import SideTree, { type SideTreeNode } from '@/components/ui/SideTree.vue'
-import { fetchPlatformPapers, reviewPlatformPaper } from '@/api/content'
+import type { OrgPaper, OrgQuestion } from '@aiteach/shared'
+import {
+  BankFilterBar,
+  PAPER_EXAM_TYPE_ROW,
+  PAPER_FILTER_ROWS,
+  PAPER_MORE_ROWS,
+  PAPER_PANEL_ROWS,
+  PaperListPanel,
+  PaperPreviewModal,
+  PaperTypeTree,
+  ParallelPaperDialog,
+  defaultPaperFilterSelection,
+  exportPaperDoc,
+  exportPaperPdf,
+  paperDictTypes,
+  paperFilterFields,
+  recommendPapers,
+  toPaperFilterRowDefs,
+  useBaseData,
+  type PaperFilterRow,
+  type PaperTypeGroup,
+} from '@aiteach/business-common'
+import { browsePaper, deletePaper, downloadPaper, fetchPapers, fetchQuestions, fetchTenantDict } from '@/api/bank'
 
-const all = ref<PlatformPaper[]>([])
+const papers = ref<OrgPaper[]>([])
+const questions = ref<OrgQuestion[]>([])
+
+/** 考试类型取自全局单例：左树要拿到 `paperCategory` 才能分组，光有名字不够，也免了本页再查一遍字典 */
+const { examTypeItems, stageOf, ensure: ensureBase } = useBaseData()
+
+/* ===== 筛选 =====
+ * 行定义与取值映射都在公共层（`paper/filter-model`），本页只提供本端数据与 scope。
+ * 平台专属条件加在 EXTRA_ROWS 里即可 —— 与共有行同权：进折叠汇总、也进「清空」。 */
+const EXTRA_ROWS: PaperFilterRow[] = []
+
+/** 面板里渲染的行：共有行（主条件 + 更多查询）+ 本端专属 */
+const PANEL_ROWS = [...PAPER_PANEL_ROWS, ...EXTRA_ROWS]
+
+/** 参与过滤的全部维度 —— 比面板多一个考试类型（那份值由左树写，不在面板里出入） */
+const ALL_ROWS = [...PAPER_PANEL_ROWS, PAPER_EXAM_TYPE_ROW, ...EXTRA_ROWS]
+
+const filters = reactive<Record<string, string[]>>(defaultPaperFilterSelection(EXTRA_ROWS))
+const filterOptions = reactive<Record<string, string[]>>({})
+
+/** 每个筛选 key 从试卷上取哪个值 —— 映射表在公共层，因为两端口径必须一致 */
+const FIELD_OF = paperFilterFields()
+
+const filterRowDefs = computed(() => toPaperFilterRowDefs(PAPER_FILTER_ROWS, filterOptions))
+const moreRowDefs = computed(() => toPaperFilterRowDefs(PAPER_MORE_ROWS, filterOptions))
+const extraRowDefs = computed(() => toPaperFilterRowDefs(EXTRA_ROWS, filterOptions))
+
+/** 面板回传整份筛选值（覆盖式回写） */
+function onFiltersChange(next: Record<string, string[]>) {
+  PANEL_ROWS.forEach((row) => {
+    filters[row.key] = next[row.key] ?? []
+  })
+  /* 考试类型：正常改某一行的回传里它一定在（面板 spread 的是整份 modelValue），原样写回即可；
+     而「清空」只回传面板自己渲染的那几行、`examType` 会缺席（undefined）—— 那正是把左树一起
+     清掉的信号。少了这一句，点「清空」后树上还亮着一类考试类型，列表却已经按它筛过了。 */
+  filters.examType = next.examType ?? []
+}
+
 const keyword = ref('')
-const loading = ref(true)
+const page = ref(1)
 
-/* ===== 左侧树：学科 → 年级 ===== */
-const scope = ref({ subject: '', grade: '' })
-const treeSelected = ref('all')
+/** 单份卷是否命中当前条件；`skip` 用来算「这一维度不算」的卷池（左树计数用） */
+function matches(row: OrgPaper, skip?: string): boolean {
+  for (const def of ALL_ROWS) {
+    if (def.key === skip) continue
+    const selected = filters[def.key] ?? []
+    const field = FIELD_OF[def.key]
+    if (field && selected.length > 0 && !selected.includes(field(row))) return false
+  }
+  return !keyword.value || row.name.includes(keyword.value)
+}
 
-const treeNodes = computed<SideTreeNode[]>(() => {
-  const bySubject = new Map<string, PlatformPaper[]>()
-  for (const p of all.value) {
-    if (!bySubject.has(p.subject)) bySubject.set(p.subject, [])
-    bySubject.get(p.subject)!.push(p)
-  }
-  const groups: SideTreeNode[] = [{ id: 'all', label: '全部试卷', count: all.value.length }]
-  for (const [subject, ps] of bySubject) {
-    const grades = [...new Set(ps.map((p) => p.grade))]
-    const children: SideTreeNode[] = grades.map((grade) => ({
-      id: `g:${subject}/${grade}`,
-      label: grade,
-      count: ps.filter((p) => p.grade === grade).length,
-    }))
-    groups.push({ id: `s:${subject}`, label: subject, count: ps.length, children })
-  }
-  return groups
+/**
+ * 卷池：除考试类型外其余条件全生效。
+ * 左树的计数用它而不是全库计数 —— 否则会与点下去看到的结果对不上
+ * （树上写着「竞赛 5」、点进去只有 2 条，用户会以为丢了卷）。与组卷工作台试卷页签同一口径。
+ */
+const pool = computed(() => papers.value.filter((row) => matches(row, 'examType')))
+const filtered = computed(() => papers.value.filter((row) => matches(row)))
+const rows = computed(() => filtered.value.slice((page.value - 1) * 10, page.value * 10))
+
+/* ===== 左侧：考试类型树（分组 → 考试类型） =====
+ * 分组与归属来自平台管理端「考试类型」树（分组名经 `paperCategory` 投影下来），这里只按
+ * 字典里**首次出现的顺序**归组 —— 那份顺序就是管理端树上前序遍历的顺序。平台上给分组改名 /
+ * 增删，机构端的树跟着变，代码里没有任何分类常量；没配分类的历史项不进树，于是筛不到它。
+ * 与组卷工作台试卷页签同一条口径。 */
+const scopedExamTypeItems = computed(() => {
+  const stages = filters.grade.map((grade) => stageOf(grade) ?? '')
+  const subjects = filters.subject
+  return examTypeItems.value.filter((item) => {
+    /* 年级 / 学科都是多选：与「任一选中年级对应的学段」且「任一选中学科」兼容就留下 ——
+       按交集算会把「高一 + 高二」这种多选直接筛成空树。空串 = 该年级不在字典里，视为不限学段。
+       适配学段本身就是多选（见 `item.stages`），与选中集合有交集即命中。 */
+    const stageOk =
+      stages.length === 0 || stages.includes('') || !item.stages?.length || item.stages.some((name) => stages.includes(name))
+    const subjectOk =
+      subjects.length === 0 || !item.subjects?.length || item.subjects.some((name) => subjects.includes(name))
+    return stageOk && subjectOk
+  })
 })
 
-function onTreeSelect(id: string) {
-  treeSelected.value = id
-  if (id === 'all') {
-    scope.value = { subject: '', grade: '' }
-  } else if (id.startsWith('s:')) {
-    scope.value = { subject: id.slice(2), grade: '' }
-  } else if (id.startsWith('g:')) {
-    const [subject, grade] = id.slice(2).split('/')
-    scope.value = { subject, grade }
-  }
-  page.value = 1
-}
+/** 考试类型 → 卷数。每个叶子查一次即可，不必为每个叶子把卷池重筛一遍 */
+const poolByExamType = computed(() => {
+  const map = new Map<string, number>()
+  pool.value.forEach((row) => {
+    const key = row.examType ?? ''
+    map.set(key, (map.get(key) ?? 0) + 1)
+  })
+  return map
+})
 
-/* ===== 右上筛选面板（状态 / 来源） ===== */
-const STATUS_OPTIONS = [
-  { value: 'pending', text: '待审核' },
-  { value: 'published', text: '已上架' },
-  { value: 'rejected', text: '已驳回' },
-  { value: 'offline', text: '已下架' },
-]
-const SOURCES = computed(() => [...new Set(all.value.map((p) => p.source))])
-
-const FILTERS = reactive<Record<string, string[]>>({ status: [], source: [] })
-
-function onFiltersChange(next: Record<string, string[]>) {
-  FILTERS.status = next.status ?? []
-  FILTERS.source = next.source ?? []
-}
-
-const FILTER_ROWS = computed<FilterRowDef[]>(() => [
-  {
-    key: 'status',
-    label: '状态',
-    options: STATUS_OPTIONS.map((item) => item.value),
-    optionLabels: Object.fromEntries(STATUS_OPTIONS.map((item) => [item.value, item.text])),
-    multiple: false,
-  },
-  { key: 'source', label: '来源', options: SOURCES.value, multiple: false },
-])
-
-/* ===== 列表筛选 / 分页 / 视图 ===== */
-const filtered = computed(() =>
-  all.value.filter((p) => {
-    if (scope.value.subject && p.subject !== scope.value.subject) return false
-    if (scope.value.grade && p.grade !== scope.value.grade) return false
-    const st = FILTERS.status[0]
-    if (st && p.status !== st) return false
-    const src = FILTERS.source[0]
-    if (src && p.source !== src) return false
-    if (keyword.value.trim() && !p.name.includes(keyword.value.trim())) return false
-    return true
+const treeGroups = computed<PaperTypeGroup[]>(() =>
+  groupByPaperCategory(scopedExamTypeItems.value).map((group) => {
+    const items = group.items.map((item) => ({ name: item.name, count: poolByExamType.value.get(item.name) ?? 0 }))
+    return { name: group.name, items, count: items.reduce((sum, item) => sum + item.count, 0) }
   }),
 )
 
-const viewMode = ref<'table' | 'detail'>('table')
-const page = ref(1)
-const pageSize = 10
-const paged = computed(() => filtered.value.slice((page.value - 1) * pageSize, page.value * pageSize))
+/**
+ * 年级 / 学科一换，树上原先选中的考试类型可能整个消失 —— 那个值既渲染不出选中态、也没地方取消，
+ * 却仍在参与筛选，结果恒为空。字典没到位时不动，免得把选中项误清空（同题库管理的 onScopeChange）。
+ */
+watch(scopedExamTypeItems, (items) => {
+  if (!items.length) return
+  const alive = new Set(items.map((item) => item.name))
+  const next = filters.examType.filter((name) => alive.has(name))
+  if (next.length !== filters.examType.length) filters.examType = next
+})
 
-const pendingCount = computed(() => all.value.filter((p) => p.status === 'pending').length)
+/* 筛选 / 关键词变动后停在原页码会看到空列表，回第一页。
+   分页已经搬进 PaperListPanel，但这条复位规则依赖的筛选状态仍归本页所有，所以留在这里。 */
+watch([() => JSON.stringify(filters), keyword], () => {
+  page.value = 1
+})
 
-function statusTag(status: PlatformContentStatus) {
-  if (status === 'published') return 'tag-green'
-  if (status === 'pending') return 'tag-orange'
-  if (status === 'rejected') return 'tag-red'
-  return 'tag-gray'
+async function load() {
+  /* 试卷库只放审核通过的卷；草稿 / 待审在「我的文件」与审核中心里 */
+  const [all, qs] = await Promise.all([fetchPapers(), fetchQuestions()])
+  papers.value = all.filter((row) => row.status === 'approved')
+  questions.value = qs
 }
 
-/* ===== 详情 / 审核 ===== */
-const detail = ref<PlatformPaper | null>(null)
-const reviewing = ref<null | { id: number; name: string; pass: boolean }>(null)
+async function loadDicts() {
+  /* examType 不在这里拉：左树的候选项要按年级 / 学科实时收窄、还要 paperCategory 才能分组，
+     统一走 useBaseData（全站单例，组卷工作台已经加载过同一份） */
+  const types = paperDictTypes(PANEL_ROWS)
+  await Promise.all([
+    ensureBase(),
+    ...types.map(async (type) => {
+      filterOptions[type] = (await fetchTenantDict(type)).map((item) => item.name)
+    }),
+  ])
+}
 
-async function submitReview() {
-  if (!reviewing.value) return
+function totalScore(paper: OrgPaper) {
+  return paper.sections.reduce((sum, s) => sum + s.questions.reduce((t, q) => t + q.score, 0), 0)
+}
+function totalCount(paper: OrgPaper) {
+  return paper.sections.reduce((sum, s) => sum + s.questions.length, 0)
+}
+
+/* ===== 预览 ===== */
+const preview = ref<OrgPaper | null>(null)
+
+/** 打开整卷预览 = 一次浏览：计数发给 mock，本地同步 +1（无需为此重拉列表） */
+function onPreview(row: OrgPaper) {
+  preview.value = row
+  void browsePaper(row.id)
+  row.viewCount = (row.viewCount ?? 0) + 1
+}
+
+/* 预览左栏「推荐试卷」：卷池就是本页这份已审核列表（`papers`，不受当前筛选影响 ——
+   推荐要的是「同一批人能用的卷」，不是另一个搜索结果列表）。
+   筛选与排序与组卷工作台「试卷」页签同一份实现，见 paper-recommend.ts */
+const recommended = computed(() => recommendPapers(papers.value, preview.value))
+
+/* ===== 平行卷（FR-PP-015） =====
+   弹窗本体在 ParallelPaperDialog（工作台「试卷」页签也用同一个），这里只留「选中哪份卷」 */
+const parallelTarget = ref<OrgPaper | null>(null)
+
+/* ===== 导出 =====
+ * 不再走「创建导出任务」的占位：试卷数据本来就在前端，直接生成文档即可。
+ * 版本（学生版 / 教师版 / 纯答案）必须让老师选——把带答案的教师版误发给学生是实打实的教学事故，
+ * 所以不做「默认给最全的」这种省事的决定。
+ */
+const exportTarget = ref<OrgPaper | null>(null)
+const exportVersion = ref<'student' | 'teacher' | 'answer'>('student')
+const exportWithCard = ref(true)
+
+function openExport(row: OrgPaper) {
+  exportTarget.value = row
+  exportVersion.value = 'student'
+  exportWithCard.value = row.sections.some((section) => section.questions.length > 0)
+}
+
+function doExport(kind: 'doc' | 'pdf') {
+  const paper = exportTarget.value
+  if (!paper) return
+  if (totalCount(paper) === 0) {
+    showToast('该试卷还没有题目，无法导出', 'error')
+    return
+  }
+  const options = { version: exportVersion.value, withInfo: true, withAnswerCard: exportWithCard.value }
   try {
-    await reviewPlatformPaper(reviewing.value.id, reviewing.value.pass)
-    showToast(reviewing.value.pass ? '已通过并上架' : '已驳回', 'success')
-    reviewing.value = null
-    detail.value = null
-    load()
+    if (kind === 'doc') {
+      const fileName = exportPaperDoc(paper, questions.value, options)
+      showToast(`已导出 ${fileName}`, 'success')
+    } else {
+      exportPaperPdf(paper, questions.value, options)
+      showToast('已在新窗口打开，选择「另存为 PDF」即可', 'success')
+    }
+    /* 导出成功才算一次下载，本地同步 +1 */
+    void downloadPaper(paper.id)
+    paper.downloadCount = (paper.downloadCount ?? 0) + 1
+    exportTarget.value = null
   } catch (error) {
-    showToast(error instanceof Error ? error.message : '操作失败', 'error')
+    showToast(error instanceof Error ? error.message : '导出失败', 'error')
   }
 }
 
-function parseInto(row: PlatformPaper) {
-  void row
-  showToast('解析拆题入库（AI 增强）已加入任务队列', 'success')
+async function onDelete(row: OrgPaper) {
+  if (!(await appConfirm(`删除《${row.name}》？删除后放入回收站（保留 30 天可恢复）`, { type: 'danger' }))) return
+  await deletePaper(row.id)
+  showToast('已放入回收站', 'success')
+  load()
 }
 
-async function load() {
-  loading.value = true
-  all.value = await fetchPlatformPapers('', '')
-  loading.value = false
-}
-
-onMounted(load)
+onMounted(() => {
+  void load()
+  void loadDicts()
+})
 </script>
 
 <template>
   <div class="paper-layout">
-    <!-- 左：学科 / 年级树 -->
-    <aside class="tree-panel">
-      <div class="tree-title">教材目录</div>
-      <div class="tree-body">
-        <SideTree :nodes="treeNodes" :selected="treeSelected" :default-expand="true" @select="onTreeSelect" />
-      </div>
-    </aside>
+    <!-- 左：考试类型树（分类 → 考试类型，候选项随年级 / 学科收窄）。
+         选中即写进 filters.examType —— 与面板共用同一份筛选状态，「清空」也会一并清掉它 -->
+    <PaperTypeTree
+      title="考试类型"
+      :groups="treeGroups"
+      :selected="filters.examType"
+      @change="filters.examType = $event"
+    />
 
-    <!-- 右：筛选面板 + 列表 -->
+    <!-- 右：筛选条件在上，试卷列表在下（结构与题库管理、组卷工作台试卷页签一致） -->
     <div class="right-col">
-      <AppPageHeader desc="公共试卷库：整卷资产审核与上架；支持从试卷解析拆题入库（AI 增强），拆出的题回流公共题库。" />
+      <!-- 通用筛选面板：共有行来自公共层，平台专属条件走 extraRows / #extraFilter -->
+      <BankFilterBar
+        :rows="filterRowDefs"
+        :more-rows="moreRowDefs"
+        :extra-rows="extraRowDefs"
+        :model-value="filters"
+        @update:model-value="onFiltersChange"
+      />
 
-      <div v-if="pendingCount" class="notice-bar">
-        <AppIcon name="warning" :size="15" /> 当前有 <b>{{ pendingCount }}</b> 份试卷待审核，通过后进入公共试卷库。
-      </div>
-
-      <AppFilterPanel :rows="FILTER_ROWS" :model-value="FILTERS" @update:model-value="onFiltersChange" />
-
-      <div class="panel table-panel">
-        <AppListToolbar v-model="keyword" placeholder="试卷名称" :search-width="240">
-          <template #right>
-            <AppSegmented
-              :options="[
-                { value: 'table', label: '表格', icon: 'grid' },
-                { value: 'detail', label: '详细', icon: 'file' },
-              ]"
-              :model-value="viewMode"
-              @update:model-value="(v: string) => (viewMode = v as 'table' | 'detail')"
-            />
-          </template>
-        </AppListToolbar>
-
-        <!-- 表格视图 -->
-        <div v-if="viewMode === 'table'" class="data-table-wrap">
-          <table class="data-table paper-table">
-            <thead>
-              <tr>
-                <th style="width: 46px">序号</th>
-                <th>试卷名称</th>
-                <th style="width: 130px">学科 / 年级</th>
-                <th style="width: 90px">题量</th>
-                <th style="width: 90px">总分</th>
-                <th style="width: 130px">来源</th>
-                <th style="width: 84px">状态</th>
-                <th style="width: 200px">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-if="loading && all.length === 0">
-                <td colspan="8" class="empty-row">加载中…</td>
-              </tr>
-              <tr v-else-if="paged.length === 0">
-                <td colspan="8" class="empty-row">暂无试卷</td>
-              </tr>
-              <template v-else>
-                <tr v-for="(row, i) in paged" :key="row.id">
-                  <td>{{ (page - 1) * pageSize + i + 1 }}</td>
-                  <td class="name-cell" @click="detail = row">{{ row.name }}</td>
-                  <td>{{ row.subject }} · {{ row.grade }}</td>
-                  <td>{{ row.questionCount }} 题</td>
-                  <td>{{ row.fullScore }} 分</td>
-                  <td>{{ row.source }}</td>
-                  <td><span class="tag" :class="statusTag(row.status)">{{ PLATFORM_CONTENT_STATUS_TEXT[row.status] }}</span></td>
-                  <td>
-                    <div class="op-group">
-                      <button class="mini-btn" type="button" @click="detail = row">详情</button>
-                      <button v-if="row.status === 'pending'" class="mini-btn" type="button" @click="reviewing = { id: row.id, name: row.name, pass: true }">审核</button>
-                      <button class="mini-btn" type="button" @click="parseInto(row)">解析入库</button>
-                    </div>
-                  </td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- 详细视图 -->
-        <div v-else class="detail-list">
-          <p v-if="paged.length === 0" class="empty-row">暂无试卷</p>
-          <article v-for="row in paged" :key="row.id" class="p-card">
-            <div class="pc-meta">
-              <span class="pc-name" @click="detail = row">{{ row.name }}</span>
-              <span class="tag" :class="statusTag(row.status)">{{ PLATFORM_CONTENT_STATUS_TEXT[row.status] }}</span>
-            </div>
-            <div class="pc-info">{{ row.subject }} · {{ row.grade }} · {{ row.questionCount }} 题 · {{ row.fullScore }} 分 · {{ row.source }}</div>
-            <div class="pc-ops">
-              <button class="mini-btn" type="button" @click="detail = row">详情</button>
-              <button v-if="row.status === 'pending'" class="mini-btn" type="button" @click="reviewing = { id: row.id, name: row.name, pass: true }">审核</button>
-              <button class="mini-btn" type="button" @click="parseInto(row)">解析入库</button>
-            </div>
-          </article>
-        </div>
-
-        <AppPagination :total="filtered.length" v-model:page="page" :page-size="pageSize" />
-      </div>
+      <!-- 列表整块交给共享面板（工作台「试卷」页签用同一个），弹窗与筛选状态仍留在本页。
+           class 会透传到面板根节点上（Vue 的 attribute 透传），所以布局能在这里排 -->
+      <PaperListPanel
+        class="list-panel"
+        :rows="rows"
+        :total="filtered.length"
+        v-model:page="page"
+        v-model:keyword="keyword"
+        placeholder="试卷名称"
+        view-key="paper-list"
+        @preview="onPreview"
+      >
+        <!-- 操作列：平台端将来接自己的「审核」类入口；当前按「与机构端一致」处理 -->
+        <template #renderOperation="{ row }">
+          <button class="mini-btn" @click="onPreview(row)">预览</button>
+          <button class="mini-btn" @click="parallelTarget = row">平行卷</button>
+          <button class="mini-btn" @click="openExport(row)">导出</button>
+          <button class="mini-btn danger" @click="onDelete(row)">删除</button>
+        </template>
+      </PaperListPanel>
     </div>
 
-    <!-- 试卷详情 -->
-    <AppDrawer
-      v-if="detail"
-      title="试卷详情"
-      :subtitle="`${detail.subject} · ${detail.grade}`"
-      :width="520"
-      @close="detail = null"
-    >
-      <div class="detail-block">
-        <h4>试卷名称</h4>
-        <p class="stem-text">{{ detail.name }}</p>
-      </div>
-      <div class="detail-meta">
-        <span>学科：{{ detail.subject }}</span>
-        <span>年级：{{ detail.grade }}</span>
-        <span>题量：{{ detail.questionCount }} 题</span>
-        <span>总分：{{ detail.fullScore }} 分</span>
-        <span>来源：{{ detail.source }}</span>
-        <span>引用：{{ detail.refs }} 次</span>
-        <span>状态：{{ PLATFORM_CONTENT_STATUS_TEXT[detail.status] }}</span>
-        <span>更新时间：{{ detail.updatedAt }}</span>
-      </div>
-      <div class="drawer-actions">
-        <button v-if="detail.status === 'pending'" class="btn btn-ghost" type="button" @click="reviewing = { id: detail.id, name: detail.name, pass: false }">驳回</button>
-        <button v-if="detail.status === 'pending'" class="btn btn-primary" type="button" @click="reviewing = { id: detail.id, name: detail.name, pass: true }">通过并上架</button>
-        <button class="btn btn-ghost" type="button" @click="parseInto(detail)">解析入库</button>
-      </div>
-    </AppDrawer>
+    <!-- 平行卷弹窗（生成 + 落库 + 提示都在组件里，本页只传母卷） -->
+    <ParallelPaperDialog :paper="parallelTarget" @close="parallelTarget = null" />
 
-    <!-- 审核确认 -->
-    <AppModal
-      v-if="reviewing"
-      :title="reviewing.pass ? '通过审核' : '驳回试卷'"
-      :width="440"
-      @close="reviewing = null"
-    >
-      <p class="confirm-text">{{ reviewing.name }}</p>
-      <p class="confirm-note">
-        {{ reviewing.pass ? '通过后试卷进入公共试卷库（已上架），可由内容分发授权给租户使用。' : '驳回后试卷状态置为已驳回。' }}
+    <!-- 导出弹窗：版本必须显式选，避免把带答案的教师版误发给学生 -->
+    <AppModal v-if="exportTarget" title="导出试卷" :width="460" @close="exportTarget = null">
+      <p style="font-size: 13.5px; color: var(--ink-2); margin-bottom: 12px">
+        《{{ exportTarget.name }}》· {{ totalCount(exportTarget) }} 题 · {{ totalScore(exportTarget) }} 分
       </p>
+      <div class="f-field">
+        <label class="f-label">卷面版本</label>
+        <select v-model="exportVersion" class="f-select">
+          <option value="student">学生版（只有题目，解答留作答空白）</option>
+          <option value="teacher">教师版（附答案与解析）</option>
+          <option value="answer">纯答案页</option>
+        </select>
+      </div>
+      <label class="f-check">
+        <input v-model="exportWithCard" type="checkbox" />
+        附带答题卡参考答案
+      </label>
       <template #footer>
-        <button class="btn btn-ghost" type="button" @click="reviewing = null">取消</button>
-        <button class="btn" :class="reviewing.pass ? 'btn-primary' : 'btn-danger'" type="button" @click="submitReview">
-          {{ reviewing.pass ? '确认通过' : '确认驳回' }}
+        <button class="btn btn-ghost" @click="exportTarget = null">取消</button>
+        <button class="btn btn-ghost" @click="doExport('doc')">
+          <AppIcon name="download" :size="14" /> 导出 Word
+        </button>
+        <button class="btn btn-primary" @click="doExport('pdf')">
+          <AppIcon name="print" :size="14" /> 导出 PDF
         </button>
       </template>
     </AppModal>
+
+    <!-- 整卷预览：弹窗按真实纸张（8K/A3/16K…）自动分版排版，可切换排版样式、答题卡。
+         这里浏览的是库里已入库的现成卷，故传 `browse` —— 顶栏出分享 / 平行卷 / 分析，
+         左栏「试卷分析」带推荐试卷，每题悬停可逐题取用（与工作台「试卷」页签同一套界面） -->
+    <PaperPreviewModal
+      v-if="preview"
+      browse
+      :paper="preview"
+      :questions="questions"
+      :recommended="recommended"
+      @pick="onPreview"
+      @close="preview = null"
+    />
   </div>
 </template>
 
 <style scoped>
-.bank-layout,
+/* ===== 左右两栏 =====
+   高度随屏幕动态撑满内容区（顶栏 62 + 内容区上下内边距 44），左右各自内部滚动：左树滚动时
+   右侧筛选条不动，翻列表时左侧树不动。取值与题库管理的 .bank-layout 逐项一致，两页并排切换才不跳。 */
 .paper-layout {
   --content-h: calc(100vh - 106px);
   display: flex;
@@ -310,25 +371,6 @@ onMounted(load)
   height: var(--content-h);
   min-height: 480px;
 }
-.tree-panel {
-  width: 220px;
-  flex-shrink: 0;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-.tree-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--ink);
-  padding: 14px 14px 10px;
-  border-bottom: 1px solid var(--border);
-}
-.tree-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px; }
-
 .right-col {
   flex: 1;
   min-width: 0;
@@ -338,67 +380,22 @@ onMounted(load)
   gap: 14px;
   height: 100%;
 }
-.notice-bar {
-  display: flex;
+
+/* 列表面板吃满右栏剩余高度：工具条与分页固定，仅列表区滚动。
+   ⚠️ 类名不要取成 `type-panel` 这类与 PaperTypeTree 根节点同名的名字：父组件的 scoped 样式
+   同样会落到子组件根节点上，`flex: 1` 会把左树的 `flex-shrink: 0` 盖掉、把树撑满整行。 */
+.list-panel { flex: 1; min-height: 0; }
+.list-panel :deep(.pagination) { flex-shrink: 0; }
+
+/* 列表本体（工具条 / 表格 / 详细卡片 / 分页）已抽到 PaperListPanel，本页只剩导出弹窗的小样式 */
+.f-check {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
-  border-radius: 10px;
+  gap: 6px;
   font-size: 13px;
-  color: #92600a;
-}
-.notice-bar b { font-size: 15px; }
-
-.table-panel {
-  min-width: 0;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 14px 16px 12px;
-}
-.data-table-wrap { flex: 1; min-height: 0; overflow: auto; }
-.paper-table { table-layout: fixed; min-width: 980px; }
-.name-cell {
+  color: var(--ink-2);
   cursor: pointer;
-  color: var(--brand-deep);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  user-select: none;
 }
-.name-cell:hover { text-decoration: underline; }
-
-.detail-list {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding-right: 2px;
-}
-.p-card { border: 1px solid var(--border); border-radius: 14px; background: #fff; padding: 14px 18px; }
-.pc-meta { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.pc-name { font-size: 14px; font-weight: 700; color: var(--ink); cursor: pointer; }
-.pc-name:hover { color: var(--brand-deep); }
-.pc-info { font-size: 12.5px; color: var(--sub); }
-.pc-ops { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 10px; }
-
-.detail-block { margin-bottom: 16px; }
-.detail-block h4 { font-size: 13px; margin: 0 0 6px; color: var(--sub); }
-.stem-text { font-size: 14px; line-height: 1.8; color: var(--text); margin: 0; }
-.detail-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 18px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border);
-  font-size: 12.5px;
-  color: var(--sub);
-}
-.drawer-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
-.confirm-text { font-size: 14px; font-weight: 600; color: var(--text); margin: 0 0 8px; }
-.confirm-note { font-size: 12.5px; color: var(--sub); line-height: 1.7; margin: 0; }
+.f-check input { accent-color: var(--brand); }
 </style>

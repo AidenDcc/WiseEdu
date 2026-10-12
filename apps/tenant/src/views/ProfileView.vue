@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppAvatar, AppIcon, AppPageHeader, AppTabs, fileToSquareDataUrl, showToast, appConfirm } from '@aiteach/shared'
+import { AppAvatar, AppIcon, AppPageHeader, AppTabs, fileToSquareDataUrl, showToast, appConfirm, AppSwitch } from '@aiteach/shared'
 import type { TabDef } from '@aiteach/shared'
-import AppSwitch from '@/components/ui/AppSwitch.vue'
+
 import { useAuthStore } from '@/stores/auth'
 import { clearDemoIdentity, setIdentityAvatar, useDemoRole } from '@/composables/useDemoRole'
 import { fetchOrgLoginLogs } from '@/api/org'

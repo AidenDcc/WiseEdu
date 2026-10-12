@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast, appConfirm, ApiError, AI_MODEL_TYPE_TEXT, AppModal } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, appConfirm, ApiError, AI_MODEL_TYPE_TEXT, AppModal, AppSwitch } from '@aiteach/shared'
 import type { AiModel, AiModelType } from '@aiteach/shared'
-import AppSwitch from '@/components/ui/AppSwitch.vue'
+
 import { fetchAiModels, healthCheckAiModel, saveAiModel, testAiModel, toggleAiModel } from '@/api/platform'
 
 const list = ref<AiModel[]>([])

@@ -6,9 +6,9 @@ import MediaDrawSelectDialog from '@/components/draw/MediaDrawSelectDialog.vue'
 import AiDrawGenerateDialog from '@/components/draw/AiDrawGenerateDialog.vue'
 import DrawEditorHost from '@/components/draw/DrawEditorHost.vue'
 import { deleteMedia, fetchMedia, fetchMediaDetail, linkMedia, uploadMedia } from '@/api/org'
-import { useBaseData } from '@/composables/useBaseData'
-import { useKnowledgePool } from '@/composables/useKnowledgePool'
-import { readAsDataUrl } from '@/utils/file'
+import { useBaseData } from '@aiteach/business-common'
+import { useKnowledgePool } from '@aiteach/business-common'
+import { readAsDataUrl } from '@aiteach/business-common'
 
 /**
  * 多媒体资源按类型拆分的资源库视图（图片 / 小程序动画 / 视频 三个菜单共用）。

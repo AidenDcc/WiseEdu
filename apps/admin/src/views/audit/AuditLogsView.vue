@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { AppFilterPanel, AppIcon, AppListToolbar, showToast, AppModal } from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, showToast, AppModal, AppPagination } from '@aiteach/shared'
 import type { ErrorLog, FilterRowDef, LoginLog, OperationLog } from '@aiteach/shared'
-import AppPagination from '@/components/ui/AppPagination.vue'
+
 import { fetchErrorLogs, fetchLoginLogs, fetchOperationLogs } from '@/api/platform'
 
 type TabKey = 'login' | 'operation' | 'error'

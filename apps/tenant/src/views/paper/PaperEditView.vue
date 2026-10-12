@@ -32,12 +32,12 @@ import type {
   PaperSection,
   QuestionCorrection,
 } from '@aiteach/shared'
-import PaperBlock from '@/components/paper/PaperBlock.vue'
-import PaperPreviewModal from '@/components/paper/PaperPreviewModal.vue'
-import QuestionActionBarHost from '@/components/paper/QuestionActionBarHost.vue'
-import QuestionPreviewDrawer from '@/components/question/QuestionPreviewDrawer.vue'
-import QuestionCorrectionDialog from '@/components/question/QuestionCorrectionDialog.vue'
-import SimilarQuestionsModal from '@/components/compose/SimilarQuestionsModal.vue'
+import { PaperBlock } from '@aiteach/business-common'
+import { PaperPreviewModal } from '@aiteach/business-common'
+import { QuestionActionBarHost } from '@aiteach/business-common'
+import { QuestionPreviewDrawer } from '@aiteach/business-common'
+import { QuestionCorrectionDialog } from '@aiteach/business-common'
+import { SimilarQuestionsModal } from '@aiteach/business-common'
 import AiAssistant from '@/components/ai/AiAssistant.vue'
 import AppDropdownMenu from '@/components/ui/AppDropdownMenu.vue'
 import {
@@ -50,12 +50,12 @@ import {
   paperGeometry,
   presetOf,
   presetVars,
-  type PaperBlock as PaperBlockModel,
+  type PaperBlockModel,
   type PaperLayoutPreset,
   type PaperOrientation,
   type PaperSizeKey,
-} from '@/components/paper/paper-layouts'
-import { paginateBlocks, type PaperPage } from '@/components/paper/paginate'
+} from '@aiteach/business-common'
+import { paginateBlocks, type PaperPage } from '@aiteach/business-common'
 import {
   addPaperComment,
   collabAcceptMember,
@@ -93,8 +93,8 @@ import {
   type CollabCheckReport,
   type CollabPaperCheckInput,
 } from '@/api/ai-collab-check'
-import { useBaseData } from '@/composables/useBaseData'
-import { useComposeBasket } from '@/composables/useComposeBasket'
+import { useBaseData } from '@aiteach/business-common'
+import { useComposeBasket } from '@aiteach/business-common'
 import { useAuthStore } from '@/stores/auth'
 import { useDemoRole } from '@/composables/useDemoRole'
 import {
@@ -106,7 +106,7 @@ import {
   sectionLabelOf,
   typeOfSectionTitle,
   MAX_SECTIONS,
-} from './paper-sections'
+} from '@aiteach/business-common'
 import { COLLAB_MEMBER_CLASS, COLLAB_STATUS_CLASS } from './collab-status'
 
 const route = useRoute()

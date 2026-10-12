@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { AppFilterPanel, AppIcon, AppListToolbar, AppSearchInput, showToast } from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, AppSearchInput, showToast, AppPagination } from '@aiteach/shared'
 import type { AiCallLog, FilterRowDef } from '@aiteach/shared'
-import AppPagination from '@/components/ui/AppPagination.vue'
+
 import { fetchAiLogs } from '@/api/platform'
 import type { AiLogStats } from '@/api/platform'
 

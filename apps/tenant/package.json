@@ -9,7 +9,9 @@
     "typecheck": "vue-tsc --noEmit",
     "preview": "vite preview"
   },
+  "//business-common": "题库 / 试卷 / 组卷三块业务的共用层：两端不变的 UI 骨架、TS 类型、基础接口契约（见 packages/business-common）",
   "dependencies": {
+      "@aiteach/business-common": "workspace:*",
     "@aiteach/shared": "workspace:*",
     "@element-plus/icons-vue": "^2.3.2",
     "@tiptap/core": "3.31.3",

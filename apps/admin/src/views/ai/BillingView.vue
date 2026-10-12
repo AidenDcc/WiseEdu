@@ -8,8 +8,8 @@
  *   （对应租户端「AI 用量与余额」的同一份数据）。
  */
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast, AppModal } from '@aiteach/shared'
-import AppSwitch from '@/components/ui/AppSwitch.vue'
+import { AppIcon, AppPageHeader, showToast, AppModal, AppSwitch } from '@aiteach/shared'
+
 import type { AiBillingRule, TenantAiSwitch } from '@aiteach/shared'
 import { fetchBillingRules, fetchTenantAiSwitches, saveBillingRule, toggleTenantAiCapability } from '@/api/content'
 

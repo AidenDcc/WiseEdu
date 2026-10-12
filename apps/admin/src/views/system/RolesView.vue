@@ -10,9 +10,9 @@
  * 放开就会把自己关在系统管理之外。
  */
 import { computed, onMounted, reactive, ref } from 'vue'
-import { AppIcon, AppListToolbar, AppPageHeader, AppModal, appConfirm, showToast, ApiError, ADMIN_SUPER_ROLE_CODE } from '@aiteach/shared'
+import { AppIcon, AppListToolbar, AppPageHeader, AppModal, appConfirm, showToast, ApiError, ADMIN_SUPER_ROLE_CODE, AppSwitch } from '@aiteach/shared'
 import type { AdminMenuItem, AdminRoleRecord } from '@aiteach/shared'
-import AppSwitch from '@/components/ui/AppSwitch.vue'
+
 import { deleteAdminRole, fetchAdminMenus, fetchAdminRoles, saveAdminRole, toggleAdminRole } from '@/api/platform'
 
 const roles = ref<AdminRoleRecord[]>([])

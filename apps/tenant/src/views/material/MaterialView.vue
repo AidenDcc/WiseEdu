@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { AppIcon, AppPageHeader, appConfirm, MATERIAL_STATUS_TEXT, RichTextViewer, showToast, AppModal } from '@aiteach/shared'
 import type { OrgMaterial } from '@aiteach/shared'
 import { decideExample, deleteMaterial, fetchMaterials, finishMaterial, reRecognizeMaterial, uploadMaterial } from '@/api/org'
-import { useBaseData } from '@/composables/useBaseData'
+import { useBaseData } from '@aiteach/business-common'
 
 const { subjects, ensure, pick } = useBaseData()
 

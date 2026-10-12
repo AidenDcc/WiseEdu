@@ -28,20 +28,21 @@
 import { computed, defineAsyncComponent, onMounted, reactive, ref, watch } from 'vue'
 import { AppFilterPanel, PAPER_SOURCE_OPTIONS, groupByPaperCategory } from '@aiteach/shared'
 import type { FilterRowDef, OrgPaper } from '@aiteach/shared'
-import PaperListPanel from '@/components/paper/PaperListPanel.vue'
-import PaperPreviewModal from '@/components/paper/PaperPreviewModal.vue'
-import { recommendPapers } from '@/components/paper/paper-recommend'
+import { PaperListPanel } from '@aiteach/business-common'
+import { PaperPreviewModal } from '@aiteach/business-common'
+import { recommendPapers } from '@aiteach/business-common'
 /* 异步挂载：分析弹窗里的三张图带 echarts（约 500 KB），不该进本页签的首屏包 ——
    与 `PaperPreviewModal` 里的同一处理，两处动态 import 同一个模块，构建后共用一个 chunk */
-const PaperAnalysisModal = defineAsyncComponent(() => import('@/components/paper/PaperAnalysisModal.vue'))
-import ParallelPaperDialog from '@/components/paper/ParallelPaperDialog.vue'
-import PaperTypeTree, { type PaperTypeGroup } from '@/components/compose/PaperTypeTree.vue'
+const PaperAnalysisModal = defineAsyncComponent(() => import('@aiteach/business-common/components/paper/PaperAnalysisModal.vue'))
+import { ParallelPaperDialog } from '@aiteach/business-common'
+import { PaperTypeTree } from '@aiteach/business-common'
+import { type PaperTypeGroup } from '@aiteach/business-common'
 import { fetchTenantDict } from '@/api/org'
-import { scopedExamTypes, useBaseData } from '@/composables/useBaseData'
-import { useComposeData } from '@/composables/useComposeData'
-import { useComposeKeyword } from '@/composables/useComposeKeyword'
-import { matchesPaperFilter, type ComposeFilter } from '../types'
-import { paperYearOptions, yearOptionLabels } from '@/utils/paper-years'
+import { scopedExamTypes, useBaseData } from '@aiteach/business-common'
+import { useComposeData } from '@aiteach/business-common'
+import { useComposeKeyword } from '@aiteach/business-common'
+import { matchesPaperFilter, type ComposeFilter } from '@aiteach/business-common'
+import { paperYearOptions, yearOptionLabels } from '@aiteach/business-common'
 
 const props = defineProps<{ filter: ComposeFilter }>()
 const emit = defineEmits<{ patch: [patch: Partial<ComposeFilter>] }>()
@@ -258,8 +259,9 @@ const recommended = computed(() => recommendPapers(approved.value, openPreview.v
         <template #toolbar-right>
           <span class="pt-total">共 <b>{{ rows.length }}</b> 份试卷</span>
         </template>
-        <!-- 三个操作贴着卷名右侧（见 PaperListPanel 的 .pc-head） -->
-        <template #ops="{ row }">
+        <!-- 三个操作贴着卷名右侧（见 PaperListPanel 的 .pc-head）。
+             插槽名是 renderOperation：试卷库与工作台两边按钮不同，正是要靠它区分 -->
+        <template #renderOperation="{ row }">
           <button class="mini-btn" type="button" @click="openPreview = row">预览</button>
           <button class="mini-btn" type="button" @click="parallelTarget = row">平行组卷</button>
           <button class="mini-btn" type="button" @click="analysisTarget = row">试卷分析</button>

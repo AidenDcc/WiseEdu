@@ -3,7 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, showToast, AppDrawer } from '@aiteach/shared'
 import type { FilterRowDef, SquareResource } from '@aiteach/shared'
 import { collectSquare, downloadSquare, fetchSquare } from '@/api/org'
-import { useBaseData } from '@/composables/useBaseData'
+import { useBaseData } from '@aiteach/business-common'
 
 const { subjects, ensure } = useBaseData()
 

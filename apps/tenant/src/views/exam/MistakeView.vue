@@ -8,8 +8,8 @@
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, appConfirm, type FilterRowDef, type MistakeEntry, type MistakeMastery, MISTAKE_MASTERY_TEXT, MISTAKE_REASONS, type OrgQuestion, RichTextViewer, showToast, truncateRich, AppModal, AppDrawer } from '@aiteach/shared'
-import AppPagination from '@/components/ui/AppPagination.vue'
+import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, appConfirm, type FilterRowDef, type MistakeEntry, type MistakeMastery, MISTAKE_MASTERY_TEXT, MISTAKE_REASONS, type OrgQuestion, RichTextViewer, showToast, truncateRich, AppModal, AppDrawer, AppPagination } from '@aiteach/shared'
+
 import {
   buildMistakeDrill,
   deleteMistake,
@@ -20,9 +20,9 @@ import {
   saveMistake,
   setMistakeMastery,
 } from '@/api/org'
-import QuestionOptions from '@/components/question/QuestionOptions.vue'
-import { optionColumnsOf } from '@/utils/question-card'
-import { useBaseData } from '@/composables/useBaseData'
+import { QuestionOptions } from '@aiteach/business-common'
+import { optionColumnsOf } from '@aiteach/business-common'
+import { useBaseData } from '@aiteach/business-common'
 
 const router = useRouter()
 const { difficulties, ensure } = useBaseData()

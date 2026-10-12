@@ -3,8 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import { AppIcon, PAPER_STATUS_TEXT, RichTextViewer, showToast } from '@aiteach/shared'
 import type { OrgPaper, OrgQuestion } from '@aiteach/shared'
 import { fetchPapers, fetchQuestions, reviewPaper } from '@/api/org'
-import QuestionOptions from '@/components/question/QuestionOptions.vue'
-import { isJudgeNoOptions, judgeAnswerText, optionColumnsOf } from '@/utils/question-card'
+import { QuestionOptions } from '@aiteach/business-common'
+import { isJudgeNoOptions, judgeAnswerText, optionColumnsOf } from '@aiteach/business-common'
 
 const papers = ref<OrgPaper[]>([])
 const questions = ref<OrgQuestion[]>([])

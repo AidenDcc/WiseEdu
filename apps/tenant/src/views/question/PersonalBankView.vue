@@ -2,21 +2,13 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  AppFilterPanel,
-  AppListToolbar,
-  QUESTION_SOURCE_OPTIONS,
-  RichTextViewer,
-  appConfirm,
-  showToast,
-  ApiError,
-  toPlainText,
-} from '@aiteach/shared'
+  AppFilterPanel, AppListToolbar, QUESTION_SOURCE_OPTIONS, RichTextViewer, appConfirm, showToast, ApiError, toPlainText, AppPagination } from '@aiteach/shared'
 import type { FilterRowDef, OrgQuestion } from '@aiteach/shared'
-import AppPagination from '@/components/ui/AppPagination.vue'
-import QuestionPreviewDrawer from '@/components/question/QuestionPreviewDrawer.vue'
+
+import { QuestionPreviewDrawer } from '@aiteach/business-common'
 import { deleteQuestions, fetchQuestions, submitQuestions } from '@/api/org'
 import { useAuthStore } from '@/stores/auth'
-import { useBaseData } from '@/composables/useBaseData'
+import { useBaseData } from '@aiteach/business-common'
 
 const router = useRouter()
 

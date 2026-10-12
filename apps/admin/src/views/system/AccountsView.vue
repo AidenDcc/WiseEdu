@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast, ApiError, ADMIN_SUPER_ROLE_CODE, AppModal, appConfirm } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, ApiError, ADMIN_SUPER_ROLE_CODE, AppModal, appConfirm, AppSwitch } from '@aiteach/shared'
 import type { AdminAccount, AdminRole, AdminRoleRecord } from '@aiteach/shared'
-import AppSwitch from '@/components/ui/AppSwitch.vue'
+
 import { fetchAdminRoles, fetchAdmins, resetAdminPassword, saveAdmin, toggleAdmin } from '@/api/platform'
 
 const list = ref<AdminAccount[]>([])

@@ -14,18 +14,9 @@
  */
 import { computed, reactive, ref, watch } from 'vue'
 import {
-  ApiError,
-  AppChipGroup,
-  AppIcon,
-  AppListToolbar,
-  AppModal,
-  appConfirm,
-  hueColor,
-  showToast,
-} from '@aiteach/shared'
+  ApiError, AppChipGroup, AppIcon, AppListToolbar, AppModal, appConfirm, hueColor, showToast, AppSwitch, AppPagination } from '@aiteach/shared'
 import type { DictItem, TextbookVolume, TextbookVersion } from '@aiteach/shared'
-import AppSwitch from '@/components/ui/AppSwitch.vue'
-import AppPagination from '@/components/ui/AppPagination.vue'
+
 import TextbookCatalogDrawer from './TextbookCatalogDrawer.vue'
 import { deleteTextbookVolume, fetchDict, saveTextbookVolume, toggleTextbookVolume } from '@/api/platform'
 

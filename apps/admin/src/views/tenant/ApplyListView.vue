@@ -1,18 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
-  AppDrawer,
-  AppFilterPanel,
-  AppIcon,
-  AppListToolbar,
-  AppModal,
-  ApiError,
-  CERT_CATEGORIES,
-  CERT_CATEGORY_TEXT,
-  showToast,
-} from '@aiteach/shared'
+  AppDrawer, AppFilterPanel, AppIcon, AppListToolbar, AppModal, ApiError, CERT_CATEGORIES, CERT_CATEGORY_TEXT, showToast, AppPagination } from '@aiteach/shared'
 import type { FilterRowDef, PackageRecord, TenantApply } from '@aiteach/shared'
-import AppPagination from '@/components/ui/AppPagination.vue'
+
 import { useAuthStore } from '@/stores/auth'
 import { approveApply, fetchApplies, fetchPackages, rejectApply } from '@/api/tenant'
 

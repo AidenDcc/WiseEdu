@@ -7,9 +7,9 @@
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppAvatar, AppIcon, AppPageHeader, AppTabs, fileToSquareDataUrl, setAvatarOverride, showToast, appConfirm, updateSessionUser } from '@aiteach/shared'
+import { AppAvatar, AppIcon, AppPageHeader, AppTabs, fileToSquareDataUrl, setAvatarOverride, showToast, appConfirm, updateSessionUser, AppSwitch } from '@aiteach/shared'
 import type { SessionUser, TabDef } from '@aiteach/shared'
-import AppSwitch from '@/components/ui/AppSwitch.vue'
+
 import { useAuthStore } from '@/stores/auth'
 import { fetchLoginLogs } from '@/api/platform'
 

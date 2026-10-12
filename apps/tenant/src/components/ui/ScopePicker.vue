@@ -8,7 +8,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { AppIcon } from '@aiteach/shared'
-import { useScope } from '@/composables/useScope'
+import { useScope } from '@aiteach/business-common'
 
 const { grade, subject, gradeOptions, optionsForGrade, ensureScope } = useScope()
 

@@ -9,7 +9,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { AppIcon, AppPageHeader, type ExamSession, type PaperAnalysis, showToast, AppModal } from '@aiteach/shared'
 import { fetchExamSessions, fetchPaperAnalysis } from '@/api/org'
-import { useBaseData } from '@/composables/useBaseData'
+import { useBaseData } from '@aiteach/business-common'
 
 const { ensure } = useBaseData()
 

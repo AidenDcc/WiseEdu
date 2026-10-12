@@ -10,15 +10,16 @@
  * 一套年级学科口径，避免「两个下拉框各说各话」。
  */
 import { computed, ref, watch } from 'vue'
-import type { OrgQuestion } from '@aiteach/shared'
 import { AppIcon, showToast } from '@aiteach/shared'
-import { useComposeData } from '@/composables/useComposeData'
-import { useComposeBasket } from '@/composables/useComposeBasket'
-import { useBaseData } from '@/composables/useBaseData'
-import KnowledgePicker from '@/components/compose/KnowledgePicker.vue'
+import type { OrgQuestion } from '@aiteach/shared'
+
+import { useComposeData } from '@aiteach/business-common'
+import { useComposeBasket } from '@aiteach/business-common'
+import { useBaseData } from '@aiteach/business-common'
+import { KnowledgePicker } from '@aiteach/business-common'
 import QuestionPoolCard from '@/components/compose/QuestionPoolCard.vue'
-import SimilarQuestionsModal from '@/components/compose/SimilarQuestionsModal.vue'
-import { matchesQuestionFilter, type ComposeFilter } from '../types'
+import { SimilarQuestionsModal } from '@aiteach/business-common'
+import { matchesQuestionFilter, type ComposeFilter } from '@aiteach/business-common'
 
 const props = defineProps<{ filter: ComposeFilter }>()
 const emit = defineEmits<{

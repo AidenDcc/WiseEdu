@@ -16,30 +16,22 @@
  * 录题中心刚录完、还没审核的题要主动勾选才能看到，避免把待审题误加进正式试卷。
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { AppFilterPanel, AppIcon, AppListToolbar, AppPagination, AppSegmented, QUESTION_SOURCE_OPTIONS, RichTextViewer, showToast, toPlainText } from '@aiteach/shared'
 import type { OrgQuestion } from '@aiteach/shared'
-import {
-  AppFilterPanel,
-  AppIcon,
-  AppListToolbar,
-  AppSegmented,
-  QUESTION_SOURCE_OPTIONS,
-  RichTextViewer,
-  showToast,
-  toPlainText,
-} from '@aiteach/shared'
+
 import type { FilterRowDef } from '@aiteach/shared'
-import AppPagination from '@/components/ui/AppPagination.vue'
-import KnowledgeFilter from '@/components/ui/KnowledgeFilter.vue'
-import QuestionCorrectionDialog from '@/components/question/QuestionCorrectionDialog.vue'
-import QuestionOptions from '@/components/question/QuestionOptions.vue'
-import QuestionPreviewDrawer from '@/components/question/QuestionPreviewDrawer.vue'
-import SimilarQuestionsModal from '@/components/compose/SimilarQuestionsModal.vue'
-import { useComposeData } from '@/composables/useComposeData'
-import { useComposeBasket } from '@/composables/useComposeBasket'
-import { useComposeKeyword } from '@/composables/useComposeKeyword'
-import { useQuestionFavorites } from '@/composables/useQuestionFavorites'
-import { useViewMode } from '@/composables/useViewMode'
-import { examTypesFor, scopedQuestionTypes } from '@/composables/useBaseData'
+
+import { KnowledgeFilterPanel as KnowledgeFilter } from '@aiteach/business-common'
+import { QuestionCorrectionDialog } from '@aiteach/business-common'
+import { QuestionOptions } from '@aiteach/business-common'
+import { QuestionPreviewDrawer } from '@aiteach/business-common'
+import { SimilarQuestionsModal } from '@aiteach/business-common'
+import { useComposeData } from '@aiteach/business-common'
+import { useComposeBasket } from '@aiteach/business-common'
+import { useComposeKeyword } from '@aiteach/business-common'
+import { useQuestionFavorites } from '@aiteach/business-common'
+import { useViewMode } from '@aiteach/business-common'
+import { examTypesFor, scopedQuestionTypes } from '@aiteach/business-common'
 import { fetchQuestionCorrections, fetchTenantDict, type TenantDictItem } from '@/api/org'
 import {
   difficultyClass,
@@ -48,8 +40,8 @@ import {
   needsFigure,
   optionColumnsOf,
   questionSourceBadge,
-} from '@/utils/question-card'
-import { matchesQuestionFilter, type ComposeFilter, type QuestionFilterContext } from '../types'
+} from '@aiteach/business-common'
+import { matchesQuestionFilter, type ComposeFilter, type QuestionFilterContext } from '@aiteach/business-common'
 
 const props = defineProps<{ filter: ComposeFilter }>()
 const emit = defineEmits<{

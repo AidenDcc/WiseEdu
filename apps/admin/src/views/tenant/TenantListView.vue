@@ -2,19 +2,9 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
-  AppFilterPanel,
-  AppIcon,
-  AppListToolbar,
-  CERT_CATEGORIES,
-  CERT_CATEGORY_TEXT,
-  hueColor,
-  showToast,
-  ApiError,
-  AppModal,
-  appConfirm,
-} from '@aiteach/shared'
+  AppFilterPanel, AppIcon, AppListToolbar, CERT_CATEGORIES, CERT_CATEGORY_TEXT, hueColor, showToast, ApiError, AppModal, appConfirm, AppPagination } from '@aiteach/shared'
 import type { CertCategory, CertFile, FilterRowDef, PackageRecord, TenantRecord } from '@aiteach/shared'
-import AppPagination from '@/components/ui/AppPagination.vue'
+
 import {
   activateTenant,
   createApply,

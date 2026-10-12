@@ -17,7 +17,7 @@
  */
 import { hasImage, toPlainText } from '@aiteach/shared'
 import type { FillBlankAnswer, GeneratedQuestion, OptionColumns, OrgQuestion, QuestionSource } from '@aiteach/shared'
-import { judgeAnswerText } from '@/utils/question-card'
+import { judgeAnswerText } from '@aiteach/business-common'
 
 /** 知识点上限（校验提示与此保持一致） */
 export const MAX_KNOWLEDGE = 5

@@ -141,21 +141,12 @@ export function interpretComposeSearch(data: { text?: string; name?: string }) {
   return request<ComposeSearchIntent>('/tenant/ai/compose-search', { method: 'POST', data })
 }
 
-/* ===== 字典 / 知识点树（题库管理筛选） ===== */
-export interface TenantDictItem {
-  id: number
-  name: string
-  sort: number
-  enabled: boolean
-  /** 学科专属项（如「完形填空」只属于英语、「数学竞赛」只属于数学）；留空即全学科通用 */
-  subjects?: string[]
-  /** grade = 该年级所属学段（单值）。留空/缺省 = 不限 */
-  stage?: string
-  /** 仅 examType / competition（杯赛）：适配学段（多选）。留空/缺省 = 不限（全学段通用） */
-  stages?: string[]
-  /** 仅 examType：试卷分类（= 「考试类型」树一级节点的名字），组卷工作台试卷类型树的第一级 */
-  paperCategory?: string
-}
+/* ===== 字典 / 知识点树（题库管理筛选） =====
+   字典项结构两端同义，定义已上移到 @aiteach/business-common（公共筛选面板与公共组件都按它渲染），
+   这里只做转发 —— 机构端其余页面继续从本模块 import，不必改到处的引用。 */
+import type { TenantDictItem } from '@aiteach/business-common'
+export type { TenantDictItem }
+
 export function fetchTenantDict(type: string) {
   return request<TenantDictItem[]>(withQuery('/tenant/dict', { type }))
 }

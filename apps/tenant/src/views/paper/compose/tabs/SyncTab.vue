@@ -13,12 +13,12 @@
 import { computed, ref, watch } from 'vue'
 import { AppIcon, showToast } from '@aiteach/shared'
 import type { OrgMaterial, OrgQuestion } from '@aiteach/shared'
-import { useComposeData } from '@/composables/useComposeData'
-import { useComposeBasket } from '@/composables/useComposeBasket'
-import { useBaseData } from '@/composables/useBaseData'
+import { useComposeData } from '@aiteach/business-common'
+import { useComposeBasket } from '@aiteach/business-common'
+import { useBaseData } from '@aiteach/business-common'
 import QuestionPoolCard from '@/components/compose/QuestionPoolCard.vue'
-import SimilarQuestionsModal from '@/components/compose/SimilarQuestionsModal.vue'
-import { matchesQuestionFilter, type ComposeFilter } from '../types'
+import { SimilarQuestionsModal } from '@aiteach/business-common'
+import { matchesQuestionFilter, type ComposeFilter } from '@aiteach/business-common'
 
 type Chapter = OrgMaterial['chapters'][number]
 

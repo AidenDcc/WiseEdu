@@ -26,8 +26,8 @@
 import { AppIcon, RichTextViewer } from '@aiteach/shared'
 import type { GeneratedQuestion, OrgQuestion } from '@aiteach/shared'
 import type { VerifyIssue } from '@/api/ai-verify'
-import QuestionOptions from '@/components/question/QuestionOptions.vue'
-import { difficultyClass, needsFigure } from '@/utils/question-card'
+import { QuestionOptions } from '@aiteach/business-common'
+import { difficultyClass, needsFigure } from '@aiteach/business-common'
 
 const props = defineProps<{
   list: GeneratedQuestion[]

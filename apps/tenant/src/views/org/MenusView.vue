@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, appConfirm, showToast } from '@aiteach/shared'
-import AppSwitch from '@/components/ui/AppSwitch.vue'
+import { AppIcon, AppPageHeader, appConfirm, showToast, AppSwitch } from '@aiteach/shared'
+
 import { fetchOrgMenus, saveOrgMenus } from '@/api/org'
 import type { OrgMenuNodeApi } from '@/api/org'
 import { useVisibleMenus } from '@/composables/useVisibleMenus'

@@ -23,9 +23,9 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppDrawer, AppFilterChips, AppIcon, AppModal, appConfirm, showToast } from '@aiteach/shared'
+import { AppDrawer, AppFilterChips, AppIcon, AppModal, appConfirm, showToast, EARLIER_YEAR } from '@aiteach/shared'
 import type { AiComposeParams, AiComposeTemplate, OrgPaper } from '@aiteach/shared'
-import { EARLIER_YEAR } from '@aiteach/shared'
+
 import {
   aiComposePaper,
   deleteAiComposeTemplate,
@@ -33,11 +33,11 @@ import {
   fetchPapers,
   fetchTenantDict,
 } from '@/api/org'
-import { useBaseData } from '@/composables/useBaseData'
-import KnowledgePicker from '@/components/compose/KnowledgePicker.vue'
-import FolderPickerDialog from '@/components/file/FolderPickerDialog.vue'
+import { useBaseData } from '@aiteach/business-common'
+import { KnowledgePicker } from '@aiteach/business-common'
+import { FolderPickerDialog } from '@aiteach/business-common'
 import { openBlankTab, openPaperEdit, paperEditHref } from '@/utils/paper-edit'
-import { paperYearOptions, yearOptionLabels } from '@/utils/paper-years'
+import { paperYearOptions, yearOptionLabels } from '@aiteach/business-common'
 
 const router = useRouter()
 const { subjects, grades, difficulties, examTypes, questionTypesFor, ensure, pick, withCurrent } = useBaseData()

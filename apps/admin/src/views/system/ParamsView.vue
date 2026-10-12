@@ -5,8 +5,8 @@
  * 按分组维护平台运行参数；只读参数（合规红线类）不可编辑。
  */
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast, AppModal } from '@aiteach/shared'
-import AppSwitch from '@/components/ui/AppSwitch.vue'
+import { AppIcon, AppPageHeader, showToast, AppModal, AppSwitch } from '@aiteach/shared'
+
 import type { SystemParam } from '@aiteach/shared'
 import { fetchSystemParams, saveSystemParam } from '@/api/content'
 

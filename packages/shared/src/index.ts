@@ -108,6 +108,10 @@ export { default as AppChip } from './components/ui/AppChip.vue'
 export { default as AppChipGroup } from './components/ui/AppChipGroup.vue'
 export { default as AppSearchInput } from './components/ui/AppSearchInput.vue'
 export { default as AppListToolbar } from './components/ui/AppListToolbar.vue'
+/* 分页与开关：两端各存过一份同源实现（管理端 / 机构端各一份，逐字节一致），
+   随题库 / 试卷公共层一并收进共享设计系统 —— 它们与业务无关，属于通用控件 */
+export { default as AppPagination } from './components/ui/AppPagination.vue'
+export { default as AppSwitch } from './components/ui/AppSwitch.vue'
 export { default as AppTabs } from './components/ui/AppTabs.vue'
 export { default as AppSegmented } from './components/ui/AppSegmented.vue'
 /* 浮层（弹窗 / 抽屉）：与 appConfirm 共用 overlay 栈，Esc 只关最上层 */

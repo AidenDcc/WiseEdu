@@ -19,13 +19,14 @@
  * 题目分组里会得到一个既没有分值、也不该被拖拽排序的假题目行。
  */
 import { computed, nextTick, ref, watch } from 'vue'
-import type { MediaKind, OrgQuestion } from '@aiteach/shared'
 import { AppDrawer, AppIcon, AppModal, AppSegmented, resolveMediaSrc, showToast } from '@aiteach/shared'
-import { useComposeData } from '@/composables/useComposeData'
-import { useComposeBasket, type BasketEntry, type BasketResource } from '@/composables/useComposeBasket'
-import { duplicatePairs } from '@/utils/question-match'
+import type { MediaKind, OrgQuestion } from '@aiteach/shared'
+
+import { useComposeData } from '@aiteach/business-common'
+import { useComposeBasket, type BasketEntry, type BasketResource } from '@aiteach/business-common'
+import { duplicatePairs } from '@aiteach/business-common'
 import { difficultyRank } from '@/views/paper/compose/blueprint'
-import { MAX_SECTIONS, defaultScore, objectiveScoreOfSections, scoreOfSections } from '@/views/paper/paper-sections'
+import { MAX_SECTIONS, defaultScore, objectiveScoreOfSections, scoreOfSections } from '@aiteach/business-common'
 
 const props = withDefaults(
   defineProps<{

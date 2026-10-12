@@ -11,9 +11,9 @@
  */
 import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, RichTextViewer, SLIDE_LAYOUT_TEXT, TEACH_DOC_STATUS_TEXT, appConfirm, showToast, truncateRich, AppModal } from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, RichTextViewer, SLIDE_LAYOUT_TEXT, TEACH_DOC_STATUS_TEXT, appConfirm, showToast, truncateRich, AppModal, AppPagination } from '@aiteach/shared'
 import type { CoursewareSlide, FilterRowDef, OrgQuestion, SlideLayout, TeachDoc } from '@aiteach/shared'
-import AppPagination from '@/components/ui/AppPagination.vue'
+
 import {
   deleteTeachDoc,
   duplicateTeachDoc,
@@ -22,9 +22,9 @@ import {
   saveTeachDoc,
   toggleTeachDocPublish,
 } from '@/api/org'
-import QuestionOptions from '@/components/question/QuestionOptions.vue'
-import { optionColumnsOf } from '@/utils/question-card'
-import { useBaseData } from '@/composables/useBaseData'
+import { QuestionOptions } from '@aiteach/business-common'
+import { optionColumnsOf } from '@aiteach/business-common'
+import { useBaseData } from '@aiteach/business-common'
 import { COURSEWARE_TEMPLATES, SLIDE_LAYOUTS, makeSlides } from './teach-templates'
 
 const route = useRoute()

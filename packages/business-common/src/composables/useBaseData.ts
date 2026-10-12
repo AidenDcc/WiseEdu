@@ -1,0 +1,177 @@
+/**
+ * 机构端基础数据单例：全局字典（学科 / 年级 / 题型 / 难度 / 考试类型）+ 教材级联矩阵。
+ *
+ * 模块级单例（非 per-component）—— 无论多少个视图调用，全站只请求一轮。
+ * 刻意不加载 term：题目 question.term 使用「上学期 / 下学期」短名，与字典里的
+ * 「2025-2026 上学期」全名不同名，纳入会诱导误回填，因此排除在外。
+ *
+ * 用法：在 <script setup> 顶层解构（不可 `const base = useBaseData()` 再在模板写
+ * `base.subjects` —— 那样渲染出的是 ComputedRef 对象），并在既有 load() 首行 await ensure()。
+ */
+import { computed, ref } from 'vue'
+import type { TextbookOption } from '@aiteach/shared'
+import { useBusinessApi } from '../api/business-api'
+import type { TenantDictItem } from '../types'
+
+export type BaseDictKey = 'subject' | 'grade' | 'questionType' | 'difficulty' | 'examType'
+
+const DICT_KEYS: BaseDictKey[] = ['subject', 'grade', 'questionType', 'difficulty', 'examType']
+
+const dict = ref<Record<BaseDictKey, TenantDictItem[]>>({
+  subject: [],
+  grade: [],
+  questionType: [],
+  difficulty: [],
+  examType: [],
+})
+const matrix = ref<TextbookOption[]>([])
+const loading = ref(false)
+let inflight: Promise<void> | null = null
+
+const namesOf = (key: BaseDictKey) => dict.value[key].map((item) => item.name)
+
+const subjects = computed(() => namesOf('subject'))
+const grades = computed(() => namesOf('grade'))
+const difficulties = computed(() => namesOf('difficulty'))
+const examTypes = computed(() => namesOf('examType'))
+
+/**
+ * 题型按学科收窄：通用题型（未限定适用学科）+ 该学科专属题型。
+ *
+ * `subject` 为空表示「不指定学科」，此时给全部题型 —— 若只给通用项，英语专属题目
+ * 在题库里存在、却没有任何筛选项能选中它们。
+ *
+ * 纯函数，单例内的 `questionTypesFor` 与自行查字典的题库筛选共用这一份规则。
+ */
+export function scopedQuestionTypes(items: TenantDictItem[], subject: string): string[] {
+  return items
+    .filter((item) => !subject || !item.subjects?.length || item.subjects.includes(subject))
+    .map((item) => item.name)
+}
+
+function questionTypesFor(subject: string): string[] {
+  return scopedQuestionTypes(dict.value.questionType, subject)
+}
+
+/** 原始考试类型字典项：试卷类型树要按 paperCategory / stage / subjects 分组与过滤，光有名字不够。
+    这几项由平台管理端「考试类型」树投影而来（见 mock/admin-store 的 syncExamTypeDict） */
+const examTypeItems = computed(() => dict.value.examType)
+
+/**
+ * 年级 → 学段，取自**年级字典项的 `stage`**（字典是权威映射，也能吸收「七年级」与「初一」
+ * 这类命名不一致）。查不到该年级时返回 null = 不限学段，此时所有考试类型都算命中。
+ */
+function stageOf(grade: string): string | null {
+  if (!grade) return null
+  return dict.value.grade.find((item) => item.name === grade)?.stage ?? null
+}
+
+/**
+ * 考试类型按适配学段 / 学科收窄，与 `scopedQuestionTypes` 同范式（纯函数，便于单测与复用）：
+ * 留空的维度视为「通用」，一律放行；`stage` / `subject` 为空串 = 当前作用域不限，也给全部。
+ *
+ * 适配学段是**多选**（管理端「考试类型」树里可同时勾初中 + 高中），所以判的是「交集非空」，
+ * 不是相等 —— 用 `item.stages`，`item.stage` 是年级那种单值语义。
+ */
+export function scopedExamTypes(items: TenantDictItem[], stage: string, subject: string): TenantDictItem[] {
+  return items
+    .filter((item) => !item.stages?.length || !stage || item.stages.includes(stage))
+    .filter((item) => !subject || !item.subjects?.length || item.subjects.includes(subject))
+}
+
+/**
+ * 单例版：入参是界面上的「年级」，内部换算学段（调用方手上通常只有年级）。
+ * 与 `scopedQuestionTypes` 一样独立导出，供「自己查字典」的筛选面板直接用。
+ */
+export function examTypesFor(grade: string, subject: string): string[] {
+  return scopedExamTypes(dict.value.examType, stageOf(grade) ?? '', subject).map((item) => item.name)
+}
+
+/** 教材级联（学科随年级动态、版本随学科动态），唯一权威来源是机构端教材矩阵 */
+function subjectsForGrade(grade: string): string[] {
+  return matrix.value.find((row) => row.grade === grade)?.subjects.map((row) => row.name) ?? []
+}
+
+/** 指定年级下的可选学科：教材矩阵缺该年级时退回全量学科，避免选项为空（顶部栏与录题表单共用此规则） */
+function optionsForGrade(grade: string): string[] {
+  const list = subjectsForGrade(grade)
+  return list.length > 0 ? list : subjects.value
+}
+
+function versionsFor(grade: string, subject: string): string[] {
+  return matrix.value.find((row) => row.grade === grade)?.subjects.find((row) => row.name === subject)?.versions ?? []
+}
+
+/** 默认教材：优先 高一-数学-人教A版（题库种子题范围），否则取矩阵首项 */
+function defaultTextbook(): { grade: string; subject: string; version: string } {
+  const row =
+    matrix.value.find((row) => row.grade === '高一' && row.subjects.some((s) => s.name === '数学')) ?? matrix.value[0]
+  if (!row) return { grade: '', subject: '', version: '' }
+  const subject = row.subjects.find((s) => s.name === '数学')?.name ?? row.subjects[0]?.name ?? ''
+  const versions = row.subjects.find((s) => s.name === subject)?.versions ?? []
+  return { grade: row.grade, subject, version: versions.find((v) => v === '人教A版') ?? versions[0] ?? '' }
+}
+
+/**
+ * 编辑历史数据时，其取值可能已停用 —— 并入选项，避免下拉无匹配项而被静默改写。
+ * 展示文案须再过一道 optionLabel，否则停用值看起来仍可选。
+ */
+function withCurrent(options: string[], current: string): string[] {
+  return current && !options.includes(current) ? [current, ...options] : options
+}
+
+/** 选项文案：不在启用列表中的历史值标注「（已停用）」，值本身不变 */
+function optionLabel(options: string[], value: string): string {
+  return options.includes(value) ? value : `${value}（已停用）`
+}
+
+/** 兜底取列表首项（不写死 '数学' / '高一'），用于新建场景的默认值归一 */
+function pick(options: string[], current: string): string {
+  return options.includes(current) ? current : (options[0] ?? current)
+}
+
+async function ensure(): Promise<void> {
+  if (dict.value.subject.length > 0) return
+  if (inflight) return inflight
+  inflight = (async () => {
+    loading.value = true
+    try {
+      /* 字典接口由宿主应用注入（各端的 URL / 权限 / tenant_id 过滤都在各自 api 目录里） */
+      const api = useBusinessApi()
+      const [rows, textbooks] = await Promise.all([
+        Promise.all(DICT_KEYS.map((key) => api.fetchTenantDict(key))),
+        api.fetchTextbookMatrix(),
+      ])
+      DICT_KEYS.forEach((key, index) => {
+        dict.value[key] = rows[index]
+      })
+      matrix.value = textbooks
+    } finally {
+      loading.value = false
+      inflight = null
+    }
+  })()
+  return inflight
+}
+
+export function useBaseData() {
+  return {
+    loading,
+    ensure,
+    subjects,
+    grades,
+    questionTypesFor,
+    difficulties,
+    examTypes,
+    examTypeItems,
+    examTypesFor,
+    stageOf,
+    subjectsForGrade,
+    optionsForGrade,
+    versionsFor,
+    defaultTextbook,
+    withCurrent,
+    optionLabel,
+    pick,
+  }
+}

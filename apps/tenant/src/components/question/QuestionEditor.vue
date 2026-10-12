@@ -28,9 +28,9 @@ import {
   toPlainText,
 } from '@aiteach/shared'
 import type { FilterRowDef, QuestionSource } from '@aiteach/shared'
-import KnowledgePickerModal from '@/components/compose/KnowledgePickerModal.vue'
+import { KnowledgePickerModal } from '@aiteach/business-common'
 import RichTextEditor from '@/components/ui/RichTextEditor.vue'
-import { useBaseData } from '@/composables/useBaseData'
+import { useBaseData } from '@aiteach/business-common'
 import {
   collectDraftErrors,
   hasContent,

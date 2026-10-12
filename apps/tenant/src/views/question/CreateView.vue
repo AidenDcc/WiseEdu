@@ -5,7 +5,7 @@ import { AppFilterChips, AppIcon, RichTextViewer, showToast, appConfirm, ApiErro
 import type { GeneratedQuestion, OrgCategory, OrgQuestion } from '@aiteach/shared'
 import QuestionEditor from '@/components/question/QuestionEditor.vue'
 import QuestionEditorModal from '@/components/question/QuestionEditorModal.vue'
-import QuestionPreviewDrawer from '@/components/question/QuestionPreviewDrawer.vue'
+import { QuestionPreviewDrawer } from '@aiteach/business-common'
 import QuestionResultList from '@/components/question/QuestionResultList.vue'
 import { adoptGenerated, fetchCategories, fetchQuestions, fetchQuota, saveQuestion, variantOf } from '@/api/org'
 import { checkQuestionByAi } from '@/api/ai-check'
@@ -13,9 +13,9 @@ import type { AiCheckReport } from '@/api/ai-check'
 import { alignKnowledgeToPool } from '@/api/ai-photo'
 import { aiEngine, generateByAi } from '@/api/ai-generate'
 import { getCheckRounds, setCheckRounds, verifyQuestionsByAi, type AiVerifyReport, type VerifyIssue } from '@/api/ai-verify'
-import { useBaseData } from '@/composables/useBaseData'
-import { useKnowledgePool } from '@/composables/useKnowledgePool'
-import { useScope } from '@/composables/useScope'
+import { useBaseData } from '@aiteach/business-common'
+import { useKnowledgePool } from '@aiteach/business-common'
+import { useScope } from '@aiteach/business-common'
 import {
   answerTextOf,
   draftFromGenerated,

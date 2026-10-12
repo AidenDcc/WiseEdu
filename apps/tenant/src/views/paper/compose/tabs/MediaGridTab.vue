@@ -10,11 +10,11 @@
 import { computed, ref } from 'vue'
 import { AppIcon, resolveMediaSrc, showToast, AppModal } from '@aiteach/shared'
 import type { MediaKind, OrgMedia } from '@aiteach/shared'
-import { useComposeData } from '@/composables/useComposeData'
-import { useComposeBasket } from '@/composables/useComposeBasket'
-import ComposeFilterBar from '@/components/compose/ComposeFilterBar.vue'
+import { useComposeData } from '@aiteach/business-common'
+import { useComposeBasket } from '@aiteach/business-common'
+import { ComposeFilterBar } from '@aiteach/business-common'
 import MediaGridCard from '@/components/compose/MediaGridCard.vue'
-import { matchesMediaFilter, type ComposeFilter } from '../types'
+import { matchesMediaFilter, type ComposeFilter } from '@aiteach/business-common'
 
 const props = defineProps<{ filter: ComposeFilter; kind: MediaKind }>()
 const emit = defineEmits<{

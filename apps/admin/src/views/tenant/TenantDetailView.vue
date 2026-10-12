@@ -2,18 +2,9 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  AppIcon,
-  AppSegmented,
-  AppTabs,
-  BarChart,
-  CERT_CATEGORIES,
-  CERT_CATEGORY_TEXT,
-  hueColor,
-  showToast,
-  ApiError,
-} from '@aiteach/shared'
+  AppIcon, AppSegmented, AppTabs, BarChart, CERT_CATEGORIES, CERT_CATEGORY_TEXT, hueColor, showToast, ApiError, AppSwitch } from '@aiteach/shared'
 import type { FeatureSwitches, PackageRecord, TenantDetailModel } from '@aiteach/shared'
-import AppSwitch from '@/components/ui/AppSwitch.vue'
+
 import { REGION_OPTIONS, regionPath, regionText } from '@/utils/region'
 import {
   fetchPackages,

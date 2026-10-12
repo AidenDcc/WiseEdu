@@ -11,9 +11,9 @@
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, BLOCK_KIND_TEXT, LECTURE_BLOCK_TEXT, RichTextViewer, TEACH_DOC_STATUS_TEXT, appConfirm, showToast, truncateRich, AppModal } from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, BLOCK_KIND_TEXT, LECTURE_BLOCK_TEXT, RichTextViewer, TEACH_DOC_STATUS_TEXT, appConfirm, showToast, truncateRich, AppModal, AppPagination } from '@aiteach/shared'
 import type { FilterRowDef, LectureBlock, LectureBlockKind, OrgQuestion, TeachDoc } from '@aiteach/shared'
-import AppPagination from '@/components/ui/AppPagination.vue'
+
 import RichTextEditor from '@/components/ui/RichTextEditor.vue'
 import {
   deleteTeachDoc,
@@ -23,9 +23,9 @@ import {
   saveTeachDoc,
   toggleTeachDocPublish,
 } from '@/api/org'
-import QuestionOptions from '@/components/question/QuestionOptions.vue'
-import { optionColumnsOf } from '@/utils/question-card'
-import { useBaseData } from '@/composables/useBaseData'
+import { QuestionOptions } from '@aiteach/business-common'
+import { optionColumnsOf } from '@aiteach/business-common'
+import { useBaseData } from '@aiteach/business-common'
 import { LECTURE_TEMPLATES, makeBlocks } from './teach-templates'
 
 const route = useRoute()

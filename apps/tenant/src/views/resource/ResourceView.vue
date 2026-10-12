@@ -11,7 +11,7 @@
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, AppSegmented, APPROVAL_STATUS_TEXT, RESOURCE_SCOPE_TEXT, TEACH_KIND_TEXT, appConfirm, showToast, truncateRich, AppModal } from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, AppSegmented, APPROVAL_STATUS_TEXT, RESOURCE_SCOPE_TEXT, TEACH_KIND_TEXT, appConfirm, showToast, truncateRich, AppModal, AppPagination } from '@aiteach/shared'
 import type { FilterRowDef } from '@aiteach/shared'
 import type {
   ApprovalKind,
@@ -24,7 +24,7 @@ import type {
   TeachDoc,
   TeachDocKind,
 } from '@aiteach/shared'
-import AppPagination from '@/components/ui/AppPagination.vue'
+
 import {
   fetchApprovalSummary,
   fetchApprovals,
@@ -36,7 +36,7 @@ import {
   revokeApproval,
   submitApproval,
 } from '@/api/org'
-import { useBaseData } from '@/composables/useBaseData'
+import { useBaseData } from '@aiteach/business-common'
 
 const router = useRouter()
 const { subjects, grades, ensure, pick } = useBaseData()

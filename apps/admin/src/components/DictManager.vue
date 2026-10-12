@@ -8,15 +8,9 @@
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
-  AppIcon,
-  AppListToolbar,
-  showToast,
-  ApiError,
-  AppModal,
-  appConfirm,
-} from '@aiteach/shared'
+  AppIcon, AppListToolbar, showToast, ApiError, AppModal, appConfirm, AppSwitch } from '@aiteach/shared'
 import type { DictItem, DictTypeKey } from '@aiteach/shared'
-import AppSwitch from '@/components/ui/AppSwitch.vue'
+
 import { deleteDictItem, fetchDict, saveDictItem, toggleDictItem } from '@/api/platform'
 
 const props = defineProps<{

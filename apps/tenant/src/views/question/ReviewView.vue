@@ -5,7 +5,7 @@ import type { AiCheckResult, OrgQuestion, StaffMember } from '@aiteach/shared'
 import { fetchQuestions, fetchStaff, reviewQuestion } from '@/api/org'
 import { checkQuestionByAi } from '@/api/ai-check'
 import type { AiCheckItem } from '@/api/ai-check'
-import QuestionPreviewBody from '@/components/question/QuestionPreviewBody.vue'
+import { QuestionPreviewBody } from '@aiteach/business-common'
 
 const all = ref<OrgQuestion[]>([])
 const opinion = ref('')

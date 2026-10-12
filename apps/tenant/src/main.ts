@@ -3,13 +3,20 @@ import './shims/node-globals'
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { armSessionWatch, clearSession, registerSessionExpiredHandler, setupApp } from '@aiteach/shared'
+import { provideBusinessApi } from '@aiteach/business-common'
 import App from './App.vue'
 import router from './router'
+import * as orgApi from './api/org'
 import { clearDemoIdentity } from './composables/useDemoRole'
 import './styles/main.css'
 
 // 注入端标识：机构端使用独立的 token 存储与 Mock 账号库
 setupApp({ appName: 'tenant', apiBaseUrl: import.meta.env.VITE_API_BASE_URL ?? '/api' })
+
+/* 把机构端自己的数据访问层注入题库 / 试卷公共层（见 packages/business-common/src/api/business-api.ts）。
+   公共组件只调用契约上的方法，真正的 URL、查询参数与权限都在 ./api/org 里 ——
+   换句话说，公共层的组件代码里既没有 /tenant 也没有 /admin。 */
+provideBusinessApi(orgApi)
 
 /* 会话失效的统一出口：路由守卫、请求层、到期看门狗三条通路都收敛到这里。
    清会话 + 复位演示身份 + 跳登录页（带回跳地址，重登后回到原页面）。 */

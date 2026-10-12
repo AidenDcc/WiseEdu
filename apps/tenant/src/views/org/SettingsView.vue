@@ -9,7 +9,7 @@ import { onMounted, ref } from 'vue'
 import { AppIcon, AppPageHeader, showToast } from '@aiteach/shared'
 import type { OrgSettings, ReviewFlowConfig } from '@aiteach/shared'
 import { fetchOrgSettings, fetchReviewFlows, saveOrgSettings, saveReviewFlow } from '@/api/student'
-import { useBaseData } from '@/composables/useBaseData'
+import { useBaseData } from '@aiteach/business-common'
 
 const settings = ref<OrgSettings | null>(null)
 const flows = ref<ReviewFlowConfig[]>([])

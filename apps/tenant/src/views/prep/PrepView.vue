@@ -11,9 +11,9 @@
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, appConfirm, PREP_TASK_STATUS_TEXT, TEACH_KIND_TEXT, showToast, truncateRich, AppModal } from '@aiteach/shared'
+import { AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, appConfirm, PREP_TASK_STATUS_TEXT, TEACH_KIND_TEXT, showToast, truncateRich, AppModal, AppPagination } from '@aiteach/shared'
 import type { FilterRowDef, PrepMember, PrepTask, StaffMember, TeachDoc, TeachDocKind } from '@aiteach/shared'
-import AppPagination from '@/components/ui/AppPagination.vue'
+
 import RichTextEditor from '@/components/ui/RichTextEditor.vue'
 import {
   addPrepComment,
@@ -30,7 +30,7 @@ import {
   savePrepTask,
   submitPrepDuty,
 } from '@/api/org'
-import { useBaseData } from '@/composables/useBaseData'
+import { useBaseData } from '@aiteach/business-common'
 
 const route = useRoute()
 const router = useRouter()

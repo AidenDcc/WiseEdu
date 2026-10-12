@@ -9,7 +9,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { AppIcon, AppListToolbar, AppPageHeader, AppSearchInput, appConfirm, showToast, truncateRich, AppModal, AppDrawer } from '@aiteach/shared'
 import type { OrgMedia, OrgQuestion, VideoClip } from '@aiteach/shared'
 import { deleteVideoClip, fetchMedia, fetchQuestions, fetchVideoClips, saveVideoClip } from '@/api/org'
-import { useBaseData } from '@/composables/useBaseData'
+import { useBaseData } from '@aiteach/business-common'
 
 const { subjects, ensure, pick } = useBaseData()
 

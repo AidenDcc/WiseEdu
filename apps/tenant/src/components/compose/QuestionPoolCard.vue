@@ -11,8 +11,8 @@
 import { computed, ref } from 'vue'
 import { AppIcon, RichTextViewer, QUESTION_STATUS_TEXT, hasImage, toPlainText } from '@aiteach/shared'
 import type { OrgQuestion } from '@aiteach/shared'
-import QuestionOptions from '@/components/question/QuestionOptions.vue'
-import { isJudgeNoOptions, judgeAnswerText, optionColumnsOf } from '@/utils/question-card'
+import { QuestionOptions } from '@aiteach/business-common'
+import { isJudgeNoOptions, judgeAnswerText, optionColumnsOf } from '@aiteach/business-common'
 
 const props = defineProps<{
   row: OrgQuestion

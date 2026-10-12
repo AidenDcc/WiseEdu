@@ -13,8 +13,8 @@
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ANSWER_STATUS_TEXT, AppIcon, AppPageHeader, appConfirm, CLASS_NAMES, type AnswerItem, type AnswerStatus, type ExamAnswer, type ExamSession, type GradingDuty, type OrgPaper, type OrgQuestion, RichTextViewer, showToast, truncateRich, AppModal, AppDrawer } from '@aiteach/shared'
-import AppPagination from '@/components/ui/AppPagination.vue'
+import { ANSWER_STATUS_TEXT, AppIcon, AppPageHeader, appConfirm, CLASS_NAMES, type AnswerItem, type AnswerStatus, type ExamAnswer, type ExamSession, type GradingDuty, type OrgPaper, type OrgQuestion, RichTextViewer, showToast, truncateRich, AppModal, AppDrawer, AppPagination } from '@aiteach/shared'
+
 import {
   assignDuty,
   deleteExamSession,
@@ -28,7 +28,7 @@ import {
   saveAnswerScore,
   saveExamSession,
 } from '@/api/org'
-import { useBaseData } from '@/composables/useBaseData'
+import { useBaseData } from '@aiteach/business-common'
 
 const route = useRoute()
 const router = useRouter()

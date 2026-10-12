@@ -21,12 +21,12 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from '@aiteach/shared'
 import type { MediaKind, OrgPaper } from '@aiteach/shared'
-import FolderPickerDialog from '@/components/file/FolderPickerDialog.vue'
+import { FolderPickerDialog } from '@aiteach/business-common'
 import { savePaper } from '@/api/org'
 import { openBlankTab, openPaperEdit, paperEditHref } from '@/utils/paper-edit'
-import { useComposeBasket } from '@/composables/useComposeBasket'
-import { useComposeData } from '@/composables/useComposeData'
-import { objectiveScoreOfSections, scoreOfSections } from '@/views/paper/paper-sections'
+import { useComposeBasket } from '@aiteach/business-common'
+import { useComposeData } from '@aiteach/business-common'
+import { objectiveScoreOfSections, scoreOfSections } from '@aiteach/business-common'
 
 withDefaults(
   defineProps<{

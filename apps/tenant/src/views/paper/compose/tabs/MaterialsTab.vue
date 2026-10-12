@@ -10,9 +10,9 @@
 import { computed, ref } from 'vue'
 import { AppIcon, MATERIAL_STATUS_TEXT, showToast } from '@aiteach/shared'
 import type { OrgMaterial } from '@aiteach/shared'
-import { useComposeData } from '@/composables/useComposeData'
-import ComposeFilterBar from '@/components/compose/ComposeFilterBar.vue'
-import { matchesMaterialFilter, type ComposeFilter } from '../types'
+import { useComposeData } from '@aiteach/business-common'
+import { ComposeFilterBar } from '@aiteach/business-common'
+import { matchesMaterialFilter, type ComposeFilter } from '@aiteach/business-common'
 
 const props = defineProps<{ filter: ComposeFilter }>()
 const emit = defineEmits<{

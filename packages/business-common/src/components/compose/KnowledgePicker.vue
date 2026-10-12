@@ -1,0 +1,417 @@
+<script setup lang="ts">
+/**
+ * 知识点多选器（题库组卷工作台的试题筛选、知识点组卷共用）。
+ *
+ * 为什么不复用 `ui/KnowledgeFilter.vue`：那个是题库管理/BankView 与标准公式库的**单选**面板
+ * ——固定宽 272px 的 `aside`、只保留一个 activeNode、emit 该子树的 tag 或 null，而且还独占
+ * 教材级联并单向绑定顶部栏全局作用域（useScope）。组卷工作台要的是：内联、**任意多选**、
+ * 可逐个删的 chip，且页面自带教材级联（全屏页没有顶部栏，绑定 useScope 是错的）。
+ * 硬要泛化会把 BankView 与 StandardView 两个现有消费方一起搭进去，仓库既有做法是各页 scoped
+ * 复制（见 `question/QuestionResultList.vue` 头部注释），这里沿用。
+ *
+ * 交互口径由 `mode` 决定：
+ * - `subtree`（默认，组卷工作台）：**点节点 = 整棵子树的知识点标签一起选中/取消**。教师是按
+ *   「三角函数」这个层级想事情的，让他逐个勾 15 个叶子标签不合理；个别不想要的标签可以在上方
+ *   chip 里单独删。
+ * - `node`（录题页的知识点弹窗）：**只选本节点自己的标签**，配合 `max` 限个数。分类节点没有
+ *   tag 因而不可勾选（点它只展开）—— 把分类名存进题目的 knowledge 会变成池外的孤儿值。
+ */
+import { computed, ref, watch } from 'vue'
+import { AppIcon, showToast } from '@aiteach/shared'
+import type { OrgKnowledgeNode } from '@aiteach/shared'
+import { collectTags, useKnowledgePool } from '../../composables/useKnowledgePool'
+
+const props = defineProps<{
+  modelValue: string[]
+  subject: string
+  grade?: string
+  version?: string
+  /** 选中粒度（见文件头注释），默认 `subtree` = 组卷工作台的既有行为 */
+  mode?: 'subtree' | 'node'
+  /** 最多可选几个标签；不给 = 不限（组卷侧不设上限） */
+  max?: number | null
+  /** 用于节点计数（传当前题源列表即可）；不传则不显示计数 */
+  rows?: Array<{ knowledge: string[] }>
+  /** 树区最大高度 */
+  maxHeight?: string
+  /**
+   * 撑满父容器剩余高度（试题页签左栏那种常驻面板用）。**要求父容器是 flex 纵向布局**
+   * ——树靠 `flex: 1` 吃掉剩余空间并自行滚动，弹层里不能开（弹层高度由内容决定，
+   * 撑满会把树压成一条缝）。
+   */
+  fill?: boolean
+  /**
+   * 藏起顶部那条「已选 N 个知识点 + chip」。
+   *
+   * 给智能组卷用：那一页的已选知识点要回显在**右侧第一步的表单里**（左树与表单是两个区域，
+   * 左树只负责勾选），而这条 chip 行长在树自己的根节点里 —— 不藏的话同一批知识点会在
+   * 左右两处各长一遍，用户会以为选重了。
+   */
+  hideSelected?: boolean
+}>()
+
+const emit = defineEmits<{ 'update:modelValue': [tags: string[]] }>()
+
+const { nodes, loading } = useKnowledgePool(() => ({
+  grade: props.grade ?? '',
+  subject: props.subject,
+  version: props.version ?? '',
+}))
+
+const query = ref('')
+const expanded = ref<Set<string>>(new Set())
+
+const byId = computed(() => new Map(nodes.value.map((node) => [node.id, node] as const)))
+const childrenMap = computed(() => {
+  const map = new Map<string, OrgKnowledgeNode[]>()
+  nodes.value.forEach((node) => {
+    if (node.parentId == null) return
+    const bucket = map.get(node.parentId) ?? []
+    bucket.push(node)
+    map.set(node.parentId, bucket)
+  })
+  return map
+})
+
+/** 节点子树的全部知识点标签（叶子 tag；整棵子树无 tag 时退化为节点名） */
+function subtreeTags(id: string): string[] {
+  const root = byId.value.get(id)
+  if (!root) return []
+  const tags: string[] = []
+  const stack = [root]
+  while (stack.length) {
+    const node = stack.pop()!
+    if (node.tag) tags.push(node.tag)
+    childrenMap.value.get(node.id)?.forEach((child) => stack.push(child))
+  }
+  return tags.length > 0 ? tags : [root.name]
+}
+
+const selected = computed(() => new Set(props.modelValue))
+
+/** 点这个节点会选中哪些标签：`subtree` = 整棵子树，`node` = 本节点的 tag（无 tag 则为空） */
+function selectableTags(id: string): string[] {
+  const node = byId.value.get(id)
+  if (!node) return []
+  if (props.mode === 'node') return node.tag ? [node.tag] : []
+  return subtreeTags(id)
+}
+
+/** 该节点是否可勾选：`node` 模式下分类节点（无 tag）不可勾，点它只展开 */
+function selectable(id: string): boolean {
+  return selectableTags(id).length > 0
+}
+
+/** 节点三态：全部已选 / 部分已选 / 未选（`node` 模式下不会出现「部分」） */
+function nodeState(id: string): 'on' | 'part' | 'off' {
+  const tags = selectableTags(id)
+  if (!tags.length) return 'off'
+  const hit = tags.filter((tag) => selected.value.has(tag)).length
+  if (hit === 0) return 'off'
+  return hit === tags.length ? 'on' : 'part'
+}
+
+function countOf(id: string): number | null {
+  if (!props.rows) return null
+  const tags = subtreeTags(id)
+  return props.rows.filter((row) => row.knowledge.some((tag) => tags.includes(tag))).length
+}
+
+/** 整行点击：可勾选的节点 = 选中/取消；分类节点 = 展开（它没有可存的标签） */
+function onRowClick(id: string) {
+  if (!selectable(id)) {
+    toggleExpand(id)
+    return
+  }
+  toggleNode(id)
+}
+
+function toggleNode(id: string) {
+  const tags = selectableTags(id)
+  if (!tags.length) return
+  const next = new Set(props.modelValue)
+  if (nodeState(id) === 'on') {
+    tags.forEach((tag) => next.delete(tag))
+  } else {
+    /* 到达上限时整次点击不落地：删了再勾是两步操作，比「勾上又被悄悄挤掉一个」好理解 */
+    const adding = tags.filter((tag) => !next.has(tag)).length
+    if (props.max != null && next.size + adding > props.max) {
+      showToast(`最多 ${props.max} 个知识点`, 'error')
+      return
+    }
+    tags.forEach((tag) => next.add(tag))
+  }
+  emit('update:modelValue', [...next])
+}
+
+function removeTag(tag: string) {
+  emit('update:modelValue', props.modelValue.filter((row) => row !== tag))
+}
+
+function clearAll() {
+  emit('update:modelValue', [])
+}
+
+function toggleExpand(id: string) {
+  const next = new Set(expanded.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  expanded.value = next
+}
+
+const searchMode = computed(() => query.value.trim().length > 0)
+const hitIds = computed(() => {
+  const keyword = query.value.trim()
+  if (!keyword) return new Set<string>()
+  return new Set(
+    nodes.value
+      .filter((node) => node.name.includes(keyword) || (node.tag ?? '').includes(keyword))
+      .map((node) => node.id),
+  )
+})
+/** 搜索时保留命中节点及其祖先链，其余折叠掉 */
+const visibleIds = computed(() => {
+  if (!searchMode.value) return null
+  const keep = new Set<string>()
+  hitIds.value.forEach((id) => {
+    let current = byId.value.get(id)
+    while (current) {
+      keep.add(current.id)
+      current = current.parentId == null ? undefined : byId.value.get(current.parentId)
+    }
+  })
+  return keep
+})
+
+interface TreeRow {
+  node: OrgKnowledgeNode
+  depth: number
+  hasChildren: boolean
+  open: boolean
+  hit: boolean
+}
+
+const treeRows = computed<TreeRow[]>(() => {
+  const rows: TreeRow[] = []
+  const walk = (parentId: string | null, depth: number) => {
+    const children =
+      parentId == null
+        ? nodes.value.filter((node) => node.parentId == null)
+        : childrenMap.value.get(parentId) ?? []
+    children.forEach((node) => {
+      if (searchMode.value && visibleIds.value && !visibleIds.value.has(node.id)) return
+      const hasChildren = (childrenMap.value.get(node.id) ?? []).length > 0
+      const open = searchMode.value || expanded.value.has(node.id)
+      rows.push({ node, depth, hasChildren, open, hit: hitIds.value.has(node.id) })
+      if (open) walk(node.id, depth + 1)
+    })
+  }
+  walk(null, 0)
+  return rows
+})
+
+/** 作用域变了：旧展开状态对应不上新树了，收起重来 */
+watch(
+  () => `${props.grade ?? ''}|${props.subject}|${props.version ?? ''}`,
+  () => {
+    query.value = ''
+    expanded.value = new Set(nodes.value.filter((node) => node.parentId == null).map((node) => node.id))
+  },
+)
+
+/**
+ * 新树到位后：**摘掉新树里已经不存在的已选标签**，并展开根节点。
+ *
+ * 清空**不按「作用域 key 变没变」判，而按「这些标签在新树里还成不成立」判**。两者换学科时
+ * 结果一样（数学的标签在英语树里一个不剩，等于清空），但**换年级**时不一样：知识点树是按学科
+ * （+学段）取的，同科换年级往往返回同一批叶子 —— 旧写法会在用户挑完知识点、只是回头改一下
+ * 年级时把已选全抹掉，而树上其实什么都没变，看起来就是「我刚选的东西自己没了」。
+ * 逐标签过滤在标签真换了时照样清干净，所以这么改只赚不亏。
+ *
+ * 过滤放在 `nodes` 变化之后、而不是作用域变化的那一拍：作用域变了、新树还在路上时，
+ * 拿旧树去判会把本来有效的标签误删。
+ */
+watch(nodes, (list) => {
+  if (expanded.value.size === 0 && list.length) {
+    expanded.value = new Set(list.filter((node) => node.parentId == null).map((node) => node.id))
+  }
+  if (!props.modelValue.length || !list.length) return
+  const tags = new Set(collectTags(list))
+  const kept = props.modelValue.filter((tag) => tags.has(tag))
+  if (kept.length !== props.modelValue.length) emit('update:modelValue', kept)
+})
+
+const treeStyle = computed(() => (props.fill ? undefined : { maxHeight: props.maxHeight ?? '300px' }))
+</script>
+
+<template>
+  <div class="kp-picker" :class="{ fill }">
+    <!-- 已选知识点：可逐个删除（`hideSelected` 时交给调用方在别处长，见 props 注释） -->
+    <div v-if="modelValue.length && !hideSelected" class="kp-selected">
+      <span class="kp-selected-label">已选 {{ modelValue.length }} 个知识点</span>
+      <button v-for="tag in modelValue" :key="tag" class="kp-chip" type="button" @click="removeTag(tag)">
+        {{ tag }}
+        <AppIcon name="close" :size="11" />
+      </button>
+      <button class="kp-clear-all" type="button" @click="clearAll">清空</button>
+    </div>
+
+    <div class="kp-search">
+      <AppIcon name="search" :size="14" />
+      <input v-model="query" placeholder="搜索知识点" />
+      <button v-if="query" class="kp-search-clear" type="button" @click="query = ''">
+        <AppIcon name="close" :size="12" />
+      </button>
+    </div>
+
+    <div class="kp-tree" :style="treeStyle">
+      <p v-if="loading" class="kp-empty">正在加载知识点…</p>
+      <p v-else-if="!subject" class="kp-empty">请先选择学科</p>
+      <p v-else-if="treeRows.length === 0" class="kp-empty">未找到匹配的知识点</p>
+      <template v-else>
+        <div
+          v-for="row in treeRows"
+          :key="row.node.id"
+          class="kp-item"
+          :class="[`state-${nodeState(row.node.id)}`, { hit: row.hit, disabled: !selectable(row.node.id) }]"
+          :style="{ paddingLeft: `${6 + row.depth * 15}px` }"
+          :title="selectable(row.node.id) ? '' : '分类节点，请展开选择具体知识点'"
+          @click="onRowClick(row.node.id)"
+        >
+          <button
+            v-if="row.hasChildren"
+            class="kp-caret"
+            :class="{ open: row.open }"
+            type="button"
+            @click.stop="toggleExpand(row.node.id)"
+          >
+            <AppIcon name="chevron-right" :size="12" />
+          </button>
+          <span v-else class="kp-dot" />
+          <span class="kp-check" :class="selectable(row.node.id) ? `s-${nodeState(row.node.id)}` : 's-off s-locked'">
+            <AppIcon v-if="nodeState(row.node.id) === 'on'" name="check" :size="10" />
+            <span v-else-if="nodeState(row.node.id) === 'part'" class="kp-dash" />
+          </span>
+          <span class="kp-name">{{ row.node.name }}</span>
+          <span v-if="countOf(row.node.id) !== null" class="kp-count">{{ countOf(row.node.id) }}</span>
+        </div>
+      </template>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.kp-picker { display: flex; flex-direction: column; gap: 8px; }
+
+/* 常驻面板模式：树吃掉剩余高度、自身滚动；已选 chip 过多时自身滚动，别把树挤没 */
+.kp-picker.fill { flex: 1; min-height: 0; }
+.kp-picker.fill .kp-tree { flex: 1; min-height: 0; }
+.kp-picker.fill .kp-selected { max-height: 84px; overflow-y: auto; }
+
+.kp-selected { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.kp-selected-label { font-size: 11.5px; color: var(--sub); font-weight: 600; }
+.kp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--brand);
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand-deep);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 9px;
+  transition: background 0.12s;
+}
+.kp-chip:hover { background: #fff; }
+.kp-clear-all {
+  border: none;
+  background: none;
+  color: var(--sub);
+  font-size: 11.5px;
+  text-decoration: underline;
+  padding: 0 2px;
+}
+.kp-clear-all:hover { color: var(--danger); }
+
+.kp-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1.5px solid var(--border);
+  border-radius: 9px;
+  background: #fff;
+  padding: 0 9px;
+  height: 32px;
+}
+.kp-search:focus-within { border-color: var(--brand); }
+.kp-search > :first-child { color: var(--sub); flex-shrink: 0; }
+.kp-search input { flex: 1; min-width: 0; border: none; outline: none; font-size: 12.5px; background: transparent; }
+.kp-search-clear { display: flex; color: var(--sub); }
+
+.kp-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 5px;
+  background: #fcfdfe;
+}
+.kp-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 7px;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  color: var(--ink);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s;
+}
+.kp-item:hover { background: #eef5f4; }
+.kp-item.state-on { background: var(--brand-soft); color: var(--brand-deep); font-weight: 600; }
+.kp-item.state-part { color: var(--brand-deep); }
+.kp-item.hit .kp-name { font-weight: 700; }
+/* 分类节点（node 模式下无可选标签）：整行仍可点（展开），但勾选框置灰表明它选不了 */
+.kp-item.disabled .kp-name { color: var(--sub); }
+
+.kp-caret {
+  display: flex;
+  flex-shrink: 0;
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--sub);
+  transition: transform 0.18s;
+}
+.kp-caret.open { transform: rotate(90deg); }
+.kp-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--border); flex-shrink: 0; margin: 0 4px; }
+
+/* 勾选框：三态（未选 / 部分 / 全选），部分态显示短横 */
+.kp-check {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border: 1.5px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+.kp-check.s-on { background: var(--brand); border-color: var(--brand); }
+.kp-check.s-part { background: var(--brand-soft); border-color: var(--brand); }
+/* 不可勾选（node 模式下的分类节点）：灰底虚线框，与「未选中」区分开 */
+.kp-check.s-locked { background: #f1f3f5; border-style: dashed; }
+.kp-dash { width: 7px; height: 1.5px; background: var(--brand); border-radius: 1px; }
+
+.kp-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kp-count { font-size: 11px; color: var(--sub); flex-shrink: 0; }
+.kp-item.state-on .kp-count { color: var(--brand-deep); }
+.kp-empty { font-size: 12.5px; color: var(--sub); text-align: center; padding: 22px 0; }
+</style>

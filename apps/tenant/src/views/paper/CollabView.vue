@@ -19,13 +19,13 @@
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppFilterChips, AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, appConfirm, COLLAB_MEMBER_TEXT, COLLAB_STATUS_TEXT, showToast, AppModal, AppDrawer } from '@aiteach/shared'
-import PaperFolderSelect from '@/components/paper/PaperFolderSelect.vue'
-import KnowledgePickerModal from '@/components/compose/KnowledgePickerModal.vue'
+import { AppFilterChips, AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, appConfirm, COLLAB_MEMBER_TEXT, COLLAB_STATUS_TEXT, showToast, AppModal, AppDrawer, AppPagination } from '@aiteach/shared'
+import { PaperFolderSelect } from '@aiteach/business-common'
+import { KnowledgePickerModal } from '@aiteach/business-common'
 import type { CollabMember, FilterRowDef, OrgCollabTask, OrgPaper, OrgQuestion, StaffMember } from '@aiteach/shared'
-import AppPagination from '@/components/ui/AppPagination.vue'
+
 import { deleteCollabTask, fetchCollabTasks, fetchPapers, fetchQuestions, fetchStaff, saveCollabTask } from '@/api/org'
-import { useBaseData } from '@/composables/useBaseData'
+import { useBaseData } from '@aiteach/business-common'
 import { useAuthStore } from '@/stores/auth'
 import { openBlankTab, openPaperEdit, paperEditHref } from '@/utils/paper-edit'
 import { COLLAB_MEMBER_CLASS, COLLAB_STATUS_CLASS } from './collab-status'

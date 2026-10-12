@@ -4,7 +4,7 @@ import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import { AppIcon, AppListToolbar, AppSegmented, showToast } from '@aiteach/shared'
 import type { StandardFormula } from '@aiteach/shared'
-import KnowledgeFilter from '@/components/ui/KnowledgeFilter.vue'
+import { KnowledgeFilterPanel as KnowledgeFilter } from '@aiteach/business-common'
 import { collectStandardFormula, fetchStandardFormulas, fetchTenantDict } from '@/api/org'
 
 const formulas = ref<StandardFormula[]>([])

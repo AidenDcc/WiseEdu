@@ -1,32 +1,49 @@
 <script setup lang="ts">
 /**
- * 试卷库：只展示**已审核通过**的试卷（个人创建的草稿存「我的文件」，编辑从那里进），
+ * 机构端 · 试卷库：只展示**已审核通过**的试卷（个人创建的草稿存「我的文件」，编辑从那里进），
  * 因此列表是只读的 —— 没有「编辑 / 提交审核」入口，仅保留 预览 / 平行卷 / 导出 / 删除。
  * 新建入口只留 手动协同组卷 与 细目表组卷；智能组卷是独立菜单页（/paper/ai）。
  *
  * 版式与题库管理对齐：左边一棵树、右上筛选条件、右下列表。左边的树是**考试类型树**
  * （分类 → 考试类型），候选项随年级 / 学科收窄 —— 因此筛选面板里不再有「考试类型」这一行：
  * 同一个值两处都能改，必然出现「面板里清掉了、树上还亮着」。
+ *
+ * 骨架（筛选面板 + 表格 / 详细列表 + 分页）与筛选模型都在 `@aiteach/business-common`，
+ * 与平台端「公共试卷库」共用同一份；本页只留取数（`@/api/org`，含 `tenant_id` 与机构权限）、
+ * 机构端专属筛选条件（`BankFilterBar` 的 `extraRows` / `#extraFilter`）、
+ * 操作按钮（`#renderOperation`）与本页的弹窗。
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
-  AppFilterPanel,
   AppIcon,
-  PAPER_SOURCE_OPTIONS,
   appConfirm,
   showToast,
   groupByPaperCategory,
   AppModal,
 } from '@aiteach/shared'
-import type { FilterRowDef, OrgPaper, OrgQuestion } from '@aiteach/shared'
-import PaperPreviewModal from '@/components/paper/PaperPreviewModal.vue'
-import PaperListPanel from '@/components/paper/PaperListPanel.vue'
-import ParallelPaperDialog from '@/components/paper/ParallelPaperDialog.vue'
-import PaperTypeTree, { type PaperTypeGroup } from '@/components/compose/PaperTypeTree.vue'
-import { recommendPapers } from '@/components/paper/paper-recommend'
+import type { OrgPaper, OrgQuestion } from '@aiteach/shared'
+import {
+  BankFilterBar,
+  PAPER_EXAM_TYPE_ROW,
+  PAPER_FILTER_ROWS,
+  PAPER_MORE_ROWS,
+  PAPER_PANEL_ROWS,
+  PaperListPanel,
+  PaperPreviewModal,
+  PaperTypeTree,
+  ParallelPaperDialog,
+  defaultPaperFilterSelection,
+  exportPaperDoc,
+  exportPaperPdf,
+  paperDictTypes,
+  paperFilterFields,
+  recommendPapers,
+  toPaperFilterRowDefs,
+  useBaseData,
+  type PaperFilterRow,
+  type PaperTypeGroup,
+} from '@aiteach/business-common'
 import { browsePaper, deletePaper, downloadPaper, fetchPapers, fetchQuestions, fetchTenantDict } from '@/api/org'
-import { useBaseData } from '@/composables/useBaseData'
-import { exportPaperDoc, exportPaperPdf, type ExportVersion } from '@/utils/paper-export'
 
 const papers = ref<OrgPaper[]>([])
 const questions = ref<OrgQuestion[]>([])
@@ -35,72 +52,27 @@ const questions = ref<OrgQuestion[]>([])
 const { examTypeItems, stageOf, ensure: ensureBase } = useBaseData()
 
 /* ===== 筛选 =====
- * 年级 / 科目 / 难度 / 杯赛 / 地区候选项来自租户字典（与题库管理同一口径），
- * 字典是异步到达的，行定义只在运行时展开成 FilterRowDef。 */
-interface PaperFilterRow {
-  key: 'grade' | 'subject' | 'difficulty' | 'examType' | 'competition' | 'region' | 'source'
-  label: string
-  dict?: string
-  options?: string[]
-  /** 放不下的行收回一行 + 「展开 / 收起」，见 FilterRowDef.collapsible */
-  collapsible?: boolean
-}
+ * 行定义与取值映射都在公共层（`paper/filter-model`），本页只提供本端数据与 scope。
+ * 机构端专属条件加在 EXTRA_ROWS 里即可 —— 与共有行同权：进折叠汇总、也进「清空」。 */
+const EXTRA_ROWS: PaperFilterRow[] = []
 
-/** 主条件（产品指定的顺序：年级 / 科目 / 难度 / 地区）。考试类型不在这里 —— 它归左侧的树 */
-const FILTER_ROWS: PaperFilterRow[] = [
-  { key: 'grade', label: '年级', dict: 'grade' },
-  { key: 'subject', label: '科目', dict: 'subject' },
-  { key: 'difficulty', label: '难度', dict: 'difficulty' },
-  /* 地区铺满 34 个省级行政区后一行放不下，收起态只留一行 */
-  { key: 'region', label: '地区', dict: 'region', collapsible: true },
-]
-
-/** 次要条件：收在「更多查询」里 */
-const MORE_ROWS: PaperFilterRow[] = [
-  { key: 'competition', label: '杯赛', dict: 'competition' },
-  { key: 'source', label: '来源', options: [...PAPER_SOURCE_OPTIONS] },
-]
-
-/** 面板里渲染的行：回写与「清空」按这份走 */
-const PANEL_ROWS = [...FILTER_ROWS, ...MORE_ROWS]
+/** 面板里渲染的行：共有行（主条件 + 更多查询）+ 本端专属 */
+const PANEL_ROWS = [...PAPER_PANEL_ROWS, ...EXTRA_ROWS]
 
 /** 参与过滤的全部维度 —— 比面板多一个考试类型（那份值由左树写，不在面板里出入） */
-const ALL_ROWS: PaperFilterRow[] = [...PANEL_ROWS, { key: 'examType', label: '考试类型', dict: 'examType' }]
+const ALL_ROWS = [...PAPER_PANEL_ROWS, PAPER_EXAM_TYPE_ROW, ...EXTRA_ROWS]
 
-const filters = reactive<Record<PaperFilterRow['key'], string[]>>({
-  grade: [],
-  subject: [],
-  difficulty: [],
-  examType: [],
-  competition: [],
-  region: [],
-  source: [],
-})
+const filters = reactive<Record<string, string[]>>(defaultPaperFilterSelection(EXTRA_ROWS))
 const filterOptions = reactive<Record<string, string[]>>({})
 
-/** 每个筛选 key 从试卷上取哪个值（可缺省的维度给空串，等价于「没有该属性」） */
-const FIELD_OF: Record<PaperFilterRow['key'], (row: OrgPaper) => string> = {
-  grade: (row) => row.grade,
-  subject: (row) => row.subject,
-  difficulty: (row) => row.difficulty ?? '',
-  examType: (row) => row.examType ?? '',
-  competition: (row) => row.competition ?? '',
-  region: (row) => row.region ?? '',
-  source: (row) => row.source ?? '',
-}
+/** 每个筛选 key 从试卷上取哪个值 —— 映射表在公共层，因为两端口径必须一致 */
+const FIELD_OF = paperFilterFields()
 
-function toRowDefs(rows: PaperFilterRow[]): FilterRowDef[] {
-  return rows.map((row) => ({
-    key: row.key,
-    label: row.label,
-    options: row.options ?? filterOptions[row.dict ?? ''] ?? [],
-    collapsible: row.collapsible,
-  }))
-}
-const filterRowDefs = computed(() => toRowDefs(FILTER_ROWS))
-const moreRowDefs = computed(() => toRowDefs(MORE_ROWS))
+const filterRowDefs = computed(() => toPaperFilterRowDefs(PAPER_FILTER_ROWS, filterOptions))
+const moreRowDefs = computed(() => toPaperFilterRowDefs(PAPER_MORE_ROWS, filterOptions))
+const extraRowDefs = computed(() => toPaperFilterRowDefs(EXTRA_ROWS, filterOptions))
 
-/** AppFilterPanel 回传整份筛选值（覆盖式回写） */
+/** 面板回传整份筛选值（覆盖式回写） */
 function onFiltersChange(next: Record<string, string[]>) {
   PANEL_ROWS.forEach((row) => {
     filters[row.key] = next[row.key] ?? []
@@ -115,11 +87,12 @@ const keyword = ref('')
 const page = ref(1)
 
 /** 单份卷是否命中当前条件；`skip` 用来算「这一维度不算」的卷池（左树计数用） */
-function matches(row: OrgPaper, skip?: PaperFilterRow['key']): boolean {
+function matches(row: OrgPaper, skip?: string): boolean {
   for (const def of ALL_ROWS) {
     if (def.key === skip) continue
-    const selected = filters[def.key]
-    if (selected.length > 0 && !selected.includes(FIELD_OF[def.key](row))) return false
+    const selected = filters[def.key] ?? []
+    const field = FIELD_OF[def.key]
+    if (field && selected.length > 0 && !selected.includes(field(row))) return false
   }
   return !keyword.value || row.name.includes(keyword.value)
 }
@@ -172,7 +145,7 @@ const treeGroups = computed<PaperTypeGroup[]>(() =>
 
 /**
  * 年级 / 学科一换，树上原先选中的考试类型可能整个消失 —— 那个值既渲染不出选中态、也没地方取消，
- * 却仍在参与筛选，结果恒为空。字典没到位时不动，免得把选中项误清空（同 BankView 的 onScopeChange）。
+ * 却仍在参与筛选，结果恒为空。字典没到位时不动，免得把选中项误清空（同题库管理的 onScopeChange）。
  */
 watch(scopedExamTypeItems, (items) => {
   if (!items.length) return
@@ -197,7 +170,7 @@ async function load() {
 async function loadDicts() {
   /* examType 不在这里拉：左树的候选项要按年级 / 学科实时收窄、还要 paperCategory 才能分组，
      统一走 useBaseData（全站单例，组卷工作台已经加载过同一份） */
-  const types = [...new Set(PANEL_ROWS.map((row) => row.dict).filter((d): d is string => !!d))]
+  const types = paperDictTypes(PANEL_ROWS)
   await Promise.all([
     ensureBase(),
     ...types.map(async (type) => {
@@ -298,9 +271,11 @@ onMounted(() => {
 
     <!-- 右：筛选条件在上，试卷列表在下（结构与题库管理、组卷工作台试卷页签一致） -->
     <div class="right-col">
-      <AppFilterPanel
+      <!-- 通用筛选面板：共有行来自公共层，机构端专属条件走 extraRows / #extraFilter -->
+      <BankFilterBar
         :rows="filterRowDefs"
         :more-rows="moreRowDefs"
+        :extra-rows="extraRowDefs"
         :model-value="filters"
         @update:model-value="onFiltersChange"
       />
@@ -317,7 +292,8 @@ onMounted(() => {
         view-key="paper-list"
         @preview="onPreview"
       >
-        <template #ops="{ row }">
+        <!-- 操作列：机构端试卷库是只读的，故只有 预览 / 平行卷 / 导出 / 删除 -->
+        <template #renderOperation="{ row }">
           <button class="mini-btn" @click="onPreview(row)">预览</button>
           <button class="mini-btn" @click="parallelTarget = row">平行卷</button>
           <button class="mini-btn" @click="openExport(row)">导出</button>

@@ -12,9 +12,9 @@
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppFilterChips, AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, PLAN_STEP_TEXT, RichTextViewer, TEACH_DOC_STATUS_TEXT, appConfirm, showToast, truncateRich, AppModal } from '@aiteach/shared'
+import { AppFilterChips, AppFilterPanel, AppIcon, AppListToolbar, AppPageHeader, PLAN_STEP_TEXT, RichTextViewer, TEACH_DOC_STATUS_TEXT, appConfirm, showToast, truncateRich, AppModal, AppPagination } from '@aiteach/shared'
 import type { FilterRowDef, OrgQuestion, PlanStep, PlanStepKind, TeachDoc } from '@aiteach/shared'
-import AppPagination from '@/components/ui/AppPagination.vue'
+
 import RichTextEditor from '@/components/ui/RichTextEditor.vue'
 import {
   deleteTeachDoc,
@@ -24,7 +24,7 @@ import {
   saveTeachDoc,
   toggleTeachDocPublish,
 } from '@/api/org'
-import { useBaseData } from '@/composables/useBaseData'
+import { useBaseData } from '@aiteach/business-common'
 import { PLAN_TEMPLATES, makePlan } from './teach-templates'
 
 const route = useRoute()

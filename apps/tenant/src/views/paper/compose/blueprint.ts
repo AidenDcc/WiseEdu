@@ -9,7 +9,7 @@
  * 只放纯函数与数据结构，副作用（Toast、写 localStorage）留在页签里。
  */
 import type { OrgQuestion } from '@aiteach/shared'
-import { defaultScore } from '@/views/paper/paper-sections'
+import { defaultScore } from '@aiteach/business-common'
 
 /** 难度由易到难，用于把候选题按「与目标难度的接近程度」排序 */
 export const DIFFICULTY_ORDER = ['容易', '较易', '中等', '较难', '困难'] as const

@@ -27,7 +27,7 @@ import { AppIcon, appConfirm } from '@aiteach/shared'
 import AiChatPanel from './AiChatPanel.vue'
 import { askAi, chatEngine, type ChatSource, type ChatTurn } from '@/api/ai-chat'
 import { useDraggableFab } from '@/composables/useDraggableFab'
-import { useScope } from '@/composables/useScope'
+import { useScope } from '@aiteach/business-common'
 
 /** 悬浮球边长：与样式里的 width/height 保持一致，供拖拽定位首帧测算用 */
 const FAB_SIZE = 64

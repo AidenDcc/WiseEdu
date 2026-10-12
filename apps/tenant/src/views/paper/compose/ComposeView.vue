@@ -15,9 +15,9 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { AppIcon, showToast } from '@aiteach/shared'
-import { useComposeBasket } from '@/composables/useComposeBasket'
-import { useComposeData } from '@/composables/useComposeData'
-import { useScope } from '@/composables/useScope'
+import { useComposeBasket } from '@aiteach/business-common'
+import { useComposeData } from '@aiteach/business-common'
+import { useScope } from '@aiteach/business-common'
 import ScopePicker from '@/components/ui/ScopePicker.vue'
 import AiAssistant from '@/components/ai/AiAssistant.vue'
 import ComposeSearchBar from '@/components/compose/ComposeSearchBar.vue'
@@ -30,7 +30,7 @@ import MediaGridTab from './tabs/MediaGridTab.vue'
 import KnowledgeTab from './tabs/KnowledgeTab.vue'
 import SyncTab from './tabs/SyncTab.vue'
 import BlueprintTab from './tabs/BlueprintTab.vue'
-import { COMPOSE_TABS, defaultComposeFilter, type ComposeFilter, type TabKey } from './types'
+import { COMPOSE_TABS, defaultComposeFilter, type ComposeFilter, type TabKey } from '@aiteach/business-common'
 
 const basket = useComposeBasket()
 

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast, ApiError, AppModal, appConfirm } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, ApiError, AppModal, appConfirm, AppSwitch } from '@aiteach/shared'
 import type { AgentConfig, AiModel } from '@aiteach/shared'
-import AppSwitch from '@/components/ui/AppSwitch.vue'
+
 import { fetchAgentConfig, fetchAiModels, rollbackAgentConfig, saveAgentConfig } from '@/api/platform'
 
 const AUTO_FIX_TYPES = ['格式错误', '语法错误', '数值笔误']

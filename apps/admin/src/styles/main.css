@@ -5,6 +5,8 @@
   --brand-2: #7b5cf0;
   --brand-grad: linear-gradient(135deg, #4f6ef7 0%, #7b5cf0 100%);
   --brand-soft: rgba(79, 110, 247, 0.09);
+  /* 品牌色投影：图表 / 控件收不到 CSS 变量时由它兜底（如分页激活态、公共层图表） */
+  --brand-shadow: rgba(79, 110, 247, 0.3);
   --ink: #1c2434;
   --ink-2: #4b5568;
   --sub: #8a94a8;

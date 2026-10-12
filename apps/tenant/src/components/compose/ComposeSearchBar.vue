@@ -21,8 +21,8 @@ import {
   aiComposeSearch,
   composeSearchEngine,
 } from '@/api/ai-compose-search'
-import { useBaseData } from '@/composables/useBaseData'
-import type { ComposeFilter } from '@/views/paper/compose/types'
+import { useBaseData } from '@aiteach/business-common'
+import type { ComposeFilter } from '@aiteach/business-common'
 
 const props = defineProps<{ filter: ComposeFilter }>()
 const emit = defineEmits<{ patch: [patch: Partial<ComposeFilter>] }>()

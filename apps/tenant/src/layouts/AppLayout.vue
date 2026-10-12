@@ -5,7 +5,7 @@ import { AppAvatar, AppIcon, showToast, resolveApiMode, getAppConfig, buildBread
 import type { MenuItem } from '@/menu'
 import { footerMenus, menus } from '@/menu'
 import { useAuthStore } from '@/stores/auth'
-import { useScope } from '@/composables/useScope'
+import { useScope } from '@aiteach/business-common'
 import { clearDemoIdentity, restoreDemoIdentity, useDemoRole, type DemoRole } from '@/composables/useDemoRole'
 import { useVisibleMenus } from '@/composables/useVisibleMenus'
 import ScopePicker from '@/components/ui/ScopePicker.vue'

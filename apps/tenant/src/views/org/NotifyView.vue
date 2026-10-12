@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, AppSwitch } from '@aiteach/shared'
 import type { NotifyMatrixRow } from '@aiteach/shared'
-import AppSwitch from '@/components/ui/AppSwitch.vue'
+
 import { fetchNotifyMatrix, saveNotifyMatrix } from '@/api/org'
 
 const rows = ref<NotifyMatrixRow[]>([])

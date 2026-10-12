@@ -3,7 +3,7 @@ import { onMounted, ref } from 'vue'
 import { fabric } from 'fabric'
 import { AppIcon } from '@aiteach/shared'
 import { useFabricCanvas } from '@/composables/useFabricCanvas'
-import { readAsDataUrl } from '@/utils/file'
+import { readAsDataUrl } from '@aiteach/business-common'
 
 /**
  * 通用 Fabric 简易画布（规格模块 6）。

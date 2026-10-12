@@ -29,9 +29,9 @@ import {
   registerFileContent,
 } from '@/api/ai-file'
 import type { FileRecognizeResult, RecognizedQuestion } from '@/api/ai-file'
-import { useBaseData } from '@/composables/useBaseData'
-import { useViewMode } from '@/composables/useViewMode'
-import { downloadFile, formatFileSize } from '@/utils/file'
+import { useBaseData } from '@aiteach/business-common'
+import { useViewMode } from '@aiteach/business-common'
+import { downloadFile, formatFileSize } from '@aiteach/business-common'
 import { openPaperEdit, paperEditHref } from '@/utils/paper-edit'
 
 /**

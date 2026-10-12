@@ -5,7 +5,7 @@ import { AppIcon, FILE_KIND_TEXT, MATERIAL_STATUS_TEXT, PAPER_STATUS_TEXT, showT
 import type { OrgPaper, OrgSearchResult } from '@aiteach/shared'
 import { fetchGlobalSearch } from '@/api/org'
 import { searchImageEngine, searchKeywordFromImage } from '@/api/ai-search'
-import { formatFileSize } from '@/utils/file'
+import { formatFileSize } from '@aiteach/business-common'
 import { openPaperEdit, paperEditHref } from '@/utils/paper-edit'
 
 /**

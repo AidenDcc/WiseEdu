@@ -9,7 +9,7 @@ import KetcherMoleculeDraw from './KetcherMoleculeDraw.vue'
 import FabricGeneralDraw from './FabricGeneralDraw.vue'
 import { fetchMediaDetail, saveDrawMedia } from '@/api/org'
 import { svgToDataUrl } from '@/utils/svgClean'
-import { useBaseData } from '@/composables/useBaseData'
+import { useBaseData } from '@aiteach/business-common'
 
 /**
  * 绘图编辑器宿主（模块 3~6 的编排层）。

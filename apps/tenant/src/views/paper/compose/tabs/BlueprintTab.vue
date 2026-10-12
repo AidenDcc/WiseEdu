@@ -11,12 +11,13 @@
  * 交棒给组卷车，与手动选题殊途同归——后面的生成试卷、预览、导出完全不用知道题是怎么来的。
  */
 import { computed, ref, watch } from 'vue'
+import { AppDrawer, AppIcon, RichTextViewer, showToast } from '@aiteach/shared'
 import type { OrgQuestion } from '@aiteach/shared'
-import { AppIcon, RichTextViewer, showToast, AppDrawer } from '@aiteach/shared'
-import { useComposeData } from '@/composables/useComposeData'
-import { useComposeBasket } from '@/composables/useComposeBasket'
-import { useBaseData } from '@/composables/useBaseData'
-import { defaultScore } from '@/views/paper/paper-sections'
+
+import { useComposeData } from '@aiteach/business-common'
+import { useComposeBasket } from '@aiteach/business-common'
+import { useBaseData } from '@aiteach/business-common'
+import { defaultScore } from '@aiteach/business-common'
 import {
   availableKnowledges,
   blueprintEntries,
@@ -33,7 +34,7 @@ import {
   type Blueprint,
   type BlueprintCell,
 } from '../blueprint'
-import type { ComposeFilter } from '../types'
+import type { ComposeFilter } from '@aiteach/business-common'
 
 const props = defineProps<{ filter: ComposeFilter }>()
 

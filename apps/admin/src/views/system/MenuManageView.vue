@@ -10,9 +10,9 @@
  * 这里新增的自定义路径会落到兜底路由，渲染为「开发中」占位页。
  */
 import { computed, onMounted, reactive, ref } from 'vue'
-import { AppIcon, AppListToolbar, AppPageHeader, AppModal, appConfirm, showToast, ApiError, MAX_ADMIN_MENU_DEPTH } from '@aiteach/shared'
+import { AppIcon, AppListToolbar, AppPageHeader, AppModal, appConfirm, showToast, ApiError, MAX_ADMIN_MENU_DEPTH, AppSwitch } from '@aiteach/shared'
 import type { AdminMenuItem } from '@aiteach/shared'
-import AppSwitch from '@/components/ui/AppSwitch.vue'
+
 import { deleteAdminMenuItem, fetchAdminMenus, saveAdminMenuItem, toggleAdminMenuItem } from '@/api/platform'
 import { useAdminMenus } from '@/composables/useAdminMenus'
 

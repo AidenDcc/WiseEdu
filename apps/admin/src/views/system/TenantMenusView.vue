@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast, ApiError, appConfirm } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, showToast, ApiError, appConfirm, AppSwitch } from '@aiteach/shared'
 import type { TenantMenuItem } from '@aiteach/shared'
-import AppSwitch from '@/components/ui/AppSwitch.vue'
+
 import { fetchTenantMenus, saveTenantMenus } from '@/api/platform'
 
 const items = ref<TenantMenuItem[]>([])

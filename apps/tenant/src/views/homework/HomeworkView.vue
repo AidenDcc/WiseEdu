@@ -20,7 +20,7 @@ import {
   gradeSubmission,
   saveHomework,
 } from '@/api/org'
-import { useBaseData } from '@/composables/useBaseData'
+import { useBaseData } from '@aiteach/business-common'
 
 const route = useRoute()
 const router = useRouter()
