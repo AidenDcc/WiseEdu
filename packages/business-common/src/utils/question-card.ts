@@ -77,3 +77,29 @@ export function needsFigure(item: { stem: string }): boolean {
   const text = toPlainText(item.stem)
   return text.includes('如图') || text.includes('图）')
 }
+
+/** 材料组合题：`stem` 是共用题干 / 材料，作答单位在 `subQuestions` 里 */
+export function isCompositeQuestion(item: { questionCategory?: string }): boolean {
+  return item.questionCategory === '材料组合题'
+}
+
+/**
+ * 题目在列表里的**可检索文本**：题干 + （组合题的）各子题题干，拼成一段纯文本。
+ *
+ * 组合题的关键信息常常只在子题里（共用材料往往只有一句情境描述），
+ * 搜索只匹配 `row.stem` 的话，「求 a 的取值范围」这类关键词搜不到任何东西。
+ * 两端题库的关键词过滤共用这一份，避免一边改了另一边没改。
+ */
+export function questionSearchText(item: { stem: string; subQuestions?: Array<{ stem: string }> }): string {
+  const parts = [toPlainText(item.stem)]
+  for (const sub of item.subQuestions ?? []) parts.push(toPlainText(sub.stem))
+  return parts.join(' ')
+}
+
+/**
+ * 子题在预览 / 列表里的富文本占位：子题未填题干时给一句提示，
+ * 免得卡片上出现一片空白（列表渲染不经过 QuestionBodyFields 的校验）。
+ */
+export function subStemText(stem: string): string {
+  return toPlainText(stem).trim() || '（未填写题干）'
+}

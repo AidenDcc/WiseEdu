@@ -13,13 +13,15 @@
  * - `subtree`（默认，组卷工作台）：**点节点 = 整棵子树的知识点标签一起选中/取消**。教师是按
  *   「三角函数」这个层级想事情的，让他逐个勾 15 个叶子标签不合理；个别不想要的标签可以在上方
  *   chip 里单独删。
- * - `node`（录题页的知识点弹窗）：**只选本节点自己的标签**，配合 `max` 限个数。分类节点没有
- *   tag 因而不可勾选（点它只展开）—— 把分类名存进题目的 knowledge 会变成池外的孤儿值。
+ * - `node`（录题页的知识点弹窗）：**只选本节点自己的标签**，配合 `max` 限个数。
+ *   **任何层级都可选**：有 tag 的取 tag，没有 tag 的分类节点取节点名本身 —— 教师的知识点认知
+ *   本来就有粗有细（有人挂到「二次函数」，有人只挂到「函数的概念与性质」），
+ *   强行要求展开到叶子会逼出「随便挑一个差不多的叶子」这种脏数据。
  */
 import { computed, ref, watch } from 'vue'
 import { AppIcon, showToast } from '@aiteach/shared'
 import type { OrgKnowledgeNode } from '@aiteach/shared'
-import { collectTags, useKnowledgePool } from '../../composables/useKnowledgePool'
+import { collectTags, nodeKnowledgeLabel, useKnowledgePool } from '../../composables/useKnowledgePool'
 
 const props = defineProps<{
   modelValue: string[]
@@ -73,7 +75,7 @@ const childrenMap = computed(() => {
   return map
 })
 
-/** 节点子树的全部知识点标签（叶子 tag；整棵子树无 tag 时退化为节点名） */
+/** 节点子树的全部标签（每个节点贡献自己的标签：有 tag 取 tag，分类节点取节点名） */
 function subtreeTags(id: string): string[] {
   const root = byId.value.get(id)
   if (!root) return []
@@ -81,23 +83,23 @@ function subtreeTags(id: string): string[] {
   const stack = [root]
   while (stack.length) {
     const node = stack.pop()!
-    if (node.tag) tags.push(node.tag)
+    tags.push(nodeKnowledgeLabel(node))
     childrenMap.value.get(node.id)?.forEach((child) => stack.push(child))
   }
-  return tags.length > 0 ? tags : [root.name]
+  return [...new Set(tags.filter(Boolean))]
 }
 
 const selected = computed(() => new Set(props.modelValue))
 
-/** 点这个节点会选中哪些标签：`subtree` = 整棵子树，`node` = 本节点的 tag（无 tag 则为空） */
+/** 点这个节点会选中哪些标签：`subtree` = 整棵子树，`node` = 本节点自己的标签 */
 function selectableTags(id: string): string[] {
   const node = byId.value.get(id)
   if (!node) return []
-  if (props.mode === 'node') return node.tag ? [node.tag] : []
+  if (props.mode === 'node') return [nodeKnowledgeLabel(node)].filter(Boolean)
   return subtreeTags(id)
 }
 
-/** 该节点是否可勾选：`node` 模式下分类节点（无 tag）不可勾，点它只展开 */
+/** 该节点是否可勾选：`node` 模式任何层级都能选，故恒为真（保留判定是为了 `subtree` 模式的退化） */
 function selectable(id: string): boolean {
   return selectableTags(id).length > 0
 }
@@ -236,6 +238,8 @@ watch(nodes, (list) => {
     expanded.value = new Set(list.filter((node) => node.parentId == null).map((node) => node.id))
   }
   if (!props.modelValue.length || !list.length) return
+  /* 保留口径 = 可选口径：`collectTags` 收的就是「每个节点自己的标签」（含分类节点名），
+     与 `selectableTags` 同源，故刚选上的分类节点不会被下一拍摘掉 */
   const tags = new Set(collectTags(list))
   const kept = props.modelValue.filter((tag) => tags.has(tag))
   if (kept.length !== props.modelValue.length) emit('update:modelValue', kept)

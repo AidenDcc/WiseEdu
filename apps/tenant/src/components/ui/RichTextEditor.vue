@@ -7,6 +7,8 @@ import { Image } from '@tiptap/extension-image'
 import { FontFamily, FontSize, TextStyle } from '@tiptap/extension-text-style'
 import { TableKit } from '@tiptap/extension-table'
 import { ResizableNodeView } from '@tiptap/core'
+/* 只用它的 Selection.atEnd：求「文档末尾」的插入落点（没有光标时的兜底位置） */
+import { Selection } from '@tiptap/pm/state'
 import {
   isRichContent,
   normalizeRichHtml,
@@ -16,6 +18,7 @@ import {
 } from '@aiteach/shared'
 import type { DrawEditorType, OrgMedia } from '@aiteach/shared'
 import FormulaPickerModal from './FormulaPickerModal.vue'
+import FormulaInlineInput from './rte/FormulaInlineInput.vue'
 import MediaPickerModal from './MediaPickerModal.vue'
 import RteToolbar from './rte/RteToolbar.vue'
 import MediaDrawSelectDialog from '@/components/draw/MediaDrawSelectDialog.vue'
@@ -139,7 +142,15 @@ const props = withDefaults(
     minHeight?: number
     /** 当前学科，用于公式库默认筛选 */
     subject?: string
-    /** 选项行等紧凑场景：隐藏按钮文案、降低最小高度 */
+    /**
+     * 简化工具栏：按钮只留图标，收起「字体 / 字号 / 表格 / 填空线…」这些文字标签。
+     *
+     * 录题页的正文框（题干 / 参考答案 / 解析 / 共用材料 / 选项 / 填空答案）一律带上。
+     * 21 个按钮带上文案要 1100px 以上，题干框在 1000px 宽的版面里当场换行成两排，
+     * 真正的正文反而被挤下去；只留图标后排数减半，按钮含义交给各自的 title 悬浮提示。
+     *
+     * 只影响工具栏外观，**不动正文高度** —— 高度由 `minHeight` 单独给（两者是正交的）。
+     */
     compact?: boolean
   }>(),
   { placeholder: '请输入内容…', minHeight: 120, subject: '', compact: false },
@@ -165,44 +176,175 @@ function toEditorHtml(input: string): string {
 /* 填空下横线 / 括号两个按钮跟着工具栏走了（纯编辑器命令，不需要父级状态）：
    见 components/ui/rte/RteToolbar.vue。 */
 
-/* ===== 公式弹窗 ===== */
-const mathOpen = ref(false)
-/** 非空表示在编辑已有公式节点（值为节点位置），空表示新插入 */
-const mathEditingPos = ref<number | null>(null)
-/** 正在编辑的公式原本是块级还是行内 —— 决定弹窗开关初始态与确认时走哪个 update 命令 */
-const mathEditingBlock = ref(false)
-const mathInitialLatex = ref('')
+/* ===== 公式落点：内联输入框与公式编辑器弹窗共用的唯一出口 ===== */
 
-function openMathInsert() {
-  mathEditingPos.value = null
-  mathEditingBlock.value = false
-  mathInitialLatex.value = ''
-  mathOpen.value = true
+/**
+ * 内联输入框的一次会话（浮层自己不带文档状态，这里记「贴哪个位置、初始源码、什么模式」）。
+ * `editPos` 非 null 表示在改已有的公式节点 —— 同一个浮层既要能新插，也要能就地改。
+ */
+interface InlineMathAnchor {
+  /** 浮层贴哪个文档位置：新插入时是落点，编辑已有节点时是节点位置 */
+  pos: number
+  latex: string
+  block: boolean
+  /** 非 null = 在改这个位置的已有公式节点；null = 新插入 */
+  editPos: number | null
 }
 
+/**
+ * 落公式的唯一出口 —— 内联输入框和公式编辑器弹窗都走这里，不各写一份。
+ *
+ * @param editPos   非 null 时改这个位置的已有公式节点
+ * @param insertPos 新插入时的落点；null 表示交给当前选区
+ */
+function placeMath(latex: string, block: boolean, editPos: number | null, insertPos: number | null) {
+  const instance = editor.value
+  if (!instance) return
+
+  if (editPos !== null) {
+    const node = instance.state.doc.nodeAt(editPos)
+    if (!node) {
+      showToast('公式已不在原位置，请重新编辑', 'error')
+      return
+    }
+    /* 模式没变：原地改 attrs 就够（扩展的 update* 会自己校验节点类型，pos 必须显式给 ——
+       不给的话它回退到 selection.$from.pos，而此刻焦点在浮层里，选区已不代表用户看着的位置） */
+    if (block === (node.type.name === 'blockMath')) {
+      const ok = block
+        ? instance.chain().focus().updateBlockMath({ latex, pos: editPos }).run()
+        : instance.chain().focus().updateInlineMath({ latex, pos: editPos }).run()
+      if (!ok) showToast('公式更新失败，请删除后重新插入', 'error')
+      return
+    }
+    /* 行内 ↔ 独立：节点类型都换了，update* 改不了，只能把这个节点整个换掉 */
+    const chain = instance.chain().focus().deleteRange({ from: editPos, to: editPos + node.nodeSize })
+    const swapped = block
+      ? chain.insertBlockMath({ latex, pos: editPos }).run()
+      : chain.insertInlineMath({ latex, pos: editPos }).run()
+    if (!swapped) showToast('公式更新失败，请删除后重新插入', 'error')
+    return
+  }
+
+  const target = insertPos === null ? null : clampPos(insertPos)
+  const chain = instance.chain().focus()
+  const ok =
+    target === null
+      ? (block ? chain.insertBlockMath({ latex }) : chain.insertInlineMath({ latex })).run()
+      : (block ? chain.insertBlockMath({ latex, pos: target }) : chain.insertInlineMath({ latex, pos: target })).run()
+  if (!ok) showToast('公式插入失败，请重试', 'error')
+}
+
+/* ===== 公式编辑器弹窗 =====
+   工具栏的「插入公式」和点正文里已有的公式，默认都是**就地**开内联输入框；
+   这个大弹窗只在「内联输入框 → 下拉 → 公式编辑器」这条回跳里出现。 */
+const mathOpen = ref(false)
+/** 弹窗在改哪个已有公式节点（null = 新插入） */
+const mathEditingPos = ref<number | null>(null)
+/** 打开弹窗时公式原本是块级还是行内 —— 决定弹窗里插入方式的初始态 */
+const mathEditingBlock = ref(false)
+const mathInitialLatex = ref('')
+/** 弹窗路径的新插入落点（null 表示退回当前选区） */
+const mathInsertPos = ref<number | null>(null)
+/** 弹窗若由内联输入框跳来，记下那个会话：取消时把草稿原样还原回内联框（见 onMathClose） */
+const mathInlineAnchor = ref<InlineMathAnchor | null>(null)
+
+/** 工具栏「插入公式」：贴光标开一个空的轻量输入框 */
+function openMathInsert() {
+  const instance = editor.value
+  if (!instance) return
+  inlineMath.value = null
+  /* 每次自增 → 子组件按 key 重挂：再点一次「公式」是「重新贴当前光标开一个」，而不是沿用旧锚点 */
+  inlineMathSession.value += 1
+  inlineMath.value = { pos: resolveInsertPos(), latex: '', block: false, editPos: null }
+}
+
+/**
+ * 点正文里已有的公式节点：就地开内联输入框改。
+ * 以前这里是直接弹公式编辑器面板，可「改个系数也要过一遍 920px 的大弹窗」太重了；
+ * 确实需要符号库 / 公式库时，再从输入框下拉里点「公式编辑器」，源码会一起带过去。
+ */
 function openMathEdit(node: { attrs: { latex?: string } }, pos: number, block: boolean) {
-  mathEditingPos.value = pos
-  mathEditingBlock.value = block
-  mathInitialLatex.value = node.attrs.latex ?? ''
-  mathOpen.value = true
+  inlineMath.value = null
+  inlineMathSession.value += 1
+  inlineMath.value = { pos, latex: node.attrs.latex ?? '', block, editPos: pos }
 }
 
 function onMathConfirm(latex: string, block: boolean) {
-  const instance = editor.value
-  if (!instance) return
-  if (mathEditingPos.value !== null) {
-    /* 显式带 pos：扩展在没给 pos 时回退到 selection.$from.pos，依赖选中态太脆 */
-    const pos = mathEditingPos.value
-    const ok = block
-      ? instance.chain().focus().updateBlockMath({ latex, pos }).run()
-      : instance.chain().focus().updateInlineMath({ latex, pos }).run()
-    if (!ok) showToast('公式更新失败，请删除后重新插入', 'error')
-  } else if (block) {
-    instance.chain().focus().insertBlockMath({ latex }).run()
-  } else {
-    instance.chain().focus().insertInlineMath({ latex }).run()
-  }
+  const editPos = mathEditingPos.value
+  const insertPos = mathInsertPos.value
   mathOpen.value = false
+  mathEditingPos.value = null
+  mathInsertPos.value = null
+  mathInlineAnchor.value = null
+  placeMath(latex, block, editPos, editPos === null ? insertPos : null)
+}
+
+/* ===== 内联公式输入框（「插入公式」与「改已有公式」的默认通路） =====
+   贴光标开一个轻量输入框：敲 LaTeX → 失焦 / 回车即落成正文里的公式节点。
+   浮层本身不落文档（见 FormulaInlineInput 的注释），所以这里只保管「会话 + 开闭」。 */
+const inlineMath = ref<InlineMathAnchor | null>(null)
+/** 作为子组件的 key：每开一次自增，强制重挂以重新定位 */
+const inlineMathSession = ref(0)
+
+/** 插入锚点：编辑器里有光标就用当前选区起点；没有光标（从未聚焦过）就追加到文档末尾 */
+function resolveInsertPos(): number {
+  const instance = editor.value
+  if (!instance) return 1
+  if (!focused.value && !instance.isFocused) return Selection.atEnd(instance.state.doc).from
+  return instance.state.selection.from
+}
+
+/** 锚点用前夹一次：浮层开着时若文档被别处改短（AI 回填等），原位置可能已越界 */
+function clampPos(pos: number): number {
+  const instance = editor.value
+  if (!instance) return pos
+  const max = Math.max(1, instance.state.doc.content.size - 1)
+  return Math.max(1, Math.min(pos, max))
+}
+
+function onInlineInsert(latex: string, block: boolean) {
+  const anchor = inlineMath.value
+  inlineMath.value = null
+  if (!anchor) return
+  /* 编辑已有节点时落点就是节点位置，不能再夹取 —— 一夹就可能贴到隔壁节点上 */
+  placeMath(latex, block, anchor.editPos, anchor.editPos === null ? anchor.pos : null)
+}
+
+/**
+ * 下拉里的「公式编辑器」：关掉轻量输入框，交给弹窗接管。
+ * 已敲的源码、锚点、以及「是不是在改已有节点」一并带过去 ——
+ * 写了一半再开面板，不该从头开始，也不该从「就地改」变成「旁边又插一个」。
+ */
+function onInlineOpenEditor(latex: string, block: boolean) {
+  const anchor = inlineMath.value
+  inlineMath.value = null
+  mathEditingPos.value = anchor?.editPos ?? null
+  mathEditingBlock.value = block
+  mathInitialLatex.value = latex
+  mathInsertPos.value = anchor && anchor.editPos === null ? anchor.pos : null
+  /* 记住这一趟是从内联输入框来的：弹窗被取消时好把草稿还回去 */
+  mathInlineAnchor.value = anchor ? { ...anchor, block } : null
+  mathOpen.value = true
+}
+
+/**
+ * 关掉公式编辑器弹窗。
+ * 若这趟是从内联输入框跳过来的（mathInlineAnchor 有值），把弹窗里的草稿原样装回内联框：
+ * 用户在面板里改过源码又反悔，不该连原来敲的一半也一起丢掉。
+ */
+function onMathClose(draft?: { latex: string; block: boolean }) {
+  mathOpen.value = false
+  mathEditingPos.value = null
+  mathInsertPos.value = null
+  const anchor = mathInlineAnchor.value
+  mathInlineAnchor.value = null
+  if (!anchor) return
+  inlineMathSession.value += 1
+  inlineMath.value = {
+    ...anchor,
+    latex: draft?.latex ?? mathInitialLatex.value,
+    block: draft?.block ?? anchor.block,
+  }
 }
 
 /* ===== 图片：选库 / 传本地 / 粘贴 / 拖拽四条入口，统一走 uploadImage ===== */
@@ -522,13 +664,27 @@ defineExpose({ isEmpty })
       <span v-if="isEmpty && !focused" class="rte-placeholder">{{ placeholder }}</span>
     </div>
 
+    <!-- 内联公式输入框：贴光标开、失焦即转成正文公式。key 让它每次「插入公式」都重新贴光标定位 -->
+    <FormulaInlineInput
+      v-if="inlineMath && editor"
+      :key="inlineMathSession"
+      :editor="editor"
+      :pos="inlineMath.pos"
+      :initial-latex="inlineMath.latex"
+      :initial-block="inlineMath.block"
+      :subject="subject"
+      @insert="onInlineInsert"
+      @cancel="inlineMath = null"
+      @open-editor="onInlineOpenEditor"
+    />
+
     <FormulaPickerModal
       v-if="mathOpen"
       :subject="subject"
       :initial-latex="mathInitialLatex"
       :editing="mathEditingPos !== null"
       :initial-block="mathEditingBlock"
-      @close="mathOpen = false"
+      @close="onMathClose"
       @confirm="onMathConfirm"
     />
 

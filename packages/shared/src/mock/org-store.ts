@@ -46,6 +46,7 @@ import type {
   OrgPaper,
   OrgPrompt,
   OrgQuestion,
+  OrgSubQuestion,
   OrgRole,
   OrgSearchResult,
   PaperAnalysis,
@@ -81,6 +82,7 @@ import {
   LECTURE_BLOCK_TEXT,
   SLIDE_LAYOUT_TEXT,
   MISTAKE_REASONS,
+  MAX_SUB_QUESTIONS,
   isEarlierYear,
 } from '../api/models'
 import { getCacheUser } from '../api/auth'
@@ -2311,6 +2313,120 @@ export const questions: OrgQuestion[] = [
     useCount: 0,
     updatedAt: nowStr(-1),
   }),
+
+  /* ---- 材料组合题（`questionCategory: '材料组合题'`）：stem 是共用题干 / 材料，作答单位在 subQuestions ----
+     刻意放在默认作用域（高一 · 数学 / 英语）里，进题库就能看到，不用先改年级学科。 */
+  seedQuestion({
+    id: 9360,
+    questionCategory: '材料组合题',
+    type: '材料分析',
+    subject: '数学',
+    grade: '高一',
+    difficulty: '中等',
+    knowledge: ['函数概念'],
+    /* 共用题干 / 材料：走与题干同一套富文本清洗，列表上显示的也正是它 */
+    stem:
+      '<p>某共享单车平台统计了工作日早高峰（7:00—9:00）某站点的用车需求。已知 7:00 时站点内停放的车辆为 40 辆，' +
+      '每小时被骑走的车辆数与该时段开始时站点内车辆数成正比，比例系数为 0.25；同时调度车每小时向站点补充 30 辆。' +
+      '设 x 为 7:00 以后经过的小时数，y 为站点内的车辆数。</p>',
+    options: [],
+    answer: '',
+    analysis: '',
+    subQuestions: [
+      {
+        id: 1,
+        type: '单选',
+        difficulty: '容易',
+        knowledge: ['函数概念'],
+        stem: '<p>根据材料，x 与 y 之间的函数关系式是（　　）</p>',
+        options: ['y=40+30x', 'y=40(1−0.25)ˣ+30x', 'y=40×0.25+30x', 'y=40−30x'],
+        answer: 'B',
+        optionColumns: 1,
+        analysis: '<p>被骑走的车辆是上一步车辆数的 25%，故每小时剩余比例恒为 0.75；再加上调度车补充的 30x 辆，得 y=40×0.75ˣ+30x。</p>',
+      },
+      {
+        id: 2,
+        type: '填空',
+        difficulty: '中等',
+        knowledge: ['函数概念'],
+        stem: '<p>按上述模型，9:00 时（即 x=2）站点内的车辆数为 ______ 辆（结果保留到整数）。</p>',
+        options: [],
+        answer: '82.5',
+        fillAnswers: [{ value: '<p>82.5</p>', equivalents: '<p>82.5、82 或 83</p>' }],
+        analysis: '<p>代入 x=2：40×0.75²+30×2=40×0.5625+60=22.5+60=82.5。</p>',
+      },
+      {
+        id: 3,
+        type: '解答',
+        difficulty: '较难',
+        knowledge: ['函数概念'],
+        stem: '<p>若要求 10:00 时站点内的车辆数不低于 60 辆，调度车每小时至少需要补充多少辆？（写出推算过程）</p>',
+        options: [],
+        answer:
+          '<p>设每小时补充 a 辆，则 x=3 时 y=40×0.75³+3a=16.875+3a≥60，解得 a≥14.375，故每小时至少补充约 15 辆。</p>',
+        analysis: '<p>先把「不低于」翻译成不等式，再代 x=3 求 a 的下界；注意最后要按实际意义取整数。</p>',
+      },
+    ],
+    library: 'org',
+    categoryId: 11,
+    term: '上学期',
+    examType: '期中考试',
+    source: '手动录入',
+    owner: '李文博',
+    ownerId: 103,
+    useCount: 3,
+    updatedAt: nowStr(-30),
+  }),
+  seedQuestion({
+    id: 9361,
+    questionCategory: '材料组合题',
+    type: '完形填空',
+    subject: '英语',
+    grade: '高一',
+    difficulty: '较难',
+    knowledge: ['完形填空'],
+    stem:
+      '<p>阅读下面短文，从每题所给的四个选项中选出最佳选项。</p>' +
+      '<p>When I was twelve, my grandfather gave me a small wooden boat. He said, "A boat only moves when you ___1___ it." ' +
+      'I did not understand then. Years later, while facing my first failure in a new city, I suddenly recalled his words: ' +
+      'life, like that boat, will stay still unless you ___2___ it forward yourself.</p>',
+    options: [],
+    answer: '',
+    analysis: '',
+    subQuestions: [
+      {
+        id: 1,
+        type: '单选',
+        difficulty: '中等',
+        knowledge: ['完形填空'],
+        stem: '<p>选择最恰当的选项填入第 1 空。</p>',
+        options: ['push', 'paint', 'buy', 'notice'],
+        answer: 'A',
+        optionColumns: 1,
+        analysis: '<p>下文「a boat only moves when you ___ it」与「push … forward」呼应，指船只有在你推动时才会前进。</p>',
+      },
+      {
+        id: 2,
+        type: '单选',
+        difficulty: '较难',
+        knowledge: ['完形填空'],
+        stem: '<p>选择最恰当的选项填入第 2 空。</p>',
+        options: ['send', 'push', 'hold', 'leave'],
+        answer: 'B',
+        optionColumns: 1,
+        analysis: '<p>与祖父原话中的动词保持一致，故选 push；其余选项与「使…前进」的比喻不符。</p>',
+      },
+    ],
+    library: 'org',
+    categoryId: 14,
+    term: '下学期',
+    examType: '期末考试',
+    source: '手动录入',
+    owner: '陈明远',
+    ownerId: 101,
+    useCount: 1,
+    updatedAt: nowStr(-12),
+  }),
   ...EXAM_QUESTIONS,
 ]
 
@@ -3029,10 +3145,61 @@ export function saveQuestion(input: Partial<OrgQuestion> & { stem: string; submi
     equivalents: row.equivalents ? sanitizeRichHtml(row.equivalents) : '',
   }))
 
+  /* 题目类别决定这份入参的后半段怎么解释：材料组合题的 stem 是「共用题干 / 材料」、
+     作答单位在 subQuestions 里，所以母题的选项 / 答案 / 解析一律留空。 */
+  const category = input.questionCategory ?? '独立单题'
+  const isComposite = category === '材料组合题'
+  /* 子题净化：题干 / 选项 / 解析 / 填空答案都是富文本，与母题同一套；
+     非填空题不留上一位编辑的填写结构（换题型后残留会让「重新打开」看到旧空答案）。 */
+  const subQuestions: OrgSubQuestion[] = (input.subQuestions ?? []).map((row, index) => {
+    const type = row.type ?? '单选'
+    return {
+      /* id 只用于界面 key 与拖拽排序，缺省补一个稳定值即可（卷面的 (1)(2) 是按数组顺序现算的） */
+      id: row.id ?? index + 1,
+      type,
+      difficulty: row.difficulty || '中等',
+      knowledge: [...(row.knowledge ?? [])],
+      stem: sanitizeRichHtml(row.stem ?? ''),
+      options: (row.options ?? []).map((opt) => sanitizeRichHtml(opt)),
+      optionColumns: (row.options ?? []).length ? (row.optionColumns ?? 1) : 1,
+      answer: row.answer ?? '',
+      fillAnswers:
+        type === '填空'
+          ? (row.fillAnswers ?? []).map((item) => ({
+              value: sanitizeRichHtml(item.value ?? ''),
+              equivalents: item.equivalents ? sanitizeRichHtml(item.equivalents) : '',
+            }))
+          : [],
+      analysis: row.analysis ? sanitizeRichHtml(row.analysis) : '',
+    }
+  })
+
   /* 富文本下 `<p></p>` 的 trim() 非空，故按纯文本判空；仅含图片的题干也算有内容 */
-  if (!toPlainText(stem).trim() && !hasImage(stem)) throw new Error('题干不能为空')
-  if ((input.type === '单选' || input.type === '多选' || input.type === '判断') && !input.answer) {
+  if (!toPlainText(stem).trim() && !hasImage(stem)) throw new Error(isComposite ? '共用题干 / 材料不能为空' : '题干不能为空')
+  if (!isComposite && (input.type === '单选' || input.type === '多选' || input.type === '判断') && !input.answer) {
     throw new Error('请设置正确答案')
+  }
+  if (isComposite) {
+    /* 条数上限两边都拦：它是数据结构约束，不是「填到哪儿了」的进度问题 */
+    if (subQuestions.length > MAX_SUB_QUESTIONS) throw new Error(`子题最多 ${MAX_SUB_QUESTIONS} 道`)
+    /* 子题的**完整性**只在提交审核时拦，与前端 `collectDraftErrors(draft, full)` 的 full 口径一致：
+       存草稿是「写一半先放着」，那时子题常常只填了题干，服务端比客户端严会让人卡在保存上，
+       而界面上的红字又指不出是哪一条（客户端在草稿态根本不校验子题正文）。
+       共用材料是上面无条件校验的那一条 —— 它是一道组合题的身份，空着就不该入库。 */
+    if (input.submit) {
+      if (!subQuestions.length) throw new Error('材料组合题至少需要一个子题')
+      subQuestions.forEach((row, index) => {
+        const label = `第 ${index + 1} 个子题`
+        if (!toPlainText(row.stem).trim() && !hasImage(row.stem)) throw new Error(`${label}的题干不能为空`)
+        if ((row.type === '单选' || row.type === '多选' || row.type === '判断') && row.options.length) {
+          if (row.options.some((opt) => !toPlainText(opt).trim() && !hasImage(opt))) throw new Error(`${label}的每项选项必填`)
+          if (!row.answer) throw new Error(`${label}未设置正确答案`)
+        }
+        if (row.type === '填空' && (row.fillAnswers ?? []).some((item) => !toPlainText(item.value).trim() && !hasImage(item.value))) {
+          throw new Error(`${label}的每空答案必填`)
+        }
+      })
+    }
   }
   const isEdit = input.id != null
   const item = isEdit
@@ -3055,13 +3222,17 @@ export function saveQuestion(input: Partial<OrgQuestion> & { stem: string; submi
     term: input.term ?? target.term,
     examType: input.examType ?? target.examType,
     sourceRemark: input.sourceRemark,
-    options,
+    questionCategory: category,
+    /* 组合题的作答单位是子题：母题不复用上一轮编辑留下的选项 / 答案 / 解析（换回独立单题时
+       这些字段由下面的 options/answer/analysis 重新写入，不会被这里的清空带跑） */
+    subQuestions: isComposite ? subQuestions : [],
+    options: isComposite ? [] : options,
     /* 非选择题的排布配置无意义，一律归一为单列，避免换题型后残留旧列数 */
-    optionColumns: options.length ? (input.optionColumns ?? target.optionColumns) : 1,
-    answer: input.answer ?? '',
-    analysis: analysis ?? '',
+    optionColumns: !isComposite && options.length ? (input.optionColumns ?? target.optionColumns) : 1,
+    answer: isComposite ? '' : (input.answer ?? ''),
+    analysis: isComposite ? '' : (analysis ?? ''),
     /* 非填空题不留上一位编辑的填写结构（换题型后残留会让「重新打开」看到旧空答案） */
-    fillAnswers: type === '填空' ? fillAnswers : [],
+    fillAnswers: !isComposite && type === '填空' ? fillAnswers : [],
     library: input.library ?? target.library,
     categoryId: input.categoryId ?? target.categoryId,
     owner: isEdit ? target.owner : CURRENT.name,
@@ -3250,6 +3421,13 @@ export function variantOf(id: number): OrgQuestion {
   const copy = seedQuestion({
     ...source,
     id: ++questionSeq,
+    /* 子题必须**深拷一层**：`...source` 只拷了数组引用，变式改一道子题会连带改掉原题 */
+    subQuestions: source.subQuestions?.map((row) => ({
+      ...row,
+      knowledge: [...row.knowledge],
+      options: [...row.options],
+      fillAnswers: row.fillAnswers?.map((item) => ({ ...item })),
+    })),
     stem: source.stem,
     status: 'draft',
     source: 'AI 变式',

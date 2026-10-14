@@ -24,6 +24,11 @@ export interface TenantDictItem {
   stages?: string[]
   /** 仅 examType：试卷分类（= 管理端「考试类型」树一级节点的名字） */
   paperCategory?: string
+  /**
+   * 仅 questionType：题目类别（独立单题 / 材料组合题）。
+   * 缺省按「独立单题」处理 —— 存量字典项与存量题型都不带这个字段。
+   */
+  questionCategory?: string
 }
 
 /** 试卷类型树的一片叶子（一个考试类型 + 当前卷数） */

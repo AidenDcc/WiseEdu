@@ -30,16 +30,22 @@ const emit = defineEmits<{ close: []; confirm: [tags: string[]] }>()
 
 const draft = ref<string[]>([...props.modelValue])
 
-/** 当前教材：给用户一个「这棵树是按什么筛出来的」的参照 */
-const scopeText = computed(() => [props.grade, props.subject, props.version].filter(Boolean).join(' / ') || '未选择教材')
+/**
+ * 当前选择范围：给用户一个「这棵树是按什么筛出来的」的参照。
+ *
+ * **只露年级与学科，不露教材版本** —— 版本只参与知识点的取数口径（`useKnowledgePool` 仍按它
+ * 拉树），但它是录题页上游的一个选择，出现在这里会让人以为「换个版本能换一批知识点」而去
+ * 反复上下改参数；教师判断「知识点对不对」看的是年级 + 学科。
+ */
+const scopeText = computed(() => [props.grade, props.subject].filter(Boolean).join(' / ') || '未选择范围')
 </script>
 
 <template>
   <AppModal :title="title" :width="720" @close="emit('close')">
     <p class="kp-scope">
-      <span class="kp-scope-label">当前教材</span>
+      <span class="kp-scope-label">选择范围</span>
       {{ scopeText }}
-      <span class="kp-scope-tip">最多选 {{ max }} 个，分类节点请展开后选具体知识点</span>
+      <span class="kp-scope-tip">最多选 {{ max }} 个，任意层级的知识点都可直接选</span>
     </p>
 
     <!-- 树要自己限高：AppModal 的 .modal-body 只负责滚动，不给固定高度 -->

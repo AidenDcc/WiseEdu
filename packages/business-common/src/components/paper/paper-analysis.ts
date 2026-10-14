@@ -16,6 +16,7 @@
  */
 import { paperTotalScore } from '@aiteach/shared'
 import type { OrgKnowledgeNode, OrgPaper, OrgQuestion } from '@aiteach/shared'
+import { nodeKnowledgeLabel } from '../../composables/useKnowledgePool'
 
 /** 知识点档位：知识点树里的深度（根 = 一级）。固定五档，与题干的 chip 选项一一对应。 */
 export const LEVEL_OPTIONS = ['一级', '二级', '三级', '四级', '五级'] as const
@@ -67,16 +68,15 @@ export function knownItems(items: PaperItem[]): PaperItem[] {
  * 知识标签 → 档位名。
  *
  * 档位不是题目数据（题目的 `knowledge` 只是扁平标签数组），只能从知识点树的深度推：
- * 一个 tag 挂在第几层，它就是几级。树里一个 tag 都没有时（历史 / 兜底树），
- * 退化为「叶子节点名」—— 与 `useKnowledgePool.collectTags` 同一套规则，否则同一棵树
- * 在两处会算出两套标签集合。
+ * 一个标签挂在第几层，它就是几级。每个节点贡献的标签由 `nodeKnowledgeLabel` 定义
+ * （有 tag 取 tag，分类节点取节点名）—— 与 `useKnowledgePool.collectTags` 同一套规则，
+ * 否则同一棵树在两处会算出两套标签集合；分类节点名也会被存进题目的 `knowledge`
+ * （录题页的知识点弹窗允许选任意层级），不收它就只能在分析表里落进「未知」档。
  *
  * 同一个 tag 可能挂在多处（如物理的「匀变速直线运动」在两个分类下各挂一次），取最浅的一档。
  */
 export function knowledgeLevels(nodes: OrgKnowledgeNode[]): Map<string, string> {
   const byId = new Map(nodes.map((node) => [node.id, node]))
-  const parentIds = new Set(nodes.map((node) => node.parentId).filter((id): id is string => id != null))
-  const hasTag = nodes.some((node) => node.tag)
 
   function depthOf(node: OrgKnowledgeNode): number {
     let depth = 1
@@ -93,7 +93,7 @@ export function knowledgeLevels(nodes: OrgKnowledgeNode[]): Map<string, string> 
 
   const map = new Map<string, string>()
   nodes.forEach((node) => {
-    const label = hasTag ? node.tag : parentIds.has(node.id) ? undefined : node.name
+    const label = nodeKnowledgeLabel(node)
     if (!label) return
     const level = LEVEL_OPTIONS[depthOf(node) - 1] ?? LEVEL_OPTIONS[LEVEL_OPTIONS.length - 1]
     const previous = map.get(label)

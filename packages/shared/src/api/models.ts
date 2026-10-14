@@ -232,6 +232,28 @@ export type DictTypeKey =
   | 'competition'
   | 'region'
 
+/**
+ * 题目类别（仅录题时需要区分）。
+ *
+ * 「独立单题」是一道自成一体的题；「材料组合题」是**一段共用题干 / 材料 + 若干子题**的组合，
+ * 它的子题才是真正作答的单位。除了录题界面，其他地方（题库列表、筛选、组卷、导出）一律
+ * 只看「题型」，不看题目类别 —— 所以它不是独立字典，而是题型字典项上的一个属性
+ * （见 `DictItem.questionCategory`），候选项与题型一起按学科收窄。
+ */
+export type QuestionCategory = '独立单题' | '材料组合题'
+
+/** 题目类别的候选值（顺序即录题界面上的展示顺序） */
+export const QUESTION_CATEGORY_OPTIONS: QuestionCategory[] = ['独立单题', '材料组合题']
+
+/**
+ * 一道材料组合题最多挂多少道子题。
+ *
+ * 放在这里（而不是录题页的 utils 里）是因为**两端都要用**：录题页面用它禁用「添加子题」按钮
+ * 并招呼应文案，mock 侧用它做入库的结构性校验 —— 前端拦一次、服务端再拦一次，
+ * 上限值只有一份，改一处两边同步。
+ */
+export const MAX_SUB_QUESTIONS = 50
+
 export interface DictItem {
   id: number
   name: string
@@ -254,6 +276,13 @@ export interface DictItem {
   dateTo?: string
   answerType?: string
   coefficient?: number
+  /**
+   * 题目类别（仅 questionType 使用）：留空按「独立单题」处理（存量字典项不受影响）。
+   *
+   * 放在题型上而不是单开一个字典：录题时「题目类别 → 题型」是一级联动（选了材料组合题，
+   * 题型行只列材料组合题型），两者本就是一棵树的上下级，分开存两份必然对不上。
+   */
+  questionCategory?: QuestionCategory
   /**
    * 适配学段（仅 examType，由「考试类型」树投影写入）：留空 = 全学段通用，
    * 有值 = 只在机构端选到这些学段时才出现在试卷类型树 / 筛选条件里。管理端不直接编辑它。
@@ -746,6 +775,35 @@ export interface PhotoResultEdit {
   fillAnswers?: FillBlankAnswer[]
 }
 
+/**
+ * 材料组合题的**子题**：一道结构完整但「没有学段」的题。
+ *
+ * 它与 `OrgQuestion` 的差别只有一个：学科 / 年级 / 教材版本 / 学期 / 考试类型 / 来源 / 归属
+ * 都继承母题，子题只描述「问什么、怎么答、难度、考点」这几件真的会逐题不同的事。
+ * 同一个结构在录题页、预览抽屉、试卷渲染三处复用，故放模型层而不是某端私有。
+ *
+ * `type` 只取「独立单题」类别的题型 —— 材料组合题里再套材料组合题在卷面上没有意义。
+ */
+export interface OrgSubQuestion {
+  /**
+   * 子题编号（本地自增，仅用于界面 key 与拖拽排序）。
+   * 卷面上的「(1) (2) (3)」是**按数组顺序现算的**，不存这个字段，所以删除 / 排序不会串号。
+   */
+  id: number
+  type: string
+  difficulty: string
+  knowledge: string[]
+  stem: string
+  options: string[]
+  /** 选项排布（同 `OrgQuestion.optionColumns`） */
+  optionColumns?: OptionColumns
+  /** 答案：选择题为字母串、无选项判断题为「对 / 错」、填空为各空纯文本以「｜」相连、解答为富文本 */
+  answer: string
+  /** 填空题各空的答案（富文本） */
+  fillAnswers?: FillBlankAnswer[]
+  analysis: string
+}
+
 export interface OrgQuestion {
   id: number
   stem: string
@@ -775,6 +833,17 @@ export interface OrgQuestion {
    * 供列表 / 试卷 / 导出等既有渲染端直接展示。
    */
   fillAnswers?: FillBlankAnswer[]
+  /**
+   * 题目类别。缺省 = 独立单题 —— 存量题与既有种子都不带这个字段，读侧一律按
+   * `row.questionCategory === '材料组合题'` 判组合题，不判「是否等于独立单题」。
+   */
+  questionCategory?: QuestionCategory
+  /**
+   * 子题（仅材料组合题）。**材料组合题的 `stem` 存的是共用题干 / 材料**，子题各带自己的题干；
+   * 这样列表 / 试卷 / 导出这些只读 `stem` 的既有渲染端天然能显示组合题的正文，不必逐个改判。
+   * `options` / `answer` / `analysis` 在组合题上留空（作答单位是子题）。
+   */
+  subQuestions?: OrgSubQuestion[]
   variantOf?: number
   useCount: number
   updatedAt: string

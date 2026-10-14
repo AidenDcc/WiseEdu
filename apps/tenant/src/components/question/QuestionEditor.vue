@@ -15,33 +15,53 @@
  * 校验留在这里而不是全提成纯函数：`collectDraftErrors` 本身是纯的，但「解析为空要弹一次确认」
  * 与「基本信息红字在收起态看不见、失败时强制展开」是界面的事，所以 errors 由本组件持有，
  * 只对外暴露 `validate()`。同理 `appConfirm` 一律留在组件里，纯逻辑层不弹窗。
+ *
+ * ## 题目类别（独立单题 / 材料组合题）
+ *
+ * 「题目类别」是基本信息面板里的第一行（排在年级前面）—— 它决定**下面那半页长什么样**：
+ * - 独立单题：题型取该学科的全部题型，正文就是一道题的题干 / 选项 / 答案 / 解析；
+ * - 材料组合题：题型收窄为「材料组合题型」，正文换成「共用题干 / 材料」+「子题」两块
+ *   （见 MaterialCompositePanel），子题自己的题型只从「独立单题」题型里取。
+ *
+ * 两个类别的正文**各自留在草稿里**（`stem` 与 `material` / `subQuestions` 互不覆盖），
+ * 来回切不丢已经写好的内容；存库时按类别收口，见 `questionPayloadOf`。
  */
 import { computed, ref, watch } from 'vue'
 import {
-  ANSWER_PAREN,
   AppFilterPanel,
-  AppIcon,
-  AppSegmented,
-  QUESTION_SOURCE_OPTIONS,
   appConfirm,
-  showToast,
-  toPlainText,
+  QUESTION_CATEGORY_OPTIONS,
+  QUESTION_SOURCE_OPTIONS,
 } from '@aiteach/shared'
-import type { FilterRowDef, QuestionSource } from '@aiteach/shared'
-import { KnowledgePickerModal } from '@aiteach/business-common'
-import RichTextEditor from '@/components/ui/RichTextEditor.vue'
+import type { FilterRowDef, QuestionCategory, QuestionSource } from '@aiteach/shared'
+import KnowledgeRow from './KnowledgeRow.vue'
+import MaterialCompositePanel from './MaterialCompositePanel.vue'
+import QuestionBodyFields from './QuestionBodyFields.vue'
 import { useBaseData } from '@aiteach/business-common'
 import {
   collectDraftErrors,
+  emptySubQuestionDraft,
   hasContent,
-  isJudgeNoOptionsDraft,
+  isCompositeDraft,
   MAX_KNOWLEDGE,
+  nextSubQuestionId,
+  pickCategoryType,
+  resetBodyStructure,
   setDraftGrade,
 } from '@/utils/question-draft'
-import type { OptionColumns, QuestionDraft } from '@/utils/question-draft'
+import type { QuestionDraft } from '@/utils/question-draft'
 
 /** 基本信息面板里可出现的行 */
-export type MetaRowKey = 'grade' | 'subject' | 'type' | 'difficulty' | 'term' | 'examType' | 'source' | 'textbook'
+export type MetaRowKey =
+  | 'category'
+  | 'grade'
+  | 'subject'
+  | 'type'
+  | 'difficulty'
+  | 'term'
+  | 'examType'
+  | 'source'
+  | 'textbook'
 
 const props = withDefaults(
   defineProps<{
@@ -87,75 +107,24 @@ const TERMS = ['上学期', '下学期']
    录题中心手动态与「编辑入库」弹窗要全量行；AI 出题标签页只该给四个必填项 ——
    学期 / 考试类型 / 来源 / 教材版本影响不到出题参数，摆出来只会让人以为改了有用。
    拍照识别弹窗显式传 rows：识别结果不带学期 / 教材版本，摆了也存不下去。 */
-const EDIT_ROWS: MetaRowKey[] = ['grade', 'subject', 'type', 'difficulty', 'term', 'examType', 'source', 'textbook']
+const EDIT_ROWS: MetaRowKey[] = ['category', 'grade', 'subject', 'type', 'difficulty', 'term', 'examType', 'source', 'textbook']
 const PARAMS_ROWS: MetaRowKey[] = ['grade', 'subject', 'type', 'difficulty']
 
 const activeRows = computed(() => props.rows ?? (props.mode === 'params' ? PARAMS_ROWS : EDIT_ROWS))
 const hasRow = (key: MetaRowKey) => activeRows.value.includes(key)
 
+/* ===== 题目类别 ===== */
+
+/** 材料组合题：正文换成「材料 + 子题」两块，作答单位是子题 */
+const composite = computed(() => isCompositeDraft(draft))
+
+/** 母题的可选题型：按类别 + 学科收窄（材料组合题只列材料组合题型） */
+const typeOptions = computed(() => questionTypesFor(draft.subject, draft.category))
+
+/** 子题的可选题型：**只含「独立单题」类别**（组合题里再套组合题在卷面上没有意义） */
+const subTypeOptions = computed(() => questionTypesFor(draft.subject, '独立单题'))
+
 /* ===== 题型与作答结构 ===== */
-
-/** 有选项、答案存字母的题型 */
-const isChoice = computed(() => draft.type === '单选' || draft.type === '多选' || draft.type === '判断')
-
-/** 参考答案栏的占位文案：连线题的答案是配对结果，不是演算过程 */
-const essayPlaceholder = computed(() =>
-  draft.type === '连线' ? '逐组写出配对结果，如：①—③；②—①；③—④…' : '输入解答过程…（可插入公式与图片）',
-)
-
-/** 判断题：把「正确 / 错误」两项换成题干前的（　　）。两种形态共用 answers 的下标（0 = 对，1 = 错），
-    来回切不会丢已选的答案。 */
-const judgeNoOptions = computed(() => isJudgeNoOptionsDraft(draft))
-
-const JUDGE_MODES = [
-  { value: 'options', label: '显示选项 √ ×' },
-  { value: 'none', label: '无选项（题前括号）' },
-]
-
-/* ===== 选项排布（一行 1 / 2 / 4 个） =====
-   只改表单的呈现结构，不改存储口径：排布存成题目字段 `optionColumns`，缺省 1（存量题不受影响）。 */
-const COLUMN_OPTIONS = [
-  { value: '1', label: '单行显示' },
-  { value: '2', label: '一行 2 个' },
-  { value: '4', label: '一行 4 个' },
-]
-
-/** AppSegmented 的 modelValue 是 string，这里在两类取值间转换 */
-const columnValue = computed(() => String(draft.optionColumns))
-
-function setColumnValue(value: string) {
-  draft.optionColumns = (Number(value) === 2 ? 2 : Number(value) === 4 ? 4 : 1) as OptionColumns
-  emit('change')
-}
-
-/** 排布只对单选 / 多选有意义：判断题就两项，解答题没有选项 */
-const showColumnPicker = computed(() => draft.type === '单选' || draft.type === '多选')
-
-/** 题干是否已以作答括号开头（富文本下要按纯文本判，`<p>（　　）x</p>` 也算） */
-const stemHasAnswerParen = computed(() => toPlainText(draft.stem).trimStart().startsWith(ANSWER_PAREN))
-
-/**
- * 把作答括号放到题干最前面。
- * 题干是富文本 HTML，直接字符串拼接会得到 `（　　）<p>题干</p>` —— 括号被隔到段落外面独占一行；
- * 因此有首个段落标签时插进段落内部，与题干同行（与卷面「（　　）题干」的写法一致）。
- */
-function prependAnswerParen(stem: string): string {
-  if (!stem) return ANSWER_PAREN
-  if (/^<p[^>]*>/.test(stem)) return stem.replace(/^(<p[^>]*>)/, `$1${ANSWER_PAREN}`)
-  return `${ANSWER_PAREN}${stem}`
-}
-
-function setJudgeMode(mode: string) {
-  if (mode === 'none') {
-    draft.options = []
-    if (!stemHasAnswerParen.value) draft.stem = prependAnswerParen(draft.stem)
-  } else if (draft.options.length === 0) {
-    draft.options = ['正确', '错误']
-    /* 括号是本模式自动加的，切回来时一并收回，避免题干留下一个多余的（　　） */
-    if (stemHasAnswerParen.value) draft.stem = draft.stem.replace(ANSWER_PAREN, '')
-  }
-  emit('change')
-}
 
 /**
  * 换题型确认用的「上一次题型」，用户取消时把 draft.type 退回去。
@@ -172,14 +141,6 @@ watch(() => props.draft.type, (type) => {
   lastType = type
 })
 
-/** 换题型后重建该题型专属的作答结构（选项 / 答案 / 每空答案） */
-function resetTypeStructure() {
-  lastType = draft.type
-  draft.answers = []
-  draft.options = draft.type === '判断' ? ['正确', '错误'] : ['', '', '', '']
-  draft.fillAnswers = [{ value: '', equivalents: '' }]
-}
-
 async function onTypeChange() {
   if (hasContent(draft.stem) || draft.options.some((opt) => hasContent(opt))) {
     if (!(await appConfirm('切换题型将清空选项结构，确认切换？', { type: 'danger' }))) {
@@ -187,18 +148,19 @@ async function onTypeChange() {
       return
     }
   }
-  resetTypeStructure()
+  resetBodyStructure(draft, draft.type)
 }
 
 /**
  * 换学科后，原来的学科专属题型可能已不适用（英语的「完形填空」切到数学）——
- * 静默落回该学科的通用题型并重建作答结构，不弹确认：切学科本身就是用户主动做的动作。
+ * 静默落回该学科（同类别）的通用题型并重建作答结构，不弹确认：切学科本身就是用户主动做的动作。
  */
 watch(() => draft.subject, (subject) => {
-  const options = questionTypesFor(subject)
+  const options = questionTypesFor(subject, draft.category)
   if (!options.length || options.includes(draft.type)) return
   draft.type = pick(options, draft.type)
-  resetTypeStructure()
+  /* 组合题没有作答结构可清（选项 / 答案都在子题里），重建会把独立单题那份草稿一起抹掉 */
+  if (!composite.value) resetBodyStructure(draft, draft.type)
 })
 
 /** chip 版题型切换：点当前已选中的题型直接返回（下拉的 change 只在真的换值时触发，chip 的 click 每次都触发）。 */
@@ -208,46 +170,33 @@ function pickType(type: string) {
   /* 参数态只改出题参数、不动选项结构：手动态已填的题干/选项不该因为换个生成题型被清掉，
      而且那时正文根本不显示，弹那句「将清空选项结构」的确认更是莫名其妙 */
   if (props.mode === 'params') return
-  onTypeChange()
+  void onTypeChange()
 }
 
-function addOption() {
-  if (draft.options.length >= 6) {
-    showToast('选项最多 6 个', 'error')
-    return
+/**
+ * 切题目类别：题型必须落在新类别的候选里（两类题型互不通用），其余取值原样保留 ——
+ * 正文数据不销毁（`stem` 与 `material` / `subQuestions` 各存一份），切回来还在。
+ *
+ * 切到「材料组合题」时**自动补第一道子题**：组合题的作答单位就是子题，空着进来只会看到
+ * 一句「还没有子题」的提示外加一次多余的点击。切回来再切出去时若已有子题则不补
+ * （`subQuestions.length` 判空），不覆盖用户之前写的内容。
+ */
+function setCategory(next: QuestionCategory) {
+  if (next === draft.category) return
+  draft.category = next
+  draft.type = pickCategoryType(questionTypesFor(draft.subject, next), draft.type, next)
+  if (next === '材料组合题' && !draft.subQuestions.length) {
+    /* 难度与知识点继承母题，与「添加子题」按钮同一条路径（见 MaterialCompositePanel） */
+    draft.subQuestions.push(
+      emptySubQuestionDraft(nextSubQuestionId(draft.subQuestions), {
+        difficulty: draft.difficulty,
+        knowledge: draft.knowledge,
+      }),
+    )
   }
-  draft.options.push('')
-}
-
-function removeOption(index: number) {
-  if (draft.options.length <= 2) {
-    showToast('选项至少 2 个', 'error')
-    return
-  }
-  draft.options.splice(index, 1)
-  draft.answers = draft.answers.filter((i) => i !== index).map((i) => (i > index ? i - 1 : i))
-}
-
-function toggleAnswer(index: number) {
-  if (draft.type === '单选' || draft.type === '判断') {
-    draft.answers = [index]
-  } else {
-    const pos = draft.answers.indexOf(index)
-    if (pos >= 0) draft.answers.splice(pos, 1)
-    else draft.answers.push(index)
-  }
-}
-
-/* ===== 知识点（树弹窗） =====
-   知识点是一棵树（分类节点 + 带 tag 的叶子），一行 chip 平铺看不出层级，改为点开弹窗在树上选。
-   弹窗挂在 `#extra` 那一行的 v-if 上，每次打开都重新挂载 → 草稿态天然从最新已选起算。 */
-const knowledgeOpen = ref(false)
-
-function onKnowledgeConfirm(tags: string[]) {
-  /* 弹窗内部已按 max 拦截，这里 slice 只是兜底（组件不该是唯一一道防线） */
-  draft.knowledge = tags.slice(0, MAX_KNOWLEDGE)
-  delete errors.value.knowledge
-  knowledgeOpen.value = false
+  delete errors.value.type
+  delete errors.value.subQuestions
+  emit('change')
 }
 
 /* ===== 基本信息面板（共享 AppFilterPanel + AppFilterChips） =====
@@ -273,6 +222,11 @@ function retiredLabel(known: string[], value: string): Record<string, string> | 
 /** 面板行：候选项随字典 / 教材矩阵变化，故为 computed；不允许的行整行不给 */
 const metaRows = computed<FilterRowDef[]>(() => {
   const rows: FilterRowDef[] = []
+  /* 题目类别排在最前：它决定下面所有行的含义（题型取哪一批、正文换成哪一块），
+     所以必须先定它，与「先定怎么录、再填内容」是同一个顺序 */
+  if (hasRow('category')) {
+    rows.push({ key: 'category', label: '题目类别', multiple: false, options: [...QUESTION_CATEGORY_OPTIONS] })
+  }
   if (hasRow('grade')) {
     rows.push({
       key: 'grade', label: '年级', multiple: false,
@@ -288,11 +242,12 @@ const metaRows = computed<FilterRowDef[]>(() => {
     })
   }
   if (hasRow('type')) {
-    /* 学科专属题型（英语的完形填空 / 七选五 / 短文改错）只在选中该学科时出现 */
+    /* 题型按「题目类别 + 学科」收窄：学科专属题型（英语的完形填空 / 七选五 / 短文改错）
+       只在选中该学科时出现；材料组合题只列材料组合题型 */
     rows.push({
       key: 'type', label: '题型', multiple: false,
-      options: withCurrent(questionTypesFor(draft.subject), draft.type),
-      optionLabels: retiredLabel(questionTypesFor(draft.subject), draft.type),
+      options: withCurrent(typeOptions.value, draft.type),
+      optionLabels: retiredLabel(typeOptions.value, draft.type),
     })
   }
   if (hasRow('difficulty')) {
@@ -323,6 +278,7 @@ const metaRows = computed<FilterRowDef[]>(() => {
 /** 面板的当前取值：单值字段包成单元素数组（chip 组件以 string[] 表达选中） */
 const metaFilter = computed<Record<string, string[]>>(() => {
   const value: Record<string, string[]> = {}
+  if (hasRow('category')) value.category = draft.category ? [draft.category] : []
   if (hasRow('grade')) value.grade = draft.grade ? [draft.grade] : []
   if (hasRow('subject')) value.subject = draft.subject ? [draft.subject] : []
   if (hasRow('type')) value.type = draft.type ? [draft.type] : []
@@ -343,13 +299,19 @@ const metaFilter = computed<Record<string, string[]>>(() => {
  */
 function onMetaChange(next: Record<string, string[]>) {
   const first = (key: string) => next[key]?.[0] ?? ''
+  /* 题目类别要最先落：它会改题型的候选集，下面的题型取值得按新类别判是否有效。
+     面板回传的整份取值里，题型那一项还是**切换前**的旧值（chip 行是覆盖式回写、不会替我们算新题型），
+     所以类别真的变了就跳过题型那一行 —— 新题型由 setCategory 内部按新类别归一。 */
+  const category = first('category') as QuestionCategory | ''
+  const categoryChanged = Boolean(category) && category !== draft.category
+  if (categoryChanged) setCategory(category as QuestionCategory)
   const grade = first('grade')
   const subject = first('subject')
   if (grade && grade !== draft.grade) setDraftGrade(draft, grade, subject || undefined, optionsForGrade)
   else if (subject) draft.subject = subject
   if (subject) delete errors.value.subject
   const type = first('type')
-  if (type && type !== draft.type) pickType(type)
+  if (!categoryChanged && type && type !== draft.type) pickType(type)
   const difficulty = first('difficulty')
   if (difficulty) draft.difficulty = difficulty
   /* 未在面板上渲染的行不会出现在 next 里：缺键就跳过，别把用户看不见的值清掉 */
@@ -373,6 +335,15 @@ watch([() => draft.grade, () => draft.subject], () => {
 const metaPanelKey = ref(0)
 
 const errors = ref<Record<string, string>>({})
+/** 子题的红字，按子题 id 分组（右侧表单与左侧目录上的红点都读它） */
+const subErrors = ref<Record<number, Record<string, string>>>({})
+
+/** 知识点整行写入（母题）：KnowledgeRow 回传的是最新整份选择 */
+function onKnowledgeUpdate(tags: string[]) {
+  draft.knowledge = tags.slice(0, MAX_KNOWLEDGE)
+  delete errors.value.knowledge
+  emit('change')
+}
 
 /**
  * 校验。`full=false` 只校验必填属性（存草稿），`full=true` 全量校验（提交审核）。
@@ -380,12 +351,13 @@ const errors = ref<Record<string, string>>({})
  * 「解析为空」确认走 appConfirm，因此是 async —— 所有调用方都必须 await。
  */
 async function validate(full: boolean): Promise<boolean> {
-  const { errors: next, analysisMissing } = collectDraftErrors(draft, full)
-  errors.value = next
+  const result = collectDraftErrors(draft, full)
+  errors.value = result.errors
+  subErrors.value = result.subErrors
   /* 基本信息的红字在收起态是看不见的，校验失败时展开 */
-  if (next.knowledge || next.subject) metaPanelKey.value += 1
-  if (analysisMissing && !(await appConfirm('解析为空（选填），提交审核时建议补充解析，确认继续提交？', { type: 'warning' }))) return false
-  return Object.keys(next).length === 0
+  if (result.errors.knowledge || result.errors.subject) metaPanelKey.value += 1
+  if (result.analysisMissing && !(await appConfirm('解析为空（选填），提交审核时建议补充解析，确认继续提交？', { type: 'warning' }))) return false
+  return Object.keys(result.errors).length === 0 && Object.keys(result.subErrors).length === 0
 }
 
 defineExpose({ validate })
@@ -395,8 +367,7 @@ defineExpose({ validate })
   <div class="q-editor">
     <!-- 题目基本信息：各入口共用，全页唯一一处参数界面（FR-TM-008）。
          每个属性一行：标签左、候选项右平铺（候选项都不多，下拉是多余的一次点击，且看不到还有什么可选）。
-         顺序取数据源现成顺序（字典 sort / 教材矩阵 / TERMS），唯一例外是年级排到学科前面
-         —— 学科选项由年级收窄，先选年级才不用回头改学科。 -->
+         首行是「题目类别」——先定独立单题还是材料组合题，下面的题型与正文才知道该长什么样。 -->
     <AppFilterPanel
       :key="metaPanelKey"
       :model-value="metaFilter"
@@ -404,210 +375,55 @@ defineExpose({ validate })
       title="题目基本信息"
       @update:model-value="onMetaChange"
     >
-      <!-- 知识点行：跟在 chip 行下面，位置就是「基本信息里的知识点那一行」。
-           做成整行按钮 = 点已选标签也是打开树（重选 / 增删都在弹窗里做），
-           chip 本身只读展示，不再就地删 —— 逐个删和树上取消勾选是同一件事，没必要两套。 -->
+      <!-- 知识点行：跟在 chip 行下面，位置就是「基本信息里的知识点那一行」 -->
       <template #extra>
-        <div class="kp-row">
-          <span class="kp-row-label">知识点<span class="req">*</span></span>
-          <button class="kp-row-main" type="button" @click="knowledgeOpen = true">
-            <template v-if="draft.knowledge.length">
-              <span v-for="tag in draft.knowledge" :key="tag" class="kp-row-chip">{{ tag }}</span>
-            </template>
-            <span v-else class="kp-row-empty">点击选择知识点（最多 5 个）</span>
-            <AppIcon name="chevron-right" :size="14" class="kp-row-arrow" />
-          </button>
-        </div>
-        <p class="prop-hint">在知识点树上选，最多 {{ MAX_KNOWLEDGE }} 个；点上方已选可再次打开修改</p>
-        <p v-if="errors.knowledge" class="prop-err">{{ errors.knowledge }}</p>
+        <KnowledgeRow
+          :model-value="draft.knowledge"
+          :subject="draft.subject"
+          :grade="draft.grade"
+          :version="hasRow('textbook') ? draft.textbook : ''"
+          :error="errors.knowledge"
+          @update:model-value="onKnowledgeUpdate"
+        />
+        <!-- 学科的红字也挂在这里：基本信息面板收起时它是看不见的，校验失败会自动展开（见 validate） -->
         <p v-if="errors.subject" class="prop-err">{{ errors.subject }}</p>
       </template>
     </AppFilterPanel>
 
     <!-- ===== 题目正文（参数态不渲染：那时这张表单是「出题参数」，不是一道待编辑的题） ===== -->
-    <div v-if="mode === 'edit'" class="panel editor-panel">
-      <div class="f-field">
-        <label class="f-label">题干<span class="req">*</span></label>
-        <RichTextEditor
-          v-model="draft.stem"
-          :subject="draft.subject"
-          :min-height="150"
-          placeholder="请编辑题干"
-          @change="emit('change')"
-        />
-        <p v-if="errors.stem" class="f-err">{{ errors.stem }}</p>
-      </div>
-
-      <!-- 选项区（FR-TM-010） -->
-      <template v-if="isChoice">
-        <div class="f-field">
-          <!-- 判断题：可在「√ × 两个选项」与「无选项、题干前括号作答」之间切换 -->
-          <div v-if="draft.type === '判断'" class="opt-head">
-            <label class="f-label">作答方式</label>
-            <AppSegmented
-              :model-value="judgeNoOptions ? 'none' : 'options'"
-              :options="JUDGE_MODES"
-              @update:model-value="setJudgeMode"
-            />
-            <span class="f-hint" style="margin: 0">
-              {{ judgeNoOptions ? '题干前已加「（　　）」，学生在括号里写对 / 错' : '选项固定为「正确 / 错误」两项' }}
-            </span>
+    <template v-if="mode === 'edit'">
+      <!-- 材料组合题：共用题干 / 材料 + 子题（左目录 / 右录入）；来源备注从 #footer 落到子题面板底部 -->
+      <MaterialCompositePanel
+        v-if="composite"
+        :draft="draft"
+        :errors="errors"
+        :sub-errors="subErrors"
+        :type-options="subTypeOptions"
+        :difficulty-options="difficulties"
+        @change="emit('change')"
+      >
+        <template v-if="hasRow('source')" #footer>
+          <div class="f-field source-remark">
+            <label class="f-label">来源备注（选填 ≤100 字）</label>
+            <input v-model="draft.sourceRemark" class="f-input" placeholder="如：改编自 2025 期中第 12 题" />
+            <p v-if="errors.sourceRemark" class="f-err">{{ errors.sourceRemark }}</p>
           </div>
+        </template>
+      </MaterialCompositePanel>
 
-          <template v-if="draft.options.length">
-            <div class="opt-head">
-              <label class="f-label">
-                选项（{{ draft.options.length }}/{{ draft.type === '判断' ? 2 : 6 }}）
-                <span class="f-hint" style="display: inline; margin-left: 8px">点击左侧圆点标记正确答案</span>
-              </label>
-              <!-- 排布：短选项（数字、单词）排一行更省卷面，也少滚一屏 -->
-              <template v-if="showColumnPicker">
-                <span class="f-hint" style="margin: 0 2px 0 auto">选项排布</span>
-                <AppSegmented :model-value="columnValue" :options="COLUMN_OPTIONS" @update:model-value="setColumnValue" />
-              </template>
-            </div>
-            <div class="opt-list" :class="`cols-${draft.optionColumns}`">
-              <div v-for="(opt, i) in draft.options" :key="i" class="opt-row">
-                <button
-                  class="answer-dot"
-                  :class="{ on: draft.answers.includes(i), multi: draft.type === '多选' }"
-                  type="button"
-                  :title="draft.type === '多选' ? '正确答案（≥2 个）' : '正确答案'"
-                  @click="toggleAnswer(i)"
-                >
-                  {{ 'ABCDEF'[i] }}
-                </button>
-                <RichTextEditor
-                  v-model="draft.options[i]"
-                  class="opt-editor"
-                  compact
-                  :subject="draft.subject"
-                  :min-height="40"
-                  :placeholder="`选项 ${'ABCDEF'[i]} 内容`"
-                  @change="emit('change')"
-                />
-                <button
-                  v-if="draft.type !== '判断'"
-                  class="mini-btn danger"
-                  type="button"
-                  @click="removeOption(i)"
-                >
-                  删除
-                </button>
-              </div>
-            </div>
-            <button v-if="draft.type !== '判断'" class="btn btn-ghost btn-sm" type="button" @click="addOption">
-              <AppIcon name="plus" :size="14" /> 添加选项
-            </button>
-          </template>
+      <!-- 独立单题：题干 / 选项 / 答案 / 解析（母题与子题共用同一份正文实现）+ 来源备注 -->
+      <div v-else class="panel editor-panel">
+        <QuestionBodyFields :draft="draft" :subject="draft.subject" :errors="errors" @change="emit('change')" />
 
-          <!-- 无选项判断题：答案只有对 / 错，两个互斥按钮 -->
-          <div v-else class="judge-answer">
-            <span class="f-label" style="margin: 0">正确答案</span>
-            <button
-              v-for="(label, i) in ['对', '错']"
-              :key="label"
-              class="judge-btn"
-              :class="{ on: draft.answers[0] === i }"
-              type="button"
-              @click="draft.answers = [i]"
-            >
-              {{ label }}
-            </button>
-          </div>
-          <p v-if="errors.options" class="f-err">{{ errors.options }}</p>
+        <!-- 来源备注不单独开一行基本信息：只对「手动录入」有意义的补充说明，
+             与来源枚举一起看才完整。拍照识别没有「摘自哪份卷子」这一说，故随 source 行一起收起 -->
+        <div v-if="hasRow('source')" class="f-field source-remark">
+          <label class="f-label">来源备注（选填 ≤100 字）</label>
+          <input v-model="draft.sourceRemark" class="f-input" placeholder="如：改编自 2025 期中第 12 题" />
+          <p v-if="errors.sourceRemark" class="f-err">{{ errors.sourceRemark }}</p>
         </div>
-      </template>
-
-      <!-- 填空答案区 -->
-      <template v-else-if="draft.type === '填空'">
-        <div class="f-field">
-          <label class="f-label">填空答案（每空独立，支持等价写法）<span class="req">*</span></label>
-          <!-- 答案与等价答案都用富文本编辑器：填空答案常常是分式 / 根号，纯输入框写不出来 -->
-          <div v-for="(blank, bi) in draft.fillAnswers" :key="bi" class="blank-row">
-            <div class="blank-head">
-              <span class="blank-no">第 {{ bi + 1 }} 空</span>
-              <button
-                v-if="draft.fillAnswers.length > 1"
-                class="mini-btn danger"
-                type="button"
-                @click="draft.fillAnswers.splice(bi, 1)"
-              >
-                删除
-              </button>
-            </div>
-            <label class="blank-label">答案<span class="req">*</span></label>
-            <RichTextEditor
-              v-model="blank.value"
-              compact
-              :subject="draft.subject"
-              :min-height="40"
-              placeholder="答案…（可用公式按钮插入 LaTeX 公式）"
-              @change="emit('change')"
-            />
-            <label class="blank-label">等价答案（选填）</label>
-            <RichTextEditor
-              v-model="blank.equivalents"
-              compact
-              :subject="draft.subject"
-              :min-height="40"
-              placeholder="等价写法，多种用顿号或逗号分隔，如：-1、−1"
-              @change="emit('change')"
-            />
-          </div>
-          <button class="btn btn-ghost btn-sm" type="button" @click="draft.fillAnswers.push({ value: '', equivalents: '' })">
-            <AppIcon name="plus" :size="14" /> 添加一空
-          </button>
-          <p v-if="errors.answer" class="f-err">{{ errors.answer }}</p>
-        </div>
-      </template>
-
-      <!-- 演算 / 写作类答案：解答、计算、证明、连线、作文 -->
-      <template v-else>
-        <div class="f-field">
-          <label class="f-label">参考答案<span class="req">*</span></label>
-          <RichTextEditor
-            v-model="draft.essayAnswer"
-            :subject="draft.subject"
-            :min-height="110"
-            :placeholder="essayPlaceholder"
-            @change="emit('change')"
-          />
-          <p v-if="errors.answer" class="f-err">{{ errors.answer }}</p>
-        </div>
-      </template>
-
-      <div class="f-field">
-        <label class="f-label">解析</label>
-        <RichTextEditor
-          v-model="draft.analysis"
-          :subject="draft.subject"
-          :min-height="110"
-          placeholder="输入解析…（可插入公式与图片）"
-          @change="emit('change')"
-        />
       </div>
-
-      <!-- 来源备注不单独开一行基本信息：只对「手动录入」有意义的补充说明，
-           与来源枚举一起看才完整。拍照识别没有「摘自哪份卷子」这一说，故随 source 行一起收起 -->
-      <div v-if="hasRow('source')" class="f-field">
-        <label class="f-label">来源备注（选填 ≤100 字）</label>
-        <input v-model="draft.sourceRemark" class="f-input" placeholder="如：改编自 2025 期中第 12 题" />
-        <p v-if="errors.sourceRemark" class="f-err">{{ errors.sourceRemark }}</p>
-      </div>
-    </div>
-
-    <!-- 知识点树：`v-if` 挂载 = 每次打开都从最新已选起算，取消（不 confirm）即丢弃 -->
-    <KnowledgePickerModal
-      v-if="knowledgeOpen"
-      :model-value="draft.knowledge"
-      :subject="draft.subject"
-      :grade="draft.grade"
-      :version="hasRow('textbook') ? draft.textbook : ''"
-      :max="MAX_KNOWLEDGE"
-      @close="knowledgeOpen = false"
-      @confirm="onKnowledgeConfirm"
-    />
+    </template>
   </div>
 </template>
 
@@ -615,105 +431,13 @@ defineExpose({ validate })
 .q-editor { display: flex; flex-direction: column; gap: 14px; }
 
 /* 基本信息面板的折叠头 / chip 行 / 面板外观都由共享的 AppFilterPanel 自持，
-   原先手抄自题库管理的那套 `.prop-bar` / `.prop-head` / `.prop-row` / `.p-chip` 已全部删除。
-   只剩面板末尾的小字（说明文案、校验红字）与知识点行 —— 知识点是树弹窗，chip 行组件做不出
-   「整行点击」，只能落在 #extra 里。 */
-.prop-hint { font-size: 12px; color: var(--sub); }
-/* 全局的 .f-err 选择器是 `.f-field .f-err`，面板内不在 .f-field 里，故字号与颜色要自己给 */
-.prop-err { margin: 0; font-size: 12px; color: var(--danger); }
-
-/* ===== 知识点行（面板里的伪 chip 行） =====
-   造型对齐 AppFilterChips 的行：标签左、取值右，只是取值区整体是一个按钮。 */
-.kp-row { display: flex; align-items: flex-start; gap: 12px; margin-top: 8px; }
-.kp-row-label {
-  flex-shrink: 0;
-  width: 58px; /* 与 AppFilterChips 的 labelWidth 默认值一致，标签列才对得齐 */
-  padding-top: 5px;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--ink-2);
-}
-/* 全局的 `.req` 只在 `.f-field .f-label` 里生效，面板内要自己给一次 */
-.kp-row-label .req { color: var(--danger); margin-left: 2px; }
-.kp-row-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  appearance: none;
-  border: 1px solid transparent;
-  border-radius: 9px;
-  background: #f7fafa;
-  padding: 6px 10px;
-  text-align: left;
-  transition: border-color 0.12s, background 0.12s;
-}
-.kp-row-main:hover { border-color: var(--brand); background: #fff; }
-.kp-row-chip {
-  border: 1px solid var(--brand);
-  border-radius: 999px;
-  background: var(--brand-soft);
-  color: var(--brand-deep);
-  font-size: 12px;
-  font-weight: 600;
-  padding: 2px 9px;
-}
-.kp-row-empty { font-size: 12.5px; color: var(--sub); }
-.kp-row-arrow { margin-left: auto; color: var(--sub); flex-shrink: 0; }
-
+   知识点行由 KnowledgeRow 自持，正文由 QuestionBodyFields / MaterialCompositePanel 自持 ——
+   本文件只剩面板外框的内边距与来源备注的间距。 */
 .editor-panel { padding: 18px 20px; }
-
-/* 选项区标题行：标签 / 排布 segmented 分居两侧，判断题的作答方式也走这一行 */
-.opt-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
-.opt-head .f-label { margin: 0; }
-
-/* 选项排布：按列数切 grid —— 一行 2 / 4 个时选项编辑器等宽，短选项不再各占一行 */
-.opt-list.cols-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 10px; }
-.opt-list.cols-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 10px; }
-
-.opt-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-/* 选项编辑器占满剩余宽度（删除按钮与答案圆点保持原尺寸） */
-.opt-editor { flex: 1; min-width: 0; }
-.answer-dot {
-  width: 30px;
-  height: 34px;
-  border-radius: 9px;
-  border: 1.5px solid var(--border);
-  background: #fff;
-  color: var(--sub);
-  font-weight: 700;
-  flex-shrink: 0;
-  transition: all 0.15s;
-}
-.answer-dot.on { border-color: var(--success); background: var(--success-soft); color: var(--success); }
-.answer-dot.multi { border-radius: 999px; }
-
-/* 无选项判断题的答案按钮（对 / 错，互斥） */
-.judge-answer { display: flex; align-items: center; gap: 10px; }
-.judge-btn {
-  min-width: 64px;
-  padding: 8px 18px;
-  border: 1.5px solid var(--border);
-  border-radius: 9px;
-  background: #fff;
-  font-family: inherit;
-  font-size: 13.5px;
-  color: var(--sub);
-  transition: all 0.15s;
-}
-.judge-btn:hover { color: var(--brand-deep); }
-.judge-btn.on { border-color: var(--success); background: var(--success-soft); color: var(--success); font-weight: 700; }
-
-/* 填空答案：一空两块编辑器，纵排（横排会把富文本工具栏挤到换行） */
-.blank-row {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px 12px;
-  margin-bottom: 10px;
-}
-.blank-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-.blank-no { font-size: 12.5px; font-weight: 700; color: var(--ink-2); }
-.blank-label { display: block; font-size: 12px; color: var(--sub); margin: 6px 0 4px; }
+/* 来源备注是整页最后一项，要和上面的正文 / 子题区拉开距离：
+   `.f-field` 自带 margin-bottom、没有 margin-top，不加这一条会紧贴在上一块的最后一行下面。
+   底部留白仍压掉（面板自己还有内边距，否则面板底会多出一块空档）。 */
+.source-remark { margin-top: 18px; margin-bottom: 0; }
+/* 全局的 .f-err 选择器是 `.f-field .f-err`，面板内不在 .f-field 里，故字号与颜色要自己给 */
+.prop-err { margin: 4px 0 0; font-size: 12px; color: var(--danger); }
 </style>

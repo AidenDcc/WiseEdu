@@ -41,16 +41,23 @@ const examTypes = computed(() => namesOf('examType'))
  * `subject` 为空表示「不指定学科」，此时给全部题型 —— 若只给通用项，英语专属题目
  * 在题库里存在、却没有任何筛选项能选中它们。
  *
+ * `category`（题目类别）是**可选的第二道收窄**：录题界面选了「材料组合题」就只要组合题型、
+ * 子题的题型行只要「独立单题」题型。其余场景（题库筛选、组卷）不传 —— 那些地方只看题型，
+ * 不区分题目类别。
+ *
  * 纯函数，单例内的 `questionTypesFor` 与自行查字典的题库筛选共用这一份规则。
  */
-export function scopedQuestionTypes(items: TenantDictItem[], subject: string): string[] {
+export function scopedQuestionTypes(items: TenantDictItem[], subject: string, category?: string): string[] {
   return items
     .filter((item) => !subject || !item.subjects?.length || item.subjects.includes(subject))
+    /* 存量字典项没有 questionCategory → 一律按「独立单题」算，否则不传 category 的老调用方
+       会因为「undefined !== '独立单题'」把全部题型筛没 */
+    .filter((item) => !category || (item.questionCategory ?? '独立单题') === category)
     .map((item) => item.name)
 }
 
-function questionTypesFor(subject: string): string[] {
-  return scopedQuestionTypes(dict.value.questionType, subject)
+function questionTypesFor(subject: string, category?: string): string[] {
+  return scopedQuestionTypes(dict.value.questionType, subject, category)
 }
 
 /** 原始考试类型字典项：试卷类型树要按 paperCategory / stage / subjects 分组与过滤，光有名字不够。

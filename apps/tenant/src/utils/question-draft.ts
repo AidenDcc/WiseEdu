@@ -14,13 +14,33 @@
  * 刻意**不含** `library` / `categoryId`：那是「这题放哪个库、哪个分类」的归属信息，
  * 与编辑题目本身无关，三个入口的取值也不同（拍照识别固定个人库）。
  * 存档时由 `questionPayloadOf` 的 options 传入。
+ *
+ * ## 独立单题 / 材料组合题（`category`）
+ *
+ * 材料组合题 = **一段共用题干 / 材料 + 若干子题**；`stem` 仍留给母题自己的题干，
+ * 共用题干 / 材料另存 `material`，子题在 `subQuestions` 里。两者在**结构上是同一件事**：
+ * 子题的字段集（题型 / 题干 / 选项 / 答案 / 解析）与母题正文完全一致，所以这里把正文部分
+ * 单独抽成 `QuestionBody`，判定与答案折算的纯函数一份，母题与子题共用。
+ *
+ * 存库时按两端约定收口（见 `questionPayloadOf`）：**组合题的 `stem` 存的是共用题干 / 材料**
+ * —— 题库列表、试卷、导出这些只读 `stem` 的既有渲染端因此天然能显示组合题正文，
+ * 不必逐个去认「这题是不是组合题」。
  */
-import { hasImage, toPlainText } from '@aiteach/shared'
-import type { FillBlankAnswer, GeneratedQuestion, OptionColumns, OrgQuestion, QuestionSource } from '@aiteach/shared'
+import { hasImage, MAX_SUB_QUESTIONS, toPlainText } from '@aiteach/shared'
+import type { FillBlankAnswer, GeneratedQuestion, OptionColumns, OrgQuestion, OrgSubQuestion, QuestionCategory, QuestionSource } from '@aiteach/shared'
 import { judgeAnswerText } from '@aiteach/business-common'
 
 /** 知识点上限（校验提示与此保持一致） */
 export const MAX_KNOWLEDGE = 5
+
+/**
+ * 单道材料组合题的子题上限。
+ *
+ * 定义在 `@aiteach/shared` 的 models 里（mock 侧入库校验要用同一个数），这里只是转出去，
+ * 让编辑组件继续按 `@/utils/question-draft` 一条路径引。产品理由：卷面上一道组合题挂几十个
+ * 小问，学生根本做不完，大概率是「把一整份卷子塞进一道题」的误用。
+ */
+export { MAX_SUB_QUESTIONS } from '@aiteach/shared'
 
 /** 走「题干 + 一段富文本参考答案」的题型 */
 const ESSAY_TYPES = ['解答', '计算', '证明', '连线', '作文']
@@ -36,18 +56,14 @@ export interface FillBlankDraft {
   equivalents: string
 }
 
-export interface QuestionDraft {
-  subject: string
-  grade: string
+/**
+ * 题目正文：题干 + 作答结构 + 解析。
+ *
+ * 母题（`QuestionDraft`）与子题（`SubQuestionDraft`）都具备这一组字段，渲染组件与判定函数
+ * 只依赖这个窄接口 —— 于是「一道选择题长什么样」只有一份实现，子题不必再抄一遍。
+ */
+export interface QuestionBody {
   type: string
-  difficulty: string
-  knowledge: string[]
-  textbook: string
-  /** 学期（上学期 / 下学期） */
-  term: string
-  examType: string
-  source: QuestionSource
-  sourceRemark: string
   stem: string
   options: string[]
   optionColumns: OptionColumns
@@ -60,9 +76,40 @@ export interface QuestionDraft {
   analysis: string
 }
 
+/**
+ * 子题草稿。学段 / 教材版本 / 学期 / 考试类型 / 来源 / 归属一律继承母题，故子题不持有它们；
+ * 只有「会逐题不同」的四件事单独存：题型、难度、知识点、正文。
+ */
+export interface SubQuestionDraft extends QuestionBody {
+  /** 本地自增编号，仅用于列表 key 与拖拽排序；卷面的 (1)(2)(3) 是按数组顺序现算的 */
+  id: number
+  difficulty: string
+  knowledge: string[]
+}
+
+export interface QuestionDraft extends QuestionBody {
+  /** 题目类别：独立单题 / 材料组合题。只有录题界面需要它 */
+  category: QuestionCategory
+  subject: string
+  grade: string
+  difficulty: string
+  knowledge: string[]
+  textbook: string
+  /** 学期（上学期 / 下学期） */
+  term: string
+  examType: string
+  source: QuestionSource
+  sourceRemark: string
+  /** 共用题干 / 材料（仅材料组合题用；独立单题恒为空串） */
+  material: string
+  /** 子题（仅材料组合题用；按数组顺序即卷面 (1)(2)(3) 的顺序） */
+  subQuestions: SubQuestionDraft[]
+}
+
 /** 新草稿：只给结构初值，学段由调用方按「顶部栏 scope」或来源题填 */
 export function emptyQuestionDraft(): QuestionDraft {
   return {
+    category: '独立单题',
     subject: '',
     grade: '',
     type: '单选',
@@ -80,10 +127,50 @@ export function emptyQuestionDraft(): QuestionDraft {
     fillAnswers: [{ value: '', equivalents: '' }],
     essayAnswer: '',
     analysis: '',
+    material: '',
+    subQuestions: [],
   }
 }
 
+/**
+ * 新子题：**难度与知识点默认继承母题**（可以改）。
+ * 题型不走母题（母题是「阅读理解」这类组合题型，子题取的是一组独立单题题型），由调用方传。
+ */
+export function emptySubQuestionDraft(
+  id: number,
+  base: { difficulty?: string; knowledge?: string[] } = {},
+): SubQuestionDraft {
+  return {
+    id,
+    type: '单选',
+    difficulty: base.difficulty || '中等',
+    knowledge: [...(base.knowledge ?? [])],
+    options: ['', '', '', ''],
+    optionColumns: 1,
+    answers: [],
+    fillAnswers: [{ value: '', equivalents: '' }],
+    essayAnswer: '',
+    analysis: '',
+    stem: '',
+  }
+}
+
+/**
+ * 新子题的 id：取现有最大 id + 1。
+ *
+ * **不按条数走** —— 删掉中间一题后再新增会撞上后面那道题的 id，`v-for` 的 key 重复，
+ * 右侧表单与拖拽排序都会串题。切类别时自动补的第一道子题也走这里，两处口径一致。
+ */
+export function nextSubQuestionId(subQuestions: readonly { id: number }[]): number {
+  return Math.max(0, ...subQuestions.map((row) => row.id)) + 1
+}
+
 /* ==================== 判定（口径只此一份） ==================== */
+
+/** 材料组合题：作答单位是子题，母题本身没有答案 */
+export function isCompositeDraft(draft: { category?: QuestionCategory }): boolean {
+  return draft.category === '材料组合题'
+}
 
 /** 有选项、答案存字母的题型 */
 export function isChoiceDraft(draft: { type: string }): boolean {
@@ -138,7 +225,7 @@ export function answerLettersOf(answer: string): string {
  * - 填空题：各空纯文本以「｜」分隔（富文本另存在 fillAnswers 里）
  * - 解答类：整段参考答案富文本
  */
-export function answerTextOf(draft: QuestionDraft): string {
+export function answerTextOf(draft: QuestionBody): string {
   if (isJudgeNoOptionsDraft(draft)) {
     return draft.answers.length ? (draft.answers[0] === 0 ? '对' : '错') : ''
   }
@@ -157,7 +244,7 @@ export function answerTextOf(draft: QuestionDraft): string {
  * 生成结果 / 识别结果 → 草稿，以及题型切换后的重建，走的都是这一条路。
  */
 export function applyAnswerToDraft(
-  draft: QuestionDraft,
+  draft: QuestionBody,
   options: readonly string[],
   answer: string,
   type?: string,
@@ -187,6 +274,31 @@ export function applyAnswerToDraft(
 }
 
 /**
+ * 换题型后重建该题型专属的作答结构（选项 / 答案 / 每空答案）。
+ * 母题与子题共用 —— 子题换题型时同样要清掉上一种题型的作答结构。
+ */
+export function resetBodyStructure(draft: QuestionBody, nextType: string): void {
+  draft.type = nextType
+  draft.answers = []
+  draft.options = nextType === '判断' ? ['正确', '错误'] : ['', '', '', '']
+  draft.fillAnswers = [{ value: '', equivalents: '' }]
+  draft.essayAnswer = ''
+}
+
+/**
+ * 切题目类别时把题型落到新类别的候选里。
+ *
+ * 两类题型互不通用（「阅读理解」不能当独立单题的题型、「单选」也不能当材料组合题的题型），
+ * 所以切类别后原来的题型必然失效。规则：候选里还有原值就保留（切回原类别时能复原上一次的选择），
+ * 否则落回该类别下最通用的一项 —— 独立单题取「单选」、材料组合题取「材料分析」。
+ */
+export function pickCategoryType(options: string[], current: string, category: QuestionCategory): string {
+  if (!options.length || options.includes(current)) return current
+  const preferred = category === '材料组合题' ? '材料分析' : '单选'
+  return options.includes(preferred) ? preferred : (options[0] ?? current)
+}
+
+/**
  * 年级变更的**唯一入口**：年级变了就按新年级收窄学科，当前学科在新年级不存在则**清空**
  * （不落到该年级第一个学科 —— 那等于替用户做了「换成物理」这种决定）。
  *
@@ -209,8 +321,29 @@ export function setDraftGrade(
 
 export interface DraftErrors {
   errors: Record<string, string>
+  /** 子题的红字，按子题 id 分组（展开态才看得见，故校验失败时会自动打开那一题） */
+  subErrors: Record<number, Record<string, string>>
   /** 解析为空。要不要拦由调用方决定 —— 组件里会为此弹一次 confirm（题目审核建议补解析） */
   analysisMissing: boolean
+}
+
+/**
+ * 校验「题目正文」那一块（母题与子题同一套口径）。
+ * 写进传入的 `errors`，便于母题与子题各拿一份自己的红字表。
+ */
+function collectBodyErrors(draft: QuestionBody, full: boolean, errors: Record<string, string>): void {
+  if (!hasContent(draft.stem)) errors.stem = '题干不能为空'
+  if (isChoiceDraft(draft) && draft.options.length) {
+    if (draft.options.some((opt) => !hasContent(opt))) errors.options = '每项选项必填'
+    if (draft.answers.length === 0 || (draft.type === '多选' && draft.answers.length < 2)) {
+      errors.options = errors.options || (draft.type === '多选' ? '多选须标记 ≥2 个正确答案' : '请设置正确答案')
+    }
+  }
+  /* 等价答案是选填，只看每空的答案本身 */
+  if (draft.type === '填空' && draft.fillAnswers.some((row) => !hasContent(row.value))) {
+    errors.answer = '每空答案必填'
+  }
+  if (isEssayDraft(draft) && !hasContent(draft.essayAnswer)) errors.answer = '参考答案必填'
 }
 
 /**
@@ -219,42 +352,90 @@ export interface DraftErrors {
  */
 export function collectDraftErrors(draft: QuestionDraft, full: boolean): DraftErrors {
   const errors: Record<string, string> = {}
+  const subErrors: Record<number, Record<string, string>> = {}
   /* 学科必须校验：切年级会把不适用的学科清空，少了这一条能存出 subject: '' 的题 */
   if (!draft.subject) errors.subject = '请选择学科（切换年级后原学科可能已不适用）'
   if (!draft.knowledge.length) errors.knowledge = `请选择知识点（最多 ${MAX_KNOWLEDGE} 个）`
   let analysisMissing = false
-  if (full) {
-    if (!hasContent(draft.stem)) errors.stem = '题干不能为空'
-    if (isChoiceDraft(draft)) {
-      if (draft.options.some((opt) => !hasContent(opt))) errors.options = '每项选项必填'
-      if (draft.answers.length === 0 || (draft.type === '多选' && draft.answers.length < 2)) {
-        errors.options = errors.options || (draft.type === '多选' ? '多选须标记 ≥2 个正确答案' : '请设置正确答案')
+
+  if (isCompositeDraft(draft)) {
+    /* 组合题：母题没有作答结构，要校验的是共用材料与每一道子题 */
+    if (!hasContent(draft.material)) errors.material = '共用题干 / 材料不能为空'
+    /* 上限两边都拦：它是数据完整性问题，不该靠「按钮点不动」这一个界面防线 */
+    if (draft.subQuestions.length > MAX_SUB_QUESTIONS) {
+      errors.subQuestions = `子题最多 ${MAX_SUB_QUESTIONS} 道`
+    }
+    if (full) {
+      /* 「至少一道子题」只在**提交审核**时拦。录题中途把子题删空、先存个草稿明天接着写
+         是正常操作；存草稿也拦的话这条路走不通（切类别时已自动补第一道，见 QuestionEditor） */
+      if (!draft.subQuestions.length) {
+        errors.subQuestions = errors.subQuestions || '材料组合题至少需要一个子题'
       }
+      draft.subQuestions.forEach((sub, index) => {
+        const row: Record<string, string> = {}
+        if (!sub.knowledge.length) row.knowledge = '请选择知识点'
+        collectBodyErrors(sub, full, row)
+        if (Object.keys(row).length) subErrors[sub.id] = row
+        /* 子题解析为空也算——它照样要给学生看 */
+        if (!hasContent(sub.analysis)) analysisMissing = true
+        void index
+      })
+    } else {
+      /* 存草稿只看子题的知识点（必填属性），正文类问题留给提交时的全量校验 */
+      draft.subQuestions.forEach((sub) => {
+        if (!sub.knowledge.length) subErrors[sub.id] = { knowledge: '请选择知识点' }
+      })
     }
-    /* 等价答案是选填，只看每空的答案本身 */
-    if (draft.type === '填空' && draft.fillAnswers.some((row) => !hasContent(row.value))) {
-      errors.answer = '每空答案必填'
+  } else {
+    if (full) {
+      collectBodyErrors(draft, full, errors)
+      if (!hasContent(draft.analysis)) analysisMissing = true
     }
-    if (isEssayDraft(draft) && !hasContent(draft.essayAnswer)) errors.answer = '参考答案必填'
-    if (!hasContent(draft.analysis)) analysisMissing = true
   }
+
   if (draft.sourceRemark.length > 100) errors.sourceRemark = '来源备注 ≤100 字'
-  return { errors, analysisMissing }
+  return { errors, subErrors, analysisMissing }
 }
 
 /* ==================== 草稿 ⇄ 各来源 ==================== */
 
+/** 子题草稿 → 入参（`OrgSubQuestion`） */
+function subQuestionPayloadOf(sub: SubQuestionDraft): OrgSubQuestion {
+  return {
+    id: sub.id,
+    type: sub.type,
+    difficulty: sub.difficulty,
+    knowledge: [...sub.knowledge],
+    stem: sub.stem,
+    /* 过滤空选项：教师删空后不该残留空选项 */
+    options: isChoiceDraft(sub) ? sub.options.filter((opt) => hasContent(opt)) : [],
+    optionColumns: sub.optionColumns,
+    answer: answerTextOf(sub),
+    fillAnswers:
+      sub.type === '填空'
+        ? sub.fillAnswers.map((row) => ({ value: row.value, equivalents: row.equivalents }))
+        : undefined,
+    analysis: sub.analysis,
+  }
+}
+
 /**
  * 草稿 → `saveQuestion` 入参。
  * 选项与填空答案的折叠口径只此一份：三个入口存进去的形状必须一模一样。
+ *
+ * 组合题按「母题只留材料」收口：`stem` = 共用题干 / 材料，选项 / 答案 / 解析留空，
+ * 子题整包放进 `subQuestions`（见文件头的说明）。
  */
 export function questionPayloadOf(
   draft: QuestionDraft,
   opts: { id?: number; library: 'personal' | 'org' | 'wrong'; categoryId?: number; submit: boolean },
 ) {
+  const composite = isCompositeDraft(draft)
   return {
     id: opts.id,
-    stem: draft.stem,
+    questionCategory: draft.category,
+    stem: composite ? draft.material : draft.stem,
+    subQuestions: composite ? draft.subQuestions.map(subQuestionPayloadOf) : [],
     subject: draft.subject,
     grade: draft.grade,
     type: draft.type,
@@ -266,26 +447,42 @@ export function questionPayloadOf(
     source: draft.source,
     sourceRemark: draft.sourceRemark || undefined,
     /* 过滤空选项：教师删空后不该残留空选项 */
-    options: isChoiceDraft(draft) ? draft.options.filter((opt) => hasContent(opt)) : [],
+    options: !composite && isChoiceDraft(draft) ? draft.options.filter((opt) => hasContent(opt)) : [],
     optionColumns: draft.optionColumns,
-    answer: answerTextOf(draft),
+    answer: composite ? '' : answerTextOf(draft),
     fillAnswers:
-      draft.type === '填空'
+      !composite && draft.type === '填空'
         ? draft.fillAnswers.map((row) => ({ value: row.value, equivalents: row.equivalents }))
         : undefined,
-    analysis: draft.analysis,
+    analysis: composite ? '' : draft.analysis,
     library: opts.library,
     categoryId: opts.categoryId,
     submit: opts.submit,
   }
 }
 
+/** 把一条已存的子题回填成子题草稿（题型反推、答案按题型分派与母题同一套） */
+export function subDraftFromQuestion(row: OrgSubQuestion): SubQuestionDraft {
+  const draft = emptySubQuestionDraft(row.id, { difficulty: row.difficulty, knowledge: row.knowledge })
+  applyAnswerToDraft(draft, row.options ?? [], row.answer ?? '', row.type)
+  draft.stem = row.stem
+  draft.analysis = row.analysis
+  draft.optionColumns = row.optionColumns ?? 1
+  /* 每空的富文本答案单独存了一份，覆盖面较薄的重建结果 */
+  if (draft.type === '填空' && row.fillAnswers?.length) {
+    draft.fillAnswers = row.fillAnswers.map((item) => ({ value: item.value, equivalents: item.equivalents }))
+  }
+  return draft
+}
+
 /** 题库里的存量题 → 草稿（录题中心「编辑既有题目」与 AI 结果「重新编辑」共用） */
 export function draftFromQuestion(q: OrgQuestion): QuestionDraft {
   const draft = emptyQuestionDraft()
+  const composite = q.questionCategory === '材料组合题'
   /* 有意**不走 setDraftGrade**：这是「载入已存数据」而非「用户切年级」，
      按新规则校验会在打开一道学科已停用的存量题时把学科静默抹掉。 */
   Object.assign(draft, {
+    category: composite ? ('材料组合题' as QuestionCategory) : ('独立单题' as QuestionCategory),
     subject: q.subject,
     grade: q.grade,
     type: q.type,
@@ -296,10 +493,19 @@ export function draftFromQuestion(q: OrgQuestion): QuestionDraft {
     examType: q.examType ?? '',
     source: q.source ?? '手动录入',
     sourceRemark: q.sourceRemark ?? '',
-    stem: q.stem,
-    analysis: q.analysis,
     optionColumns: q.optionColumns ?? 1,
   })
+  if (composite) {
+    /* 组合题的 `stem` 就是共用题干 / 材料，正文在子题里 */
+    draft.material = q.stem
+    draft.subQuestions = (q.subQuestions ?? []).map(subDraftFromQuestion)
+    draft.options = []
+    draft.answers = []
+    draft.essayAnswer = ''
+    return draft
+  }
+  draft.stem = q.stem
+  draft.analysis = q.analysis
   if (q.type === '填空') {
     draft.fillAnswers = q.fillAnswers?.length
       ? q.fillAnswers.map((row) => ({ value: row.value, equivalents: row.equivalents }))
@@ -325,9 +531,11 @@ export function draftFromQuestion(q: OrgQuestion): QuestionDraft {
  *
  * 无选项的生成题落进**解答**：旧实现沿用请求时的题型，于是「选了单选又拿到无选项的题」会停在
  * 「单选 + 四个空选项框」上，而 AI 给的答案存在 essayAnswer 里根本看不见。
+ *
+ * AI 出题只产出独立单题，故类别固定为「独立单题」。
  */
 export function draftFromGenerated(item: GeneratedQuestion, base: Partial<QuestionDraft> = {}): QuestionDraft {
-  const draft = { ...emptyQuestionDraft(), ...base }
+  const draft = { ...emptyQuestionDraft(), ...base, category: '独立单题' as QuestionCategory }
   draft.difficulty = item.difficulty || draft.difficulty
   draft.knowledge = item.knowledge.slice(0, MAX_KNOWLEDGE)
   draft.stem = item.stem
@@ -397,5 +605,13 @@ export function mergeDraft(base: QuestionDraft, saved?: Partial<QuestionDraft>):
     options: [...(saved.options ?? base.options)],
     answers: [...(saved.answers ?? base.answers)],
     fillAnswers: (saved.fillAnswers ?? base.fillAnswers).map((row) => ({ ...row })),
+    /* 子题同样按值拷：它是对象数组，浅拷一层仍会共享内层选项 / 知识点 */
+    subQuestions: (saved.subQuestions ?? base.subQuestions).map((row) => ({
+      ...row,
+      knowledge: [...row.knowledge],
+      options: [...row.options],
+      answers: [...row.answers],
+      fillAnswers: row.fillAnswers.map((item) => ({ ...item })),
+    })),
   }
 }

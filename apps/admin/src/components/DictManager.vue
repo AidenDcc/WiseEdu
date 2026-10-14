@@ -8,8 +8,10 @@
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import {
-  AppIcon, AppListToolbar, showToast, ApiError, AppModal, appConfirm, AppSwitch } from '@aiteach/shared'
-import type { DictItem, DictTypeKey } from '@aiteach/shared'
+  AppIcon, AppListToolbar, showToast, ApiError, AppModal, appConfirm, AppSwitch,
+  QUESTION_CATEGORY_OPTIONS,
+} from '@aiteach/shared'
+import type { DictItem, DictTypeKey, QuestionCategory } from '@aiteach/shared'
 
 import { deleteDictItem, fetchDict, saveDictItem, toggleDictItem } from '@/api/platform'
 
@@ -39,6 +41,22 @@ const nameLabel = computed(() => NAME_LABELS[activeType.value] ?? '名称')
 /** 需要「编码」列 / 表单项的字典类型（与 mock 侧 `CODE_TYPES` 同口径，改一处要改两处） */
 const CODE_TYPES: DictTypeKey[] = ['subject', 'grade', 'questionType', 'region']
 const hasCode = computed(() => CODE_TYPES.includes(activeType.value))
+
+/**
+ * 表格列数（空态那一行的 colspan）。
+ * 原先写死 9，加一列就得回来改一次 —— 按当前类型的实际可见列算，加列不用动这里。
+ */
+const colCount = computed(() => {
+  let count = 4 /* 名称 + 序号 + 状态 + 操作 */
+  if (activeType.value === 'grade') count += 1
+  if (activeType.value === 'term') count += 2
+  if (activeType.value === 'subject') count += 1
+  /* 题目类别 + 作答类型 + 适用学科 */
+  if (activeType.value === 'questionType') count += 3
+  if (activeType.value === 'difficulty') count += 1
+  if (hasCode.value) count += 1
+  return count
+})
 
 /** 编码**可编辑**的类型（与 mock 侧 `EDITABLE_CODE_TYPES` 同口径）：仅地区，行政区划代码允许订正 */
 const CODE_EDITABLE_TYPES: DictTypeKey[] = ['region']
@@ -99,6 +117,8 @@ function onImport() {
 /* ===== 新增 / 编辑弹窗（编码除地区外创建后置灰） ===== */
 const STAGES = ['小学', '初中', '高中']
 const ANSWER_TYPES = ['选择', '填空', '连线', '解答']
+/* 题目类别只在题型下用：录题界面靠它分「独立单题」与「材料组合题」（材料组合题 = 材料 + 子题）。
+   其余场景（题库筛选、组卷、导出）只看题型，不看类别 —— 所以它是题型的一个属性而不是独立字典。 */
 
 const editing = ref<DictItem | 'new' | null>(null)
 const form = reactive({
@@ -112,6 +132,7 @@ const form = reactive({
   dateFrom: '',
   dateTo: '',
   answerType: '选择',
+  questionCategory: '独立单题' as QuestionCategory,
   /* 适用学科（仅题型用）：空 = 全学科通用 */
   subjects: [] as string[],
   /* 适配年级（仅学科用）：空 = 不限年级 */
@@ -181,6 +202,7 @@ function openCreate() {
   form.dateFrom = ''
   form.dateTo = ''
   form.answerType = '选择'
+  form.questionCategory = '独立单题'
   form.subjects = []
   form.grades = []
   form.coefficient = 0.5
@@ -198,6 +220,8 @@ function openEdit(item: DictItem) {
   form.dateFrom = item.dateFrom ?? ''
   form.dateTo = item.dateTo ?? ''
   form.answerType = item.answerType ?? '选择'
+  /* 存量字典项没有 questionCategory → 一律按独立单题展示（与机构端读侧同一口径） */
+  form.questionCategory = (item.questionCategory ?? '独立单题') as QuestionCategory
   form.subjects = [...(item.subjects ?? [])]
   form.grades = [...(item.grades ?? [])]
   form.coefficient = item.coefficient ?? 0.5
@@ -224,6 +248,8 @@ async function save() {
       dateFrom: activeType.value === 'term' ? form.dateFrom : undefined,
       dateTo: activeType.value === 'term' ? form.dateTo : undefined,
       answerType: activeType.value === 'questionType' ? form.answerType : undefined,
+      /* 题目类别：只有题型带它（其余类型传了也会被 mock 丢掉） */
+      questionCategory: activeType.value === 'questionType' ? form.questionCategory : undefined,
       /* 不勾任何学科即全学科通用：传 undefined 而不是空数组，两种写法在字典里都表示「不限定」 */
       subjects:
         activeType.value === 'questionType' && form.subjects.length ? [...form.subjects] : undefined,
@@ -293,6 +319,7 @@ onMounted(load)
               <th v-if="hasCode">编码</th>
               <th v-if="activeType === 'subject'">适配年级</th>
               <th v-if="activeType === 'term'">起止日期</th>
+              <th v-if="activeType === 'questionType'">题目类别</th>
               <th v-if="activeType === 'questionType'">作答类型</th>
               <th v-if="activeType === 'questionType'">适用学科</th>
               <th v-if="activeType === 'difficulty'">系数</th>
@@ -303,10 +330,10 @@ onMounted(load)
           </thead>
           <tbody>
             <tr v-if="loading && list.length === 0">
-              <td :colspan="9" class="empty-row">加载中…</td>
+              <td :colspan="colCount" class="empty-row">加载中…</td>
             </tr>
             <tr v-else-if="list.length === 0">
-              <td :colspan="9" class="empty-row">暂无数据</td>
+              <td :colspan="colCount" class="empty-row">暂无数据</td>
             </tr>
             <template v-else>
               <tr v-for="item in list" :key="item.id">
@@ -319,6 +346,11 @@ onMounted(load)
                   <span v-else class="ref-zero">不限</span>
                 </td>
                 <td v-if="activeType === 'term'">{{ item.dateFrom }} ~ {{ item.dateTo }}</td>
+                <td v-if="activeType === 'questionType'">
+                  <span class="tag" :class="(item.questionCategory ?? '独立单题') === '材料组合题' ? 'tag-orange' : 'tag-gray'">
+                    {{ item.questionCategory ?? '独立单题' }}
+                  </span>
+                </td>
                 <td v-if="activeType === 'questionType'">{{ item.answerType }}</td>
                 <td v-if="activeType === 'questionType'">
                   <span v-if="item.subjects?.length">{{ item.subjects.join('、') }}</span>
@@ -417,6 +449,16 @@ onMounted(load)
           end-placeholder="结束日期"
         />
         <p class="f-hint">同学年起止日期不可与已有学期交叉重叠。</p>
+      </div>
+      <div v-if="activeType === 'questionType'" class="f-field">
+        <label class="f-label">题目类别<span class="req">*</span></label>
+        <select v-model="form.questionCategory" class="f-select">
+          <option v-for="item in QUESTION_CATEGORY_OPTIONS" :key="item" :value="item">{{ item }}</option>
+        </select>
+        <p class="f-hint">
+          「材料组合题」= 一段共用题干 / 材料 + 若干子题，录题时先选类别再选题型；子题的题型只从「独立单题」里取。
+          除录题外（题库筛选、组卷、导出）只看题型，不区分类别。
+        </p>
       </div>
       <div v-if="activeType === 'questionType'" class="f-field">
         <label class="f-label">作答类型<span class="req">*</span></label>

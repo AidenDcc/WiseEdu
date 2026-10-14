@@ -2,9 +2,10 @@
 import { computed, onMounted, ref } from 'vue'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
-import { showToast, AppModal } from '@aiteach/shared'
+import { AppIcon, showToast, AppModal } from '@aiteach/shared'
 import type { OrgFormula, StandardFormula } from '@aiteach/shared'
 import { FORMULA_CATEGORIES, PLACEHOLDER } from './formula-symbols'
+import AiFormulaRecognizeDialog from './AiFormulaRecognizeDialog.vue'
 import { fetchFormulas, fetchStandardFormulas } from '@/api/org'
 
 /**
@@ -13,6 +14,9 @@ import { fetchFormulas, fetchStandardFormulas } from '@/api/org'
  * 「编辑 LaTeX」页签 = 分类符号/模板面板 + 源码编辑 + KaTeX 实时预览：
  * 模板里的 \square 占位符插入后自动选中，键入即替换。
  * 「标准公式库 / 我的公式库」页签按当前学科拉取，点选后插入到光标处（非整体替换）。
+ *
+ * LaTeX 源码框后面还挂着「AI 识图」入口（拍照 / 截图转 LaTeX），与内联公式输入框下拉里的
+ * 是同一个子弹窗组件 —— 两处入口共用一套取图与识别逻辑，不各写一份。
  */
 const props = withDefaults(
   defineProps<{
@@ -31,7 +35,15 @@ const props = withDefaults(
   { subject: '', initialLatex: '', editing: false, initialBlock: false },
 )
 
-const emit = defineEmits<{ close: []; confirm: [latex: string, block: boolean] }>()
+/* close 带上当前草稿：调用方若是从「内联公式输入框」跳过来的，取消时要能原样还回去 */
+const emit = defineEmits<{
+  close: [draft?: { latex: string; block: boolean }]
+  confirm: [latex: string, block: boolean]
+}>()
+
+function requestClose() {
+  emit('close', { latex: latex.value, block: block.value })
+}
 
 type Tab = 'input' | 'standard' | 'mine'
 const tab = ref<Tab>('input')
@@ -56,6 +68,19 @@ const caret = ref(latex.value.length)
 function syncCaret() {
   const el = SOURCE.value
   if (el && typeof el.selectionStart === 'number') caret.value = el.selectionStart
+}
+
+/* ===== AI 识图：识别结果整体写入源码框（不是插到光标处 —— 识出来的是「一条完整公式」） ===== */
+const aiOpen = ref(false)
+
+function onAiConfirm(result: string) {
+  aiOpen.value = false
+  latex.value = result
+  caret.value = result.length
+  requestAnimationFrame(() => {
+    SOURCE.value?.focus()
+    SOURCE.value?.setSelectionRange(result.length, result.length)
+  })
 }
 
 /** 点选符号 / 公式库行：插入到光标处；模板的首个占位符自动选中，键入即替换 */
@@ -151,7 +176,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <AppModal :title="editing ? '编辑公式' : '插入公式'" :width="920" @close="emit('close')">
+  <AppModal :title="editing ? '编辑公式' : '插入公式'" :width="920" @close="requestClose">
     <div class="fp-tabs">
       <button class="fp-tab" :class="{ on: tab === 'input' }" type="button" @click="loadTab('input')">
         编辑 LaTeX
@@ -210,6 +235,14 @@ onMounted(() => {
           @keyup="syncCaret"
           @select="syncCaret"
         />
+        <!-- AI 识图：拍照 / 截图里的公式直接转成源码，省去手敲长公式 -->
+        <div class="fp-src-foot">
+          <button class="mini-btn" type="button" @click="aiOpen = true">
+            <AppIcon name="sparkles" :size="14" />
+            AI 识图
+          </button>
+          <span class="f-hint">上传或粘贴公式图片，自动转成 LaTeX 源码</span>
+        </div>
       </div>
 
       <div class="f-field">
@@ -256,8 +289,12 @@ onMounted(() => {
       </div>
     </div>
 
+    <!-- AI 识图子弹窗：层级抬到 130 —— 它是从一个 120 的弹窗里开的，
+         同层会按 DOM 顺序压在上面看着像「没盖住」，抬一层最稳（本弹窗里不会再开确认框） -->
+    <AiFormulaRecognizeDialog v-if="aiOpen" :z-index="130" @close="aiOpen = false" @confirm="onAiConfirm" />
+
     <template #footer>
-      <button class="btn btn-ghost" type="button" @click="emit('close')">取消</button>
+      <button class="btn btn-ghost" type="button" @click="requestClose">取消</button>
       <button class="btn btn-primary" type="button" @click="confirm">
         {{ editing ? '保存修改' : '插入公式' }}
       </button>
@@ -310,18 +347,26 @@ onMounted(() => {
 .fp-cat.on { background: var(--brand); color: #fff; }
 
 .fp-panel { flex: 1; min-width: 0; }
+/* 动态布局：不按固定列宽排格子。
+   内置公式的长短差得很远（`\alpha` 和 `\int_{a}^{b} f(x)\,dx = F(b)-F(a)` 差六倍），
+   固定列宽要么把长公式压窄到行内换行、要么在短符号旁边留一大片空白。
+   改成 flex 流式：每个格子取内容的自然宽度，一行放不下时整格折到下一行 ——
+   公式自身永远不折行；纯符号由 min-width 兜住可点击面积，行高仍然齐整。 */
 .fp-grid {
   max-height: 264px;
   overflow-y: auto;
   border: 1.5px solid var(--border);
   border-radius: 10px;
   padding: 8px;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  align-content: start;
+  align-content: flex-start;
 }
 .fp-cell {
+  flex: 0 0 auto;
+  min-width: 60px;
+  max-width: 100%;
   min-height: 40px;
   border: 1.5px solid var(--border);
   border-radius: 8px;
@@ -329,7 +374,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 4px 6px;
+  padding: 4px 10px;
   overflow: hidden;
   transition: all 0.15s;
 }
@@ -337,11 +382,16 @@ onMounted(() => {
 .fp-cell-math {
   font-size: 15px;
   color: var(--ink);
-  max-width: 100%;
-  overflow-x: auto;
-  scrollbar-width: none;
+  white-space: nowrap;
+  /* 不给 max-width: 100%：格子宽度是「由内容撑开」的，而它又依赖格子的宽度 ——
+     百分比 max-width 在这种互相依赖下会被算成 0，结果所有格子都塌回 min-width。
+     上限交给 .fp-cell 的 max-width（参照物是网格容器，宽度确定，不循环）。 */
 }
 .fp-cell-label { font-size: 12px; color: var(--ink-2); }
+
+/* LaTeX 源码框下面那条：AI 识图按钮 + 说明 */
+.fp-src-foot { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.fp-src-foot .f-hint { margin: 0; }
 
 .fp-kinds { display: flex; gap: 10px; }
 .fp-kind {

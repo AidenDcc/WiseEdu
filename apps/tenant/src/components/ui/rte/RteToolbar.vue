@@ -40,7 +40,7 @@ import {
 
 const props = defineProps<{
   editor: Editor
-  /** 选项行等紧凑场景：按钮文案收起，只留图标（与父级 .rte.compact 同源） */
+  /** 简化工具栏：按钮文案收起，只留图标（与父级 .rte.compact 同源；录题页正文框全部走这一档） */
   compact?: boolean
 }>()
 
@@ -657,7 +657,7 @@ function insertParen() {
 
     <span class="rte-sep" />
 
-    <button class="rte-btn" type="button" title="插入 / 编辑公式" @click="emit('math')">
+    <button class="rte-btn" type="button" title="插入公式（在光标处直接输入 LaTeX，失焦即插入；点已有的公式会就地打开输入框继续改）" @click="emit('math')">
       <AppIcon name="formula" :size="16" />
       <span class="rte-btn-text">公式</span>
     </button>

@@ -40,7 +40,7 @@ export {
   cancelSessionWatch,
 } from './auth/session'
 export type { AdminOverview, TenantOverview } from './api/models'
-export { CERT_CATEGORIES, CERT_CATEGORY_TEXT } from './api/models'
+export { CERT_CATEGORIES, CERT_CATEGORY_TEXT, MAX_SUB_QUESTIONS, QUESTION_CATEGORY_OPTIONS } from './api/models'
 export type {
   PageResult,
   ApplyStatus,
@@ -54,6 +54,7 @@ export type {
   TenantDetailModel,
   DictTypeKey,
   DictItem,
+  QuestionCategory,
   KnowledgeNode,
   ExamTypeNode,
   ExamTypeNodeKind,
@@ -194,6 +195,7 @@ export type {
   QuestionLibrary,
   AiCheckResult,
   OrgQuestion,
+  OrgSubQuestion,
   QuestionCorrection,
   QuestionCorrectionType,
   FillBlankAnswer,

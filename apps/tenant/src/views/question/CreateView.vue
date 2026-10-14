@@ -23,6 +23,7 @@ import {
   emptyQuestionDraft,
   hasContent,
   isChoiceDraft,
+  isCompositeDraft,
   questionPayloadOf,
   setDraftGrade,
 } from '@/utils/question-draft'
@@ -35,12 +36,17 @@ const { subjects, grades, questionTypesFor, difficulties, examTypes, optionsForG
 /** 顶部栏的全局年级 / 学科：表单初值与出题参数的默认值 */
 const { grade: scopeGrade, subject: scopeSubject, ensureScope } = useScope()
 
-/** 有选项、答案存字母的题型。判定口径与编辑组件同源（`isChoiceDraft`），页面这边只用来收口
-    预览 / 检测 / 保存的 options —— 表单本身的选项区已搬进 QuestionEditor。 */
-const isChoice = computed(() => isChoiceDraft(form))
+/** 材料组合题：作答单位是子题，母题自身没有选项 / 答案（正文换成「材料 + 子题」两块） */
+const composite = computed(() => isCompositeDraft(form))
 
-/** 答案的三形态折叠成一条字符串（存库口径）—— 预览、AI 检测入参、修正比对都读它 */
-const answerText = computed(() => answerTextOf(form))
+/** 有选项、答案存字母的题型。判定口径与编辑组件同源（`isChoiceDraft`），页面这边只用来收口
+    预览 / 检测 / 保存的 options —— 表单本身的选项区已搬进 QuestionEditor。
+    组合题一律按「无选项」处理：它没有自己的作答结构。 */
+const isChoice = computed(() => !composite.value && isChoiceDraft(form))
+
+/** 答案的三形态折叠成一条字符串（存库口径）—— 预览、AI 检测入参、修正比对都读它。
+    组合题没有自己的答案（作答单位在子题里），恒为空串。 */
+const answerText = computed(() => (composite.value ? '' : answerTextOf(form)))
 
 /* ===== 录题方式：手动录入 / AI 出题 =====
    两种方式共用上面同一套「题目基本信息」，下面切标签换录入方式，故合在一页里。
@@ -123,7 +129,8 @@ async function load() {
     /* 新建：默认取顶部栏的全局年级 / 学科，并归一为当前启用字典内的值。
        走 setDraftGrade 让学科同样受年级收窄 —— 顶部栏那两个值是各自独立的，可能凑成无效组合。 */
     setDraftGrade(form, pick(grades.value, scopeGrade.value), pick(subjects.value, scopeSubject.value), optionsForGrade)
-    form.type = pick(questionTypesFor(form.subject), form.type)
+    /* 题型必须落在「类别 + 学科」都允许的候选项里（材料组合题只列材料组合题型） */
+    form.type = pick(questionTypesFor(form.subject, form.category), form.type)
     form.difficulty = pick(difficulties.value, form.difficulty)
     form.examType = pick(examTypes.value, form.examType)
   }
@@ -207,7 +214,9 @@ function checkInput() {
     type: form.type,
     difficulty: form.difficulty,
     knowledge: [...form.knowledge],
-    stem: form.stem,
+    /* 组合题的正文是「共用材料 + 子题」，母题自身没有题干 / 选项 / 答案；
+       交给 AI 检测的是共用材料 —— 子题逐题检测等有接口了再说。 */
+    stem: composite.value ? form.material : form.stem,
     options: isChoice.value ? form.options.filter((opt) => hasContent(opt)) : [],
     answer: answerText.value,
     analysis: form.analysis,
@@ -249,19 +258,32 @@ function fieldDiffers(current: string, next: string): boolean {
 
 const corrected = computed(() => checkReport.value?.corrected)
 
-/** 逐字段修正建议（与当前值有差异才列出）；answer 仅当非选项结构差异时单列 */
+/** 母题的「题干」入口：组合题读写的其实是共用题干 / 材料（母题自身没有题干） */
+const currentStem = computed(() => (composite.value ? form.material : form.stem))
+
+function setCurrentStem(value: string) {
+  if (composite.value) form.material = value
+  else form.stem = value
+}
+
+/** 逐字段修正建议（与当前值有差异才列出）；answer 仅当非选项结构差异时单列。
+    组合题只保留「共用材料」这一条：选项 / 答案 / 解析都在子题里，回写母题没有去处。 */
 const corrections = computed(() => {
   const c = corrected.value
   if (!c) return [] as Array<{ field: string; label: string; value: string }>
   const rows: Array<{ field: string; label: string; value: string }> = []
-  if (fieldDiffers(form.stem, c.stem)) rows.push({ field: 'stem', label: '题干', value: c.stem })
-  if (isChoice.value && c.options.length) {
-    const cur = form.options.map((opt) => toPlainText(opt).trim()).join('｜')
-    const next = c.options.map((opt) => toPlainText(opt).trim()).join('｜')
-    if (cur !== next) rows.push({ field: 'options', label: '选项与正确项', value: c.options.join('<br>') })
+  if (fieldDiffers(currentStem.value, c.stem)) {
+    rows.push({ field: 'stem', label: composite.value ? '共用题干 / 材料' : '题干', value: c.stem })
   }
-  if (fieldDiffers(answerText.value, c.answer)) rows.push({ field: 'answer', label: '答案', value: c.answer })
-  if (fieldDiffers(form.analysis, c.analysis)) rows.push({ field: 'analysis', label: '解析', value: c.analysis })
+  if (!composite.value) {
+    if (isChoice.value && c.options.length) {
+      const cur = form.options.map((opt) => toPlainText(opt).trim()).join('｜')
+      const next = c.options.map((opt) => toPlainText(opt).trim()).join('｜')
+      if (cur !== next) rows.push({ field: 'options', label: '选项与正确项', value: c.options.join('<br>') })
+    }
+    if (fieldDiffers(answerText.value, c.answer)) rows.push({ field: 'answer', label: '答案', value: c.answer })
+    if (fieldDiffers(form.analysis, c.analysis)) rows.push({ field: 'analysis', label: '解析', value: c.analysis })
+  }
   return rows
 })
 
@@ -285,7 +307,7 @@ const metaCorrection = computed(() => {
 function applyCorrection(field: string) {
   const c = corrected.value
   if (!c) return
-  if (field === 'stem') form.stem = c.stem
+  if (field === 'stem') setCurrentStem(c.stem)
   else if (field === 'options') {
     form.options = [...c.options]
     form.answers = c.answer
@@ -662,7 +684,22 @@ const previewQuestion = computed(() => ({
   term: form.term,
   examType: form.examType,
   /* useCount 不传 → 抽屉显示「—」：草稿还没入库，写「0 次」是假数据 */
-  stem: form.stem,
+  /* 组合题的 `stem` 就是共用题干 / 材料，子题另走 subQuestions（与存库口径一致） */
+  stem: composite.value ? form.material : form.stem,
+  questionCategory: form.category,
+  subQuestions: composite.value
+    ? form.subQuestions.map((sub) => ({
+        id: sub.id,
+        type: sub.type,
+        difficulty: sub.difficulty,
+        knowledge: sub.knowledge,
+        stem: sub.stem,
+        options: isChoiceDraft(sub) ? sub.options.filter((opt) => hasContent(opt)) : [],
+        optionColumns: sub.optionColumns,
+        answer: answerTextOf(sub),
+        analysis: sub.analysis,
+      }))
+    : [],
   /* 填空 / 解答题的 form.options 是占位的 ['','','','']，必须按 isChoice 收口，
      否则预览里会凭空出现四个空选项 */
   options: isChoice.value ? form.options : [],

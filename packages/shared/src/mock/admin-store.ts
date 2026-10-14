@@ -46,7 +46,7 @@ export const DICT_TYPES: Array<{ key: DictTypeKey; title: string; hint: string }
   { key: 'subject', title: '学科', hint: '编码唯一，创建后不可修改；可限定适配年级' },
   { key: 'grade', title: '年级 / 学段', hint: '年级挂靠学段；编码唯一' },
   { key: 'term', title: '学期', hint: '起止日期不可交叉重叠' },
-  { key: 'questionType', title: '题型', hint: '编码唯一；已被题目使用的题型不可修改作答类型，可限定适用学科' },
+  { key: 'questionType', title: '题型', hint: '编码唯一；题目类别区分独立单题 / 材料组合题，已被题目使用的题型不可修改作答类型，可限定适用学科' },
   { key: 'difficulty', title: '难度等级', hint: '系数 0-1.0，越小越难；保留 1 位小数且不可重复' },
   /* 这两项的维护入口已移到「考试类型」树（见 `examTypeNodes`），基础字典里不再展示；
      hint 保留给机构端与平台端的说明用，不再出现在管理端左栏 */
@@ -165,21 +165,29 @@ export const dictStore: Record<DictTypeKey, DictItem[]> = {
     { id: 25, name: '2026-2027 上学期', year: '2026-2027', termHalf: '上学期', dateFrom: '2026-09-01', dateTo: '2027-01-23', sort: 5, enabled: true, refCount: 1 },
     { id: 26, name: '2026-2027 下学期', year: '2026-2027', termHalf: '下学期', dateFrom: '2027-02-22', dateTo: '2027-07-09', sort: 6, enabled: true, refCount: 0 },
   ],
+  /* 题型：`questionCategory` 区分「独立单题」与「材料组合题」（只有录题时需要区分，其余场景只看题型）。
+     两个类别的题型合在同一份字典里 —— 录题页按类别收窄候选项，题库筛选等地方则列出全部。 */
   questionType: [
-    { id: 31, name: '单选', code: 'QT01', answerType: '选择', sort: 1, enabled: true, refCount: 9 },
-    { id: 32, name: '多选', code: 'QT02', answerType: '选择', sort: 2, enabled: true, refCount: 7 },
-    { id: 36, name: '判断', code: 'QT03', answerType: '选择', sort: 3, enabled: true, refCount: 3 },
-    { id: 33, name: '填空', code: 'QT04', answerType: '填空', sort: 4, enabled: true, refCount: 8 },
-    { id: 34, name: '解答', code: 'QT05', answerType: '解答', sort: 5, enabled: true, refCount: 9 },
-    { id: 37, name: '计算', code: 'QT06', answerType: '解答', sort: 6, enabled: true, refCount: 1 },
-    { id: 38, name: '证明', code: 'QT07', answerType: '解答', sort: 7, enabled: true, refCount: 1 },
-    { id: 39, name: '连线', code: 'QT08', answerType: '连线', sort: 8, enabled: true, refCount: 1 },
-    { id: 40, name: '作文', code: 'QT09', answerType: '解答', sort: 9, enabled: true, refCount: 1 },
-    /* 英语专属题型（subjects 限定）：录题 / 筛选题型时先选学科，选到英语才多出这三项 */
-    { id: 42, name: '完形填空', code: 'QT10', answerType: '填空', sort: 10, enabled: true, refCount: 1, subjects: ['英语'] },
-    { id: 43, name: '七选五', code: 'QT11', answerType: '填空', sort: 11, enabled: true, refCount: 1, subjects: ['英语'] },
-    { id: 44, name: '短文改错', code: 'QT12', answerType: '解答', sort: 12, enabled: true, refCount: 1, subjects: ['英语'] },
-    { id: 35, name: '作图', code: 'QT13', answerType: '解答', sort: 13, enabled: false, refCount: 1 },
+    { id: 31, name: '单选', code: 'QT01', answerType: '选择', questionCategory: '独立单题', sort: 1, enabled: true, refCount: 9 },
+    { id: 32, name: '多选', code: 'QT02', answerType: '选择', questionCategory: '独立单题', sort: 2, enabled: true, refCount: 7 },
+    { id: 36, name: '判断', code: 'QT03', answerType: '选择', questionCategory: '独立单题', sort: 3, enabled: true, refCount: 3 },
+    { id: 33, name: '填空', code: 'QT04', answerType: '填空', questionCategory: '独立单题', sort: 4, enabled: true, refCount: 8 },
+    { id: 34, name: '解答', code: 'QT05', answerType: '解答', questionCategory: '独立单题', sort: 5, enabled: true, refCount: 9 },
+    { id: 37, name: '计算', code: 'QT06', answerType: '解答', questionCategory: '独立单题', sort: 6, enabled: true, refCount: 1 },
+    { id: 38, name: '证明', code: 'QT07', answerType: '解答', questionCategory: '独立单题', sort: 7, enabled: true, refCount: 1 },
+    { id: 39, name: '连线', code: 'QT08', answerType: '连线', questionCategory: '独立单题', sort: 8, enabled: true, refCount: 1 },
+    { id: 40, name: '作文', code: 'QT09', answerType: '解答', questionCategory: '独立单题', sort: 9, enabled: true, refCount: 1 },
+    { id: 35, name: '作图', code: 'QT13', answerType: '解答', questionCategory: '独立单题', sort: 10, enabled: false, refCount: 1 },
+    /* —— 材料组合题：母题只有「共用题干 / 材料」，真正的作答单位是若干子题。
+       子题的题型只从上面这一组（独立单题）里取，故下面这些**不会**出现在子题的题型里。 */
+    /* 学科专属题型（subjects 限定）：录题 / 筛选题型时先选学科，选到英语才多出这几项 */
+    { id: 42, name: '完形填空', code: 'QT10', answerType: '填空', questionCategory: '材料组合题', sort: 11, enabled: true, refCount: 1, subjects: ['英语'] },
+    { id: 43, name: '七选五', code: 'QT11', answerType: '填空', questionCategory: '材料组合题', sort: 12, enabled: true, refCount: 1, subjects: ['英语'] },
+    { id: 44, name: '短文改错', code: 'QT12', answerType: '解答', questionCategory: '材料组合题', sort: 13, enabled: true, refCount: 1, subjects: ['英语'] },
+    /* 阅读理解：语文 / 英语的主打组合题型；这两科之外不出现 */
+    { id: 45, name: '阅读理解', code: 'QT14', answerType: '选择', questionCategory: '材料组合题', sort: 14, enabled: true, refCount: 2, subjects: ['语文', '英语'] },
+    /* 材料分析：全学科通用的组合题型 —— 保证任何学科都有可选的组合题型（不勾学科 = 通用） */
+    { id: 46, name: '材料分析', code: 'QT15', answerType: '解答', questionCategory: '材料组合题', sort: 15, enabled: true, refCount: 1 },
   ],
   /* 难度系数：**越小越难**（0 = 最难，1 = 最容易），保留 1 位小数。sort 仍是「容易 → 困难」的展示顺序。 */
   difficulty: [
@@ -322,6 +330,8 @@ export function saveDictItem(type: DictTypeKey, input: Partial<DictItem>): DictI
     dateTo: input.dateTo,
     answerType: input.answerType,
     coefficient: input.coefficient,
+    /* 题目类别只对题型有意义；其余类型传了也丢掉，免得别的字典莫名其妙多出一列 */
+    questionCategory: type === 'questionType' ? (input.questionCategory ?? '独立单题') : undefined,
     subjects: input.subjects?.length ? [...input.subjects] : undefined,
     grades: input.grades?.length ? [...input.grades] : undefined,
     paperCategory: input.paperCategory,

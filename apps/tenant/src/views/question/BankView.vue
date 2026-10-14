@@ -22,7 +22,6 @@ import {
   ApiError,
   RichTextViewer,
   showToast,
-  toPlainText,
   truncateRich,
 } from '@aiteach/shared'
 import type { FilterRowDef, OrgQuestion, QuestionCorrection } from '@aiteach/shared'
@@ -35,6 +34,7 @@ import {
   BankFilterBar,
   KnowledgeFilterPanel,
   QuestionBankPanel,
+  questionSearchText,
   QuestionPreviewDrawer,
   bankDictTypes,
   bankFilterFields,
@@ -214,7 +214,8 @@ const filtered = computed(() => {
       const selected = filterSel[def.key]
       if (selected.length > 0 && !selected.includes(field[def.key](row))) return false
     }
-    if (kw && !toPlainText(row.stem).includes(kw) && !String(row.id).includes(kw)) return false
+    /* 关键词覆盖面：题干 + 组合题的各子题题干（questionSearchText 只此一份） */
+    if (kw && !questionSearchText(row).includes(kw) && !String(row.id).includes(kw)) return false
     return true
   })
 })

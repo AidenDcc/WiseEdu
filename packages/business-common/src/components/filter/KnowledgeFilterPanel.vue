@@ -15,6 +15,7 @@ import { ArrowRight } from '@element-plus/icons-vue'
 import { AppFilterChips, AppIcon } from '@aiteach/shared'
 import type { OrgKnowledgeNode, TextbookOption } from '@aiteach/shared'
 import { useBusinessApi } from '../../api/business-api'
+import { nodeKnowledgeLabel } from '../../composables/useKnowledgePool'
 import { useScope } from '../../composables/useScope'
 
 const props = defineProps<{ rows: Array<{ knowledge: string[] }> }>()
@@ -129,7 +130,14 @@ const childrenMap = computed(() => {
   return map
 })
 
-/** 节点子树的全部知识点标签（叶子 tag；整棵子树无叶子时退化为节点名） */
+/**
+ * 节点子树的全部知识点标签：**每个节点贡献自己的标签**（有 tag 取 tag，分类节点取节点名）。
+ *
+ * 必须把分类节点自己也算上：录题页的知识点弹窗允许选任意层级，题目的 `knowledge` 里因此
+ * 可能出现「函数的概念与性质」这类分类节点名。只收叶子 tag 的话，这种题点父节点筛不出来。
+ * 与 `useKnowledgePool.collectTags` 同一套规则（同一个 `nodeKnowledgeLabel`），
+ * 否则同一棵树在「录题能选什么」与「题库能筛什么」两处会算出两套集合。
+ */
 function subtreeTags(id: string): string[] {
   const root = byId.value.get(id)
   if (!root) return []
@@ -137,10 +145,10 @@ function subtreeTags(id: string): string[] {
   const stack = [root]
   while (stack.length) {
     const node = stack.pop()!
-    if (node.tag) tags.push(node.tag)
+    tags.push(nodeKnowledgeLabel(node))
     childrenMap.value.get(node.id)?.forEach((child) => stack.push(child))
   }
-  return tags.length > 0 ? tags : [root.name]
+  return [...new Set(tags.filter(Boolean))]
 }
 
 const activeTags = computed(() => (activeNode.value ? subtreeTags(activeNode.value.id) : null))
