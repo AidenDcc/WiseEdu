@@ -1,20 +1,35 @@
 /**
- * 段落缩进：`indentLevel`（整体左缩进）+ `firstLineIndent`（首行缩进两格）两个属性。
- * `indentLevel` 挂在段落、标题**与列表项**上，`firstLineIndent` 只挂段落与标题。
+ * 段落盒模型：缩进（整体 + 首行）与段间距。
  *
- * 为什么是全局属性而不是包一层 div：卷面里「缩进」是对**段落**的排版（语文卷的答题空、数学卷的条件
- * 分行），套容器会多一层结构，导出 Word 时多一层 div 会带出多余的空行段。挂到段落上还能白拿一件事 ——
- * 回车换段时 ProseMirror 分裂文本块会复制节点 attrs，**缩进自动继承**，不需要为「换行自动缩进」写代码。
- * 有序列表的续号同理，由列表本身负责。
+ * 本扩展是**段落级盒子属性（margin / padding / text-indent）的唯一所有者**。一条 CSS 属性
+ * 只能有一个写入方 —— 曾经「首行缩进」由本文件写 `text-indent`、段间距另起一个扩展写
+ * `margin-top`，两边都会往同一段落的 `style` 上拼串，一旦哪天都想写同一个属性，
+ * Tiptap 的 `mergeAttributes` 只会把两段 style 拼起来、由浏览器取最后一个，静默覆盖。
+ * 所以缩进与间距合成一处，见下面的属性表。
  *
- * 为什么列表项也要吃 `indentLevel`：列表标记（序号 / 圆点）画在 `li` 的盒子**外侧**，跟着 `li` 走。
- * 进入列表后把缩进记在段落上（`<li><p style="margin-left: 2em">`），只有文字往右挪，序号原地不动 ——
- * 看着就是「序号没跟着缩进」。记到 `li` 上则整个列表项连同序号一起右移（见 resolveIndentHost）。
- * 反过来 `firstLineIndent` 不能给 `li`：`text-indent` 是继承属性，写在 `li` 上会传给里面的段落，
- * 与段落自身那一份叠加成「缩进两格又两格」。
+ * 属性一览（都挂在**段落 / 标题**上，列表项只吃 `indentLevel`）：
+ * - `indentLevel`      增加/减少缩进按钮，一级 2em（= 两个汉字宽），走 `margin-left`
+ * - `firstLineChars`   首行缩进（字符数，中文排版惯例是 2），走 `text-indent`
+ * - `indentLeftChars`  左缩进（字符数），走 `padding-left`
+ * - `indentRightChars` 右缩进（字符数），走 `padding-right`
+ * - `spaceBefore`      段前间距（px），走 `margin-top`
+ * - `spaceAfter`       段后间距（px），走 `margin-bottom`
  *
- * 值只存数字与布尔，渲染成本仓库约定的内联样式（`margin-left: 2em` / `text-indent: 2em`），
- * 两端渲染与 Word 导出都认；净化白名单里放行的正是这两个属性。
+ * 为什么 `indentLeftChars` 用 `padding-left` 而不用 `margin-left`：`margin-left` 已经被
+ * `indentLevel` 占了，两者语义不同（前者是「整段右移几个字」，后者是「缩进级别」），
+ * 而且可能同时存在（先按了两级缩进、又在段落对话框里设了 4 字符）。`padding-left` 与
+ * `margin-left` 在视觉上是叠加的，谁也不会盖住谁。段落自身没有背景与边框（本编辑器里），
+ * 用 padding 不会带来副作用。
+ *
+ * 为什么是全局属性而不是包一层 div：如旧版注释所述，回车换段时 ProseMirror 分裂文本块会复制
+ * 节点 attrs，**缩进与间距随段落自动继承**（与 Word 的「段落格式跟着回车走」一致），
+ * 而且导出 Word 不会多出一层空 div。
+ *
+ * 为什么列表项的 `indentLevel` 单独定义：列表标记（序号 / 圆点）画在 `li` 的盒子**外侧**，
+ * 跟着 `li` 走。进入列表后把缩进记在段落上（`<li><p style="margin-left: 2em">`），
+ * 只有文字往右挪、序号原地不动 —— 看着就是「序号没跟着缩进」。记到 `li` 上则整个列表项
+ * 连同序号一起右移（见 resolveIndentHost）。反过来 `text-indent` 不能给 `li`：
+ * 它是继承属性，写在 `li` 上会传给里面的段落，与段落自身那一份叠加成「缩进两格又两格」。
  */
 import { Extension, getStyleProperty, type CommandProps } from '@tiptap/core'
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
@@ -22,15 +37,25 @@ import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
 /** 与缩进按钮的档数一致：8 级，一级 2em */
 export const INDENT_LEVELS = 8
 const INDENT_STEP_EM = 2
-/** 首行缩进固定两格（中文排版惯例），不做可调 */
-const FIRST_LINE_INDENT = '2em'
+/** 首行缩进按钮的默认值：中文正文惯例两格 */
+export const FIRST_LINE_DEFAULT = 2
+/** 段落对话框里「缩进字符」与「间距 px」的取值范围（超出即视为脏数据） */
+export const INDENT_CHARS_MAX = 16
+export const SPACING_PX_MAX = 96
 
 declare module '@tiptap/core' {
   interface Commands<ReturnType> {
     indent: {
       indent: () => ReturnType
       outdent: () => ReturnType
+      /** 首行缩进开 / 关（工具栏那一个按钮：关→2 字符，开→0） */
       toggleFirstLineIndent: () => ReturnType
+      /** 首行缩进字符数（段落对话框），传 0 等于取消 */
+      setFirstLineChars: (chars: number) => ReturnType
+      /** 左右缩进（字符数，段落对话框） */
+      setParagraphIndent: (value: { left?: number; right?: number }) => ReturnType
+      /** 段前 / 段后间距（px，段落对话框） */
+      setParagraphSpacing: (value: { before?: number; after?: number }) => ReturnType
     }
   }
 }
@@ -40,6 +65,27 @@ export interface IndentOptions {
   types: string[]
   /** 最大缩进级别 */
   levels: number
+}
+
+/** 数值属性的统一归一：null / 非数 / 越界 → 0；小数四舍五入到 0.1（`1.5 字符`也合法） */
+function norm(value: unknown, max: number): number {
+  const num = Number(value)
+  if (!Number.isFinite(num) || num <= 0) return 0
+  return Math.min(Math.round(num * 10) / 10, max)
+}
+
+/** 从内联样式里读一个 px 值（`margin-top: 8px` → 8）；百分比 / em 一律不猜，返回 0 */
+function parsePx(element: HTMLElement, prop: string): number {
+  const value = (getStyleProperty(element, prop) ?? '').trim()
+  const matched = /^(\d+(?:\.\d+)?)px$/.exec(value)
+  return matched ? norm(matched[1], SPACING_PX_MAX) : 0
+}
+
+/** 从内联样式里读一个 em / ch 值（`text-indent: 2em` → 2）；单位不符返回 0 */
+function parseUnit(element: HTMLElement, prop: string, unit: 'em' | 'ch'): number {
+  const value = (getStyleProperty(element, prop) ?? '').trim()
+  const matched = new RegExp(`^(\\d+(?:\\.\\d+)?)${unit}$`).exec(value)
+  return matched ? norm(matched[1], INDENT_CHARS_MAX) : 0
 }
 
 /**
@@ -64,6 +110,42 @@ function parseIndentLevel(element: HTMLElement): number {
   if (!matched) return 0
   const level = Math.round(Number(matched[1]) / INDENT_STEP_EM)
   return level > 0 ? Math.min(level, INDENT_LEVELS) : 0
+}
+
+/** 段落盒模型的属性表（段落与标题共用） */
+function paragraphBoxAttributes() {
+  return {
+    firstLineChars: {
+      default: 0,
+      parseHTML: (element: HTMLElement) => parseUnit(element, 'text-indent', 'em'),
+      renderHTML: (attributes: Record<string, unknown>) =>
+        Number(attributes.firstLineChars) > 0 ? { style: `text-indent: ${Number(attributes.firstLineChars)}em` } : {},
+    },
+    indentLeftChars: {
+      default: 0,
+      parseHTML: (element: HTMLElement) => parseUnit(element, 'padding-left', 'ch'),
+      renderHTML: (attributes: Record<string, unknown>) =>
+        Number(attributes.indentLeftChars) > 0 ? { style: `padding-left: ${Number(attributes.indentLeftChars)}ch` } : {},
+    },
+    indentRightChars: {
+      default: 0,
+      parseHTML: (element: HTMLElement) => parseUnit(element, 'padding-right', 'ch'),
+      renderHTML: (attributes: Record<string, unknown>) =>
+        Number(attributes.indentRightChars) > 0 ? { style: `padding-right: ${Number(attributes.indentRightChars)}ch` } : {},
+    },
+    spaceBefore: {
+      default: 0,
+      parseHTML: (element: HTMLElement) => parsePx(element, 'margin-top'),
+      renderHTML: (attributes: Record<string, unknown>) =>
+        Number(attributes.spaceBefore) > 0 ? { style: `margin-top: ${Number(attributes.spaceBefore)}px` } : {},
+    },
+    spaceAfter: {
+      default: 0,
+      parseHTML: (element: HTMLElement) => parsePx(element, 'margin-bottom'),
+      renderHTML: (attributes: Record<string, unknown>) =>
+        Number(attributes.spaceAfter) > 0 ? { style: `margin-bottom: ${Number(attributes.spaceAfter)}px` } : {},
+    },
+  }
 }
 
 /**
@@ -108,12 +190,32 @@ function shiftIndent(blockTypes: string[], levels: number, delta: number) {
   }
 }
 
+/**
+ * 逐段合并属性。
+ *
+ * 与 shiftIndent 同一套写法：先遍历收集（按 pos 去重）、再统一 dispatch。
+ * `patch` 返回要并入的属性；返回 null 表示这一段本来就是目标值、不必进事务。
+ */
+function patchBlocks(blockTypes: string[], patch: (attrs: Record<string, unknown>) => Record<string, unknown> | null) {
+  return ({ tr, state, dispatch }: CommandProps) => {
+    const { from, to } = state.selection
+    const targets: Array<{ pos: number; attrs: Record<string, unknown> }> = []
+    state.doc.nodesBetween(from, to, (node, pos) => {
+      if (!blockTypes.includes(node.type.name)) return
+      const next = patch({ ...node.attrs })
+      if (next) targets.push({ pos, attrs: next })
+    })
+    if (!targets.length) return false
+    if (dispatch) targets.forEach(({ pos, attrs }) => tr.setNodeMarkup(pos, undefined, attrs))
+    return true
+  }
+}
+
 export const Indent = Extension.create<IndentOptions>({
   name: 'indent',
 
   addOptions() {
-    /* heading 一并登记：本编辑器当前关掉了标题，但 attributes 是按类型名登记的，
-       名字不存在只是不生效，不会报错；哪天打开标题也不用回来改 */
+    /* heading 一并登记：标题与正文共享同一套段落盒模型（缩进 + 间距） */
     return { types: ['paragraph', 'heading'], levels: INDENT_LEVELS }
   },
 
@@ -124,15 +226,12 @@ export const Indent = Extension.create<IndentOptions>({
         attributes: {
           /* 与列表项那一份是同一份定义（分离出去只为两边口径一致） */
           indentLevel: indentLevelAttribute(),
-          firstLineIndent: {
-            default: false,
-            parseHTML: (element) => (getStyleProperty(element, 'text-indent') ?? '').trim() === FIRST_LINE_INDENT,
-            renderHTML: (attributes) => (attributes.firstLineIndent ? { style: `text-indent: ${FIRST_LINE_INDENT}` } : {}),
-          },
+          ...paragraphBoxAttributes(),
         },
       },
       {
-        /* 列表项只吃 indentLevel —— 见文件头：序号跟着 li 走，而 text-indent 在 li 上会继承给段落 */
+        /* 列表项只吃 indentLevel —— 见文件头：序号跟着 li 走，而 text-indent / 段间距在 li 上
+           会继承给段落，与段落自身那一份叠加 */
         types: ['listItem'],
         attributes: { indentLevel: indentLevelAttribute() },
       },
@@ -144,17 +243,33 @@ export const Indent = Extension.create<IndentOptions>({
       indent: () => shiftIndent(this.options.types, this.options.levels, 1),
       outdent: () => shiftIndent(this.options.types, this.options.levels, -1),
 
-      toggleFirstLineIndent: () => ({ tr, state, dispatch }) => {
-        const { from, to } = state.selection
-        const targets: { pos: number; attrs: Record<string, unknown> }[] = []
-        state.doc.nodesBetween(from, to, (node, pos) => {
-          if (!this.options.types.includes(node.type.name)) return
-          targets.push({ pos, attrs: { ...node.attrs, firstLineIndent: !node.attrs.firstLineIndent } })
-        })
-        if (!targets.length) return false
-        if (dispatch) targets.forEach(({ pos, attrs }) => tr.setNodeMarkup(pos, undefined, attrs))
-        return true
-      },
+      toggleFirstLineIndent: () =>
+        patchBlocks(this.options.types, (attrs) => {
+          const next = Number(attrs.firstLineChars) > 0 ? 0 : FIRST_LINE_DEFAULT
+          return { ...attrs, firstLineChars: next }
+        }),
+
+      setFirstLineChars: (chars: number) =>
+        patchBlocks(this.options.types, (attrs) => {
+          const next = norm(chars, INDENT_CHARS_MAX)
+          return Number(attrs.firstLineChars) === next ? null : { ...attrs, firstLineChars: next }
+        }),
+
+      setParagraphIndent: (value) =>
+        patchBlocks(this.options.types, (attrs) => {
+          const left = value.left === undefined ? Number(attrs.indentLeftChars) : norm(value.left, INDENT_CHARS_MAX)
+          const right = value.right === undefined ? Number(attrs.indentRightChars) : norm(value.right, INDENT_CHARS_MAX)
+          if (Number(attrs.indentLeftChars) === left && Number(attrs.indentRightChars) === right) return null
+          return { ...attrs, indentLeftChars: left, indentRightChars: right }
+        }),
+
+      setParagraphSpacing: (value) =>
+        patchBlocks(this.options.types, (attrs) => {
+          const before = value.before === undefined ? Number(attrs.spaceBefore) : norm(value.before, SPACING_PX_MAX)
+          const after = value.after === undefined ? Number(attrs.spaceAfter) : norm(value.after, SPACING_PX_MAX)
+          if (Number(attrs.spaceBefore) === before && Number(attrs.spaceAfter) === after) return null
+          return { ...attrs, spaceBefore: before, spaceAfter: after }
+        }),
     }
   },
 

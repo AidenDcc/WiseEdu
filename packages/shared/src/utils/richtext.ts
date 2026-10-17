@@ -152,7 +152,16 @@ const STYLE_PROPS: Record<string, StyleChecker> = {
   'list-style-type': (v) => (v === 'decimal' || v === 'lower-alpha' || v === 'upper-alpha'
     || v === 'lower-roman' || v === 'upper-roman' || v === 'cjk-ideographic'
     || (RICH_COUNTER_STYLES as readonly string[]).includes(v)) && v,
-  'text-align': (v) => /^(?:left|center|right)$/.test(v) && v,
+  /* 段落对齐：两端对齐（justify）是 Word 正文的默认写法，教案 / 讲义 / 学案都要用 */
+  'text-align': (v) => /^(?:left|center|right|justify)$/.test(v) && v,
+  /* 行距（段落级）：教案与讲义的正文排版都靠它。
+     三种写法都认 —— 无单位倍数（Word 的 1.0 / 1.15 / 1.5 / 2.0，Tiptap 的 lineHeight 命令也用它）、
+     带单位长度（px / em）、百分比。上界 300 挡住 `line-height: 9999px` 这类把正文挤出屏幕的值。 */
+  'line-height': (v) => {
+    const unitless = /^\d(?:\.\d{1,2})?$/.test(v)
+    const sized = isCssLength(v, ['px', 'em', '%'], 300)
+    return (unitless || sized) && Number.parseFloat(v) <= 300 ? v : false
+  },
 }
 
 /** 逐条声明过滤内联样式：保留的按 `key: value` 重新拼回，丢掉的整条消失 */

@@ -14,6 +14,12 @@
  *
  * 默认**不显示未入库题**（`includeUnapproved`），与协同组卷选题池「仅已入库可入卷」同口径；
  * 录题中心刚录完、还没审核的题要主动勾选才能看到，避免把待审题误加进正式试卷。
+ *
+ * **材料组合题整题进出**：它的作答单位在子题里，母题的 `stem` 只是共用材料 —— 只看材料
+ * 既认不出是不是组合题、也判断不出难度，所以表格与详细卡片都把子题铺开（表格里给徽标 +
+ * 小问数，详细卡片按（1）（2）列出，展开「解析」时逐题给答案与解析）。
+ * 但**入卷的单位恒为整道组合题**：子题没有独立 id，界面上也不提供任何「单加某道子题」的入口，
+ * 组卷车与试卷里存的一律是母题 id（一个题号、一个分值）。
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { AppFilterPanel, AppIcon, AppListToolbar, AppPagination, AppSegmented, QUESTION_SOURCE_OPTIONS, RichTextViewer, showToast, toPlainText } from '@aiteach/shared'
@@ -21,6 +27,8 @@ import type { OrgQuestion } from '@aiteach/shared'
 
 import type { FilterRowDef } from '@aiteach/shared'
 
+import { CompositeSubList } from '@aiteach/business-common'
+import { CompositeTag } from '@aiteach/business-common'
 import { KnowledgeFilterPanel as KnowledgeFilter } from '@aiteach/business-common'
 import { QuestionCorrectionDialog } from '@aiteach/business-common'
 import { QuestionOptions } from '@aiteach/business-common'
@@ -35,11 +43,14 @@ import { examTypesFor, scopedQuestionTypes } from '@aiteach/business-common'
 import { fetchQuestionCorrections, fetchTenantDict, type TenantDictItem } from '@/api/org'
 import {
   difficultyClass,
+  isCompositeQuestion,
   isJudgeNoOptions,
   judgeAnswerText,
   needsFigure,
   optionColumnsOf,
   questionSourceBadge,
+  subQuestionCount,
+  subQuestionsOf,
 } from '@aiteach/business-common'
 import { matchesQuestionFilter, type ComposeFilter, type QuestionFilterContext } from '@aiteach/business-common'
 
@@ -411,7 +422,11 @@ function onSimilarFilter(tags: string[]) {
                     @mousemove="onStemMove"
                     @mouseleave="onStemLeave"
                   >
-                    <div class="stem-clip"><RichTextViewer :content="row.stem" tag="span" /></div>
+                    <div class="stem-clip">
+                      <!-- 组合题：材料那一段读起来像普通题干，先挂徽标点明类别与小问数 -->
+                      <CompositeTag v-if="isCompositeQuestion(row)" inline :count="subQuestionCount(row)" />
+                      <RichTextViewer :content="row.stem" tag="span" />
+                    </div>
                   </td>
                   <td>{{ row.type }}</td>
                   <td>{{ row.difficulty }}</td>
@@ -467,6 +482,7 @@ function onSimilarFilter(tags: string[]) {
               <span v-if="questionSourceBadge(row)" class="tag tag-gray qc-source" :title="questionSourceBadge(row)">
                 {{ questionSourceBadge(row) }}
               </span>
+              <CompositeTag v-if="isCompositeQuestion(row)" :count="subQuestionCount(row)" />
               <span class="tag tag-blue">{{ row.type }}</span>
               <span class="tag" :class="difficultyClass(row.difficulty)">{{ row.difficulty }}</span>
               <span class="qc-kp">{{ row.knowledge.join('、') }}</span>
@@ -474,29 +490,48 @@ function onSimilarFilter(tags: string[]) {
             </div>
             <RichTextViewer class="qc-stem" :content="row.stem" @click="preview = row" />
             <!-- 配图（含图形描述的题展示图位；题内已嵌图的不再占位） -->
-            <div v-if="needsFigure(row)" class="qc-figure">
+            <div v-if="!isCompositeQuestion(row) && needsFigure(row)" class="qc-figure">
               <AppIcon name="image" :size="26" />
               <span>题目配图（演示占位）</span>
             </div>
-            <!-- 不传 answer：详细列表是选题态，选项里不能透露正确项，否则扫一眼就知道答案。
-                 答案与解析仍可通过下方「解析」展开查看 -->
-            <QuestionOptions class="qc-options" :options="row.options" :columns="optionColumnsOf(row)" />
-            <div v-if="analysisOpen.includes(row.id)" class="qc-answer">
-              <p>
-                <b>答案：</b>
-                <!-- 客观题答案是字母用强调色纯文本；无选项判断题的对/错同理；
-                     问答题答案是富文本（公式/插图） -->
-                <span v-if="row.options.length || isJudgeNoOptions(row)" class="qc-answer-text">
-                  {{ isJudgeNoOptions(row) ? judgeAnswerText(row.answer) : row.answer || '—' }}
-                </span>
-                <RichTextViewer v-else :content="row.answer" tag="span" empty="—" />
-              </p>
-              <p><b>解析：</b><RichTextViewer :content="row.analysis" tag="span" empty="—" /></p>
-            </div>
+
+            <!-- 材料组合题：母题没有选项 / 答案 / 解析，正文按（1）（2）铺开子题；
+                 「解析」展开的是**逐题**答案 —— 组合题的答案本来就都在子题里 -->
+            <CompositeSubList
+              v-if="isCompositeQuestion(row)"
+              class="qc-subs"
+              :subs="subQuestionsOf(row)"
+              options
+              :answers="analysisOpen.includes(row.id)"
+              empty-text="该组合题还没有子题。"
+            />
+
+            <template v-else>
+              <!-- 不传 answer：详细列表是选题态，选项里不能透露正确项，否则扫一眼就知道答案。
+                   答案与解析仍可通过下方「解析」展开查看 -->
+              <QuestionOptions class="qc-options" :options="row.options" :columns="optionColumnsOf(row)" />
+              <div v-if="analysisOpen.includes(row.id)" class="qc-answer">
+                <p>
+                  <b>答案：</b>
+                  <!-- 客观题答案是字母用强调色纯文本；无选项判断题的对/错同理；
+                       问答题答案是富文本（公式/插图） -->
+                  <span v-if="row.options.length || isJudgeNoOptions(row)" class="qc-answer-text">
+                    {{ isJudgeNoOptions(row) ? judgeAnswerText(row.answer) : row.answer || '—' }}
+                  </span>
+                  <RichTextViewer v-else :content="row.answer" tag="span" empty="—" />
+                </p>
+                <p><b>解析：</b><RichTextViewer :content="row.analysis" tag="span" empty="—" /></p>
+              </div>
+            </template>
+
             <div class="qc-ops">
               <button class="mini-btn" type="button" @click="preview = row">预览</button>
+              <!-- 组合题的答案是逐题的，按钮文案相应写成「答案与解析」 -->
               <button class="mini-btn" type="button" @click="toggleAnalysis(row.id)">
-                {{ analysisOpen.includes(row.id) ? '收起解析' : '解析' }}
+                <template v-if="isCompositeQuestion(row)">
+                  {{ analysisOpen.includes(row.id) ? '收起解析' : '答案与解析' }}
+                </template>
+                <template v-else>{{ analysisOpen.includes(row.id) ? '收起解析' : '解析' }}</template>
               </button>
               <button
                 class="mini-btn fav"
@@ -662,6 +697,8 @@ function onSimilarFilter(tags: string[]) {
   font-size: 12.5px;
 }
 .qc-options { margin-top: 10px; }
+/* 组合题的子题列表：只负责与上方材料的间距（子题自身的样式在 CompositeSubList 里） */
+.qc-subs { margin-top: 10px; }
 .qc-answer {
   margin-top: 10px;
   border-left: 3px solid var(--brand);

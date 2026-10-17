@@ -210,18 +210,27 @@ function refreshSuggest(value: string, caret: number) {
 }
 
 /**
- * 给「放不下的预览」打上渐隐标记 —— 按**实测渲染宽度**判，不看源码字符数。
+ * 给「放不下的预览」打上渐隐标记 —— 判据是「内容自然宽度是否超过 max-width」，
+ * 不看源码字符数，也不看 `scrollWidth > clientWidth`。
  *
- * 为什么不看字符数：`\frac{1}{\sqrt{\square}}` 有 22 个字符，渲染出来只有 35px 宽；
- * 而渐隐是按百分比算的（`100% - 16px`），挂到一个 35px 宽的元素上，
- * 等于从 19px 处开始变淡 —— 把符号自己的右半截抹掉，看起来又成了「显示不全」。
- * 所以等 DOM 落地后逐行量 scrollWidth，真超宽（> max-width）才挂。
+ * 两个坑都踩过：
+ * 1. **字符数**：`\frac{1}{\sqrt{\square}}` 有 22 个字符，渲染出来只有 35px 宽 ——
+ *    按字符数判会把它误当成「长」，挂上按百分比算的渐隐（`100% - 16px`），
+ *    挂到 35px 宽的元素上等于从 19px 处开始变淡，把符号自己抹掉。
+ * 2. **`scrollWidth > clientWidth`**：KaTeX 会把公式渲染两份（可见的 HTML 版 + 一个
+ *    `position: absolute` 的 MathML 副本，靠 `clip` 裁成 1px 点藏起来）。那个副本是个
+ *    完整的大盒子，会把 scrollWidth 撑出几个像素的**假溢出** —— 于是 `\sqrt{\square}`
+ *    这种 23px 宽的正常符号也被判成超宽，渐隐把根号横线的右端抹淡，看起来就像「没显示全」。
+ *
+ * 所以直接跟 max-width 比：只有内容真想画得比它还宽（差值几十像素量级）才挂渐隐，
+ * 那几像素的副本溢出落在阈值之下，自然被忽略。
  */
 function markPreviewOverflow() {
   const panel = suggestPanel.value
   if (!panel) return
   for (const el of panel.querySelectorAll<HTMLElement>('.fm-sug-preview')) {
-    el.classList.toggle('is-long', el.scrollWidth > el.clientWidth + 1)
+    const limit = Number.parseFloat(getComputedStyle(el).maxWidth)
+    el.classList.toggle('is-long', Number.isFinite(limit) && el.scrollWidth > limit)
   }
 }
 
@@ -638,16 +647,16 @@ onBeforeUnmount(() => {
 .fm-sug-preview {
   flex: 0 0 auto;
   margin-left: auto;
-  padding-left: 14px;
+  /* 右侧也留一点：KaTeX 的根号横线会往右压线，紧贴边界容易被 overflow:hidden 削掉一像素 */
+  padding: 0 4px 0 14px;
   max-width: 150px;
   overflow: hidden;
   color: var(--ink);
   font-size: 14px;
   white-space: nowrap;
 }
-/* 渐隐只在「源码确实长到放不下」时才挂上。
-   它按百分比算（100% - 16px），而本列宽度是跟着内容收缩的 ——
-   无条件挂着的话，宽 20px 的 \uplus 符号整条都落进渐隐区，看起来就像被裁掉了一截。 */
+/* 渐隐只在「内容自然宽度超过 max-width」时才挂上（判据见 markPreviewOverflow）。
+   它按百分比算（100% - 16px），挂到窄元素上会把符号自己抹淡 —— 所以宁可少挂、不可误挂。 */
 .fm-sug-preview.is-long {
   mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);
   -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent);

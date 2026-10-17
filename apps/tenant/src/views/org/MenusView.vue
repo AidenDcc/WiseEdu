@@ -4,13 +4,40 @@ import { AppIcon, AppPageHeader, appConfirm, showToast, AppSwitch } from '@aitea
 
 import { fetchOrgMenus, saveOrgMenus } from '@/api/org'
 import type { OrgMenuNodeApi } from '@/api/org'
+import { BASIC_HIDDEN_PATHS, editionOf } from '@/menu-edition'
 import { useVisibleMenus } from '@/composables/useVisibleMenus'
+import { useAuthStore } from '@/stores/auth'
 
 const { refresh: refreshMenus } = useVisibleMenus()
+const auth = useAuthStore()
 
 const menus = ref<OrgMenuNodeApi[]>([])
 const dirty = ref(false)
 const saving = ref(false)
+
+/**
+ * 当前账号是不是「标准版」。
+ *
+ * 这一页的开关是**机构级**的，而版本是**账号级**的（见 menu-edition.ts）：标准版账号
+ * 眼里的这一页会看到「学案 / 课件 / …」全开着，侧边栏却没有它们 —— 不解释一句，
+ * 用户只会当成开关失效。所以在页头把差异摆出来，而不是悄悄裁掉这些行（关掉它们
+ * 对全功能账号同样生效，仍然是一个有效配置）。
+ */
+const basicEdition = computed(() => editionOf(auth.user?.account) === 'basic')
+
+/** 标准版不含的菜单标题：按路径到菜单开关树里反查，避免在提示文案里再抄一遍名字 */
+const basicHiddenTitles = computed(() => {
+  const keys = new Set(BASIC_HIDDEN_PATHS.map((path) => path.replace(/^\//, '')))
+  const titles: string[] = []
+  const walk = (rows: OrgMenuNodeApi[]) => {
+    for (const row of rows) {
+      if (keys.has(row.key)) titles.push(row.title)
+      if (row.children?.length) walk(row.children)
+    }
+  }
+  walk(menus.value)
+  return titles
+})
 
 async function load() {
   menus.value = await fetchOrgMenus()
@@ -103,6 +130,15 @@ onMounted(load)
         <span class="f-hint">关闭后员工登录将不再显示对应入口，历史数据保留</span>
       </div>
 
+      <div v-if="basicEdition && basicHiddenTitles.length" class="edition-note">
+        <AppIcon name="shield" :size="15" />
+        <span>
+          当前账号（<b>{{ auth.user?.account }}</b>）为<b>标准版</b>，以下菜单不在本版本内、侧边栏不显示：{{
+            basicHiddenTitles.join(' / ')
+          }}。要用全部功能请用全功能账号登录；下方开关是机构级配置，关掉后全机构（含全功能账号）都会隐藏。
+        </span>
+      </div>
+
       <div class="menu-list">
         <div v-for="group in menus" :key="group.key" class="menu-group">
           <div class="group-row" :class="{ locked: group.platformLocked || group.locked }">
@@ -153,6 +189,16 @@ onMounted(load)
   background: var(--brand-soft); border-radius: 10px;
   padding: 10px 14px; font-size: 13px; color: var(--ink-2); margin-bottom: 16px;
 }
+
+/* 版本差异提示：用警示色，与「已启用 x/y」那条常态信息分开，避免被当成装饰 */
+.edition-note {
+  display: flex; align-items: flex-start; gap: 8px;
+  background: var(--warn-soft); border-radius: 10px;
+  padding: 10px 14px; font-size: 12.5px; line-height: 1.7; color: var(--ink-2);
+  margin: -6px 0 16px;
+}
+.edition-note svg { color: var(--warn); flex-shrink: 0; margin-top: 3px; }
+.edition-note b { color: var(--ink); font-weight: 600; }
 
 .menu-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
 .menu-group { border: 1.5px solid var(--border); border-radius: 12px; padding: 12px 14px; }

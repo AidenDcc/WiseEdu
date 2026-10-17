@@ -72,6 +72,9 @@ export { default as SimilarQuestionsModal } from './components/compose/SimilarQu
 
 /* ===== 题目 ===== */
 export { default as QuestionOptions } from './components/question/QuestionOptions.vue'
+/* 材料组合题：徽标 + 子题列表。选题列表、组卷卡片、题库列表三处共用同一枚徽标与同一份子题铺陈 */
+export { default as CompositeTag } from './components/question/CompositeTag.vue'
+export { default as CompositeSubList } from './components/question/CompositeSubList.vue'
 export { default as QuestionPreviewBody } from './components/question/QuestionPreviewBody.vue'
 export { default as QuestionPreviewDrawer } from './components/question/QuestionPreviewDrawer.vue'
 export { default as QuestionCorrectionDialog } from './components/question/QuestionCorrectionDialog.vue'

@@ -20,6 +20,8 @@ import { computed, ref } from 'vue'
 import { AppIcon, AppListToolbar, AppPagination, AppSegmented, RichTextViewer } from '@aiteach/shared'
 import type { OrgQuestion } from '@aiteach/shared'
 import QuestionOptions from '../question/QuestionOptions.vue'
+import CompositeTag from '../question/CompositeTag.vue'
+import CompositeSubList from '../question/CompositeSubList.vue'
 import { useViewMode } from '../../composables/useViewMode'
 import {
   difficultyClass,
@@ -28,7 +30,8 @@ import {
   judgeAnswerText,
   needsFigure,
   optionColumnsOf,
-  subStemText,
+  subQuestionCount,
+  subQuestionsOf,
 } from '../../utils/question-card'
 
 const props = withDefaults(
@@ -101,7 +104,7 @@ function rowNo(index: number): number {
 
 /** 组合题的子题列表（母题自身没有选项 / 答案 / 解析，正文都在子题里） */
 function subsOf(row: OrgQuestion) {
-  return row.subQuestions ?? []
+  return subQuestionsOf(row)
 }
 </script>
 
@@ -165,8 +168,9 @@ function subsOf(row: OrgQuestion) {
                 </div>
               </td>
               <td class="qb-stem-cell" @click="emit('preview', row)">
-                <!-- 组合题的题干格子里先标一个类别徽标：光看材料文字认不出它是组合题 -->
-                <span v-if="isCompositeQuestion(row)" class="qb-composite-tag">材料组合题</span>
+                <!-- 组合题的题干格子里先标一个类别徽标：光看材料文字认不出它是组合题，
+                     更看不出里面还有几道小题（徽标自带小问数） -->
+                <CompositeTag v-if="isCompositeQuestion(row)" inline :count="subQuestionCount(row)" />
                 <slot name="renderStem" :row="row">
                   <RichTextViewer :content="row.stem" tag="span" />
                 </slot>
@@ -194,7 +198,7 @@ function subsOf(row: OrgQuestion) {
         <div class="qb-meta">
           <span class="qb-id">#{{ row.id }}</span>
           <slot name="renderCardMeta" :row="row" />
-          <span v-if="isCompositeQuestion(row)" class="tag tag-orange">材料组合题</span>
+          <CompositeTag v-if="isCompositeQuestion(row)" :count="subQuestionCount(row)" />
           <span class="tag tag-blue">{{ row.type }}</span>
           <span class="tag" :class="difficultyClass(row.difficulty)">{{ row.difficulty }}</span>
           <span class="qb-kp">{{ row.knowledge.join('、') }}</span>
@@ -207,15 +211,15 @@ function subsOf(row: OrgQuestion) {
           <span>题目配图（演示占位）</span>
         </div>
 
-        <!-- 材料组合题：母题没有选项 / 答案 / 解析，正文按序号铺开子题 -->
-        <div v-if="isCompositeQuestion(row)" class="qb-subs">
-          <div v-for="(sub, si) in subsOf(row)" :key="sub.id" class="qb-sub">
-            <span class="qb-sub-no">（{{ si + 1 }}）</span>
-            <span class="tag tag-blue">{{ sub.type }}</span>
-            <RichTextViewer class="qb-sub-stem" :content="subStemText(sub.stem)" tag="span" />
-          </div>
-          <p v-if="!subsOf(row).length" class="qb-sub-empty">该组合题还没有子题。</p>
-        </div>
+        <!-- 材料组合题：母题没有选项 / 答案 / 解析，正文按序号铺开子题；
+             展开「答案与解析」时逐题铺开（答案都在子题里，母题那一层是空的） -->
+        <CompositeSubList
+          v-if="isCompositeQuestion(row)"
+          class="qb-subs"
+          :subs="subsOf(row)"
+          :answers="analysisOpen.includes(row.id)"
+          empty-text="该组合题还没有子题。"
+        />
 
         <template v-else>
           <!-- 不传 answer：详细列表是选题态，选项里不透露正确项（答案在下方「解析」里展开） -->
@@ -234,9 +238,13 @@ function subsOf(row: OrgQuestion) {
           </div>
         </template>
         <div class="qb-ops">
-          <!-- 组合题没有属于自己的解析（都在子题里），给一个点了没东西的按钮不如不给 -->
-          <button v-if="!isCompositeQuestion(row)" class="mini-btn" type="button" @click="toggleAnalysis(row.id)">
-            {{ analysisOpen.includes(row.id) ? '收起解析' : '解析' }}
+          <!-- 组合题没有属于自己的解析（都在子题里），展开的是**逐题**答案与解析；
+               文案因此写成「答案与解析」，与母题的「解析」区分开 -->
+          <button class="mini-btn" type="button" @click="toggleAnalysis(row.id)">
+            <template v-if="isCompositeQuestion(row)">
+              {{ analysisOpen.includes(row.id) ? '收起解析' : '答案与解析' }}
+            </template>
+            <template v-else>{{ analysisOpen.includes(row.id) ? '收起解析' : '解析' }}</template>
           </button>
           <slot name="renderOperation" :row="row" />
         </div>
@@ -271,27 +279,9 @@ function subsOf(row: OrgQuestion) {
   vertical-align: middle;
 }
 .qb-stem-cell:hover { color: var(--brand-deep); }
-/* 组合题徽标：inline 排在材料文字前面，不占独立一行 */
-.qb-composite-tag {
-  display: inline-block;
-  margin-right: 6px;
-  border: 1px solid #f0c089;
-  border-radius: 999px;
-  background: #fff5e9;
-  color: #b26a00;
-  font-size: 11px;
-  font-weight: 600;
-  padding: 0 7px;
-  line-height: 17px;
-  vertical-align: 1px;
-  white-space: nowrap;
-}
-/* 组合题卡片里的子题列表 */
-.qb-subs { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
-.qb-sub { display: flex; align-items: flex-start; gap: 6px; font-size: 13px; color: var(--ink-2); line-height: 1.7; }
-.qb-sub-no { flex-shrink: 0; font-weight: 700; color: var(--brand-deep); }
-.qb-sub-stem { flex: 1; min-width: 0; }
-.qb-sub-empty { margin: 0; font-size: 12.5px; color: var(--sub); }
+/* 组合题卡片里的子题列表（徽标与子题的样式都在 CompositeTag / CompositeSubList 里，
+   这里只负责与上方材料的间距） */
+.qb-subs { margin-top: 10px; }
 .qb-knowledge-cell { font-size: 12.5px; max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .qb-time-cell { font-size: 12.5px; color: var(--sub); white-space: nowrap; }
 

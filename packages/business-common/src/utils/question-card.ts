@@ -10,6 +10,7 @@
  * 只放纯函数：不碰接口、不碰状态。
  */
 import { hasImage, toPlainText } from '@aiteach/shared'
+import type { OrgSubQuestion } from '@aiteach/shared'
 
 /**
  * 「无选项判断题」：判断题不带「正确 / 错误」选项，学生直接在题干前的「（　　）」里写对错。
@@ -102,4 +103,60 @@ export function questionSearchText(item: { stem: string; subQuestions?: Array<{ 
  */
 export function subStemText(stem: string): string {
   return toPlainText(stem).trim() || '（未填写题干）'
+}
+
+/**
+ * 取材料的子题列表 —— 非组合题**恒为空数组**。
+ *
+ * 各渲染端一律走这个函数而不是直接读 `subQuestions`：组合题的身份只在
+ * `questionCategory === '材料组合题'` 时成立，直接读字段会让「切回独立单题后残留的
+ * 子题数组」也画出子题来（录题页切换类别时就可能出现这种残值）。
+ */
+export function subQuestionsOf(item: {
+  questionCategory?: string
+  subQuestions?: OrgSubQuestion[]
+}): OrgSubQuestion[] {
+  return isCompositeQuestion(item) ? item.subQuestions ?? [] : []
+}
+
+/** 组合题的小问数：列表徽标、卷面题量、答题卡说明都用这一个口径 */
+export function subQuestionCount(item: {
+  questionCategory?: string
+  subQuestions?: readonly unknown[]
+}): number {
+  return isCompositeQuestion(item) ? item.subQuestions?.length ?? 0 : 0
+}
+
+/**
+ * 子题答案是否为纯文本（客观题字母、无选项判断题的「对 / 错」，可直接展示）；
+ * 主观题答案是富文本（含公式 / 插图），要走 RichTextViewer。
+ *
+ * 与母题侧 `isJudgeNoOptions` 同一口径：判断题不带选项时，「正确 / 错误」两个字
+ * 写在题干前的括号里，答案就不是选项字母。
+ */
+export function subAnswerIsPlain(sub: { type: string; options: readonly unknown[] }): boolean {
+  return sub.options.length > 0 || isJudgeNoOptions(sub)
+}
+
+/** 子题的卷面答案文本：无选项判断题把库里的 A/B 归一到「对 / 错」，其余原样 */
+export function subAnswerText(sub: { type: string; options: readonly unknown[]; answer: string }): string {
+  return isJudgeNoOptions(sub) ? judgeAnswerText(sub.answer) : sub.answer
+}
+
+/**
+ * 材料组合题的「整体」徽标文案（按小问数）。
+ *
+ * 带上小问数是必要的：组合题在列表里只能露出共用材料那一段文字，
+ * 光看材料认不出里面还有几道小题（也没法从题干里看出该给多少分）。
+ */
+export function compositeBadgeLabel(count: number): string {
+  return count > 0 ? `材料组合题 · ${count} 小问` : '材料组合题'
+}
+
+/** 由题目数据直接取徽标文案（列表/卡片两侧同一口径） */
+export function compositeBadgeText(item: {
+  questionCategory?: string
+  subQuestions?: readonly unknown[]
+}): string {
+  return compositeBadgeLabel(subQuestionCount(item))
 }

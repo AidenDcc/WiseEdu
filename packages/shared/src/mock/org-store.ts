@@ -69,8 +69,11 @@ import type {
   SquareResource,
   StaffMember,
   StandardFormula,
+  TeachAiTextAction,
   TeachDoc,
   TeachDocKind,
+  TeachTemplate,
+  TeachTemplateKind,
   VideoClip,
 } from '../api/models'
 /* 常量与类型分开导入：这几个字典既要参与类型推导，也要作为值再导出给前端 */
@@ -79,6 +82,7 @@ import {
   COLLAB_MEMBER_TEXT,
   EARLIER_YEAR,
   TEACH_KIND_TEXT,
+  TEACH_AI_TEXT_TEXT,
   LECTURE_BLOCK_TEXT,
   SLIDE_LAYOUT_TEXT,
   MISTAKE_REASONS,
@@ -195,10 +199,27 @@ export function deleteCategory(id: number): void {
 /** 运行期新建题目的自增 id：种子题与高考模拟卷已占用 9001-9326，从其后开始避免撞号 */
 let questionSeq = 9400
 
-/** AI 多智能体检测结果（8 项，FR-AI-002）。与审核中心「AI检测」共用同一套项目名：
- *  基础信息匹配（年级/学科/题型）、题干（语义/文字/公式/选项完整性）、答案、解析、
- *  知识点匹配、图形描述、难度匹配、查重 —— 重跑检测时按项目名原位更新，报告结构稳定。 */
-function aiChecksFor(stem: string, suspects: string[] = []): AiCheckResult[] {
+/** 检测报告的输入：只要判定类别与正文所需的那几个字段 */
+type QuestionCheckTarget = Pick<OrgQuestion, 'stem' | 'questionCategory' | 'subQuestions'>
+
+/**
+ * AI 多智能体检测结果（FR-AI-002）。与审核中心「AI检测」共用同一套项目名，
+ * 重跑检测时按项目名原位更新，报告结构稳定：
+ * - 独立单题（8 项）：基础信息匹配（年级/学科/题型）、题干（语义/文字/公式/选项完整性）、
+ *   答案、解析、知识点匹配、图形描述、难度匹配、查重；
+ * - 材料组合题：母题级六项统一挂在「共用材料」下（组合没有自己的作答结构，它的身份就是那段材料），
+ *   另按子题逐题给出题干（含选项完整性）/ 答案 / 解析 —— 与检测引擎（ai-check）经审核中心映射后的
+ *   `共用材料 · X`、`第 N 题 · X` 报告项名一一对应。
+ */
+function aiChecksFor(target: string | QuestionCheckTarget, suspects: string[] = []): AiCheckResult[] {
+  const question = typeof target === 'string' ? { stem: target } : target
+  return question.questionCategory === '材料组合题'
+    ? compositeChecksFor(question, suspects)
+    : singleChecksFor(question.stem, suspects)
+}
+
+/** 独立单题的 8 项报告 */
+function singleChecksFor(stem: string, suspects: string[]): AiCheckResult[] {
   return [
     { name: '基础信息匹配', pass: true, note: '年级、学科、题型与题目内容一致' },
     { name: '题干', pass: true, note: '语义完整，文字、公式与选项无异常' },
@@ -214,6 +235,41 @@ function aiChecksFor(stem: string, suspects: string[] = []): AiCheckResult[] {
     { name: '难度匹配', pass: true, note: '难度系数与题干复杂度相符' },
     { name: '查重', pass: suspects.length === 0, note: suspects.length ? '与题库 1 题相似度 87%' : '未发现相似题' },
   ]
+}
+
+/**
+ * 材料组合题的报告：母题级六项 + 逐题项。
+ *
+ * 母题自己没有选项 / 答案 / 解析（作答单位在子题里），所以四项正文审查落在每道子题上；
+ * 子题项数随子题数量增长 —— 这正是组合题该有的样子：审核员要能一眼看出是哪一道子题待改，
+ * 而不是只看到一条笼统的「答案不对」。
+ */
+function compositeChecksFor(question: QuestionCheckTarget, suspects: string[]): AiCheckResult[] {
+  const checks: AiCheckResult[] = [
+    { name: '共用材料 · 基础信息匹配', pass: true, note: '年级、学科与材料情境及全部子题内容一致' },
+    { name: '共用材料 · 题干', pass: true, note: '材料表述完整，公式与图文引用无异常' },
+    { name: '共用材料 · 知识点匹配', pass: true, note: '母题知识点标注完整、准确' },
+    { name: '共用材料 · 图形描述', pass: true, note: '无图形依赖' },
+    { name: '共用材料 · 难度匹配', pass: true, note: '母题难度与材料复杂度相符' },
+    {
+      name: '共用材料 · 查重',
+      pass: suspects.length === 0,
+      note: suspects.length ? '与题库 1 题材料相似度 87%' : '未发现相似题',
+    },
+  ]
+  ;(question.subQuestions ?? []).forEach((sub, index) => {
+    const scope = `第 ${index + 1} 题`
+    /* 选项检查并入「题干」一项 —— 与独立单题的 8 项框架同一口径（框架里没有单独的「选项」维度，
+       检测引擎的「选项」项也由审核中心映射到「题干」），报告项因此每道子题恒为三条 */
+    checks.push({
+      name: `${scope} · 题干`,
+      pass: true,
+      note: sub.options.length ? '表述完整，与共用材料自洽；选项数量与题型匹配' : '表述完整，与共用材料自洽',
+    })
+    checks.push({ name: `${scope} · 答案`, pass: true, note: '答案正确，与材料条件及设问对应' })
+    checks.push({ name: `${scope} · 解析`, pass: true, note: '解析完整，与答案自洽' })
+  })
+  return checks
 }
 
 function seedQuestion(input: Partial<OrgQuestion> & { stem: string; id: number }): OrgQuestion {
@@ -2427,6 +2483,360 @@ export const questions: OrgQuestion[] = [
     useCount: 1,
     updatedAt: nowStr(-12),
   }),
+
+  /* ---- 语文 / 英语 / 生物的组合题种子 ----
+     这三个学科的题库此前只有 #9361（英语 · 完形填空）一道组合题，语文与生物一道都没有 ——
+     「材料组合题」在列表里的徽标、子题摘要，以及预览抽屉的材料 + 编号子题，在这三个学科上
+     就是没有样本可比对。每个学科补到**至少两道**，并刻意覆盖「阅读理解」与「材料分析」
+     两种组合题型（生物的题型候选只有「材料分析」，故两道都用它）。
+     知识点取值必须落在机构端知识点树的 tag 上（见下方 KNOWLEDGE_TREES），
+     否则题库管理按知识点筛选时这些题会筛不出来。 */
+  seedQuestion({
+    id: 9362,
+    questionCategory: '材料组合题',
+    type: '阅读理解',
+    subject: '语文',
+    grade: '高一',
+    difficulty: '中等',
+    knowledge: ['实词虚词'],
+    stem:
+      '<p>阅读下面的文言文，完成各题。</p>' +
+      '<p>范仲淹，字希文，苏州吴县人。二岁而孤，母更适长山朱氏，从其姓，名说。少有志操，既长，知其世家，' +
+      '乃感泣辞母，去之应天府，依戚同文学。昼夜不息，冬月惫甚，以水沃面；食不给，至以糜粥继之，人不能堪，' +
+      '仲淹不苦也。举进士第，为广德军司理参军，迎其母归养。仲淹内刚外和，性至孝，以母在时方贫，' +
+      '其后虽贵，非宾客不重肉，妻子衣食仅能自充。</p>',
+    options: [],
+    answer: '',
+    analysis: '',
+    subQuestions: [
+      {
+        id: 1,
+        type: '单选',
+        difficulty: '中等',
+        knowledge: ['实词虚词'],
+        stem: '<p>文中「母更适长山朱氏」一句里「更」的意思是（　　）</p>',
+        options: ['改变', '改嫁', '更加', '替代'],
+        answer: 'B',
+        optionColumns: 1,
+        analysis: '<p>「更适」即改嫁，「适」指女子出嫁；「更」在这里是动词，不是副词「更加」。</p>',
+      },
+      {
+        id: 2,
+        type: '单选',
+        difficulty: '较难',
+        knowledge: ['实词虚词'],
+        stem: '<p>下列对原文内容的概括与分析，不正确的一项是（　　）</p>',
+        options: [
+          '范仲淹幼年丧父，随母亲改嫁到朱家，因此一度改姓名为朱说',
+          '范仲淹成年后得知自己的家世，便辞别母亲前往应天府求学',
+          '范仲淹求学时刻苦自励，冬天疲惫时用冷水洗脸，饮食不足也不以为苦',
+          '范仲淹显贵之后仍然俭朴，只有宾客来访时才肯吃肉，妻儿的衣食也仅仅够用',
+        ],
+        answer: 'D',
+        optionColumns: 1,
+        analysis:
+          '<p>原文「非宾客不重肉」意为不逢宾客来访不吃两种以上的肉食，并非「平时不吃肉」，' +
+          'D 项把程度与范围都说重了。</p>',
+      },
+      {
+        id: 3,
+        type: '解答',
+        difficulty: '中等',
+        knowledge: ['断句与翻译'],
+        stem: '<p>把文中「昼夜不息，冬月惫甚，以水沃面」一句翻译成现代汉语。</p>',
+        options: [],
+        answer: '<p>（他）日夜不停地读书，冬天的夜晚疲惫极了，就用冷水浇脸（提神）。</p>',
+        analysis: '<p>翻译要补出省略的主语「他」，并落实「息」（停歇）、「惫」（疲惫）、「沃」（浇）三个词。</p>',
+      },
+    ],
+    library: 'org',
+    categoryId: 13,
+    term: '上学期',
+    examType: '月考',
+    source: '手动录入',
+    owner: '周雪',
+    ownerId: 105,
+    useCount: 4,
+    updatedAt: nowStr(-21),
+  }),
+  seedQuestion({
+    id: 9363,
+    questionCategory: '材料组合题',
+    type: '材料分析',
+    subject: '语文',
+    grade: '高一',
+    difficulty: '中等',
+    knowledge: ['论述类文本'],
+    stem:
+      '<p>材料一：数字技术改变了知识的获取方式。检索一条史实、核对一处引文，如今只需几秒；' +
+      '但「知道在哪里能找到」并不等于「已经理解」。阅读经典之所以仍然必要，正在于它训练的是慢下来的能力 —— ' +
+      '跟随一段论证走完全程，容忍暂时的不解，在前后的呼应里自己得出结论。</p>' +
+      '<p>材料二：有调查显示，习惯于碎片化阅读的学生，在长文本的信息整合题上得分明显偏低。' +
+      '研究者认为，这与阅读时频繁切换注意力有关：每一次跳转都要重新建立上下文，' +
+      '认知成本被反复支出，最后真正用于理解的部分反而变少。</p>',
+    options: [],
+    answer: '',
+    analysis: '',
+    subQuestions: [
+      {
+        id: 1,
+        type: '单选',
+        difficulty: '容易',
+        knowledge: ['论述类文本'],
+        stem: '<p>下列对材料内容的理解，正确的一项是（　　）</p>',
+        options: [
+          '数字技术使知识获取更便捷，因此经典阅读已不再必要',
+          '阅读经典的价值之一，在于训练读者「慢下来」的能力',
+          '碎片化阅读会直接导致学生的长文本阅读能力永久下降',
+          '注意力频繁切换不会产生认知成本，只是降低了阅读速度',
+        ],
+        answer: 'B',
+        optionColumns: 1,
+        analysis:
+          '<p>A 与材料一「并不等于已经理解」相悖；C 把调查结论绝对化为「永久下降」；' +
+          'D 与材料二「认知成本被反复支出」相悖。</p>',
+      },
+      {
+        id: 2,
+        type: '单选',
+        difficulty: '中等',
+        knowledge: ['论述类文本'],
+        stem: '<p>根据材料二，研究者认为碎片化阅读影响长文本得分的主要原因是（　　）</p>',
+        options: ['学生缺少必要的词汇量', '阅读时注意力频繁切换，上下文被反复重建', '长文本的信息整合题本身难度过高', '调查的样本集中在低年级学生'],
+        answer: 'B',
+        optionColumns: 1,
+        analysis: '<p>材料二把原因明确落在「每一次跳转都要重新建立上下文，认知成本被反复支出」上。</p>',
+      },
+      {
+        id: 3,
+        type: '解答',
+        difficulty: '较难',
+        knowledge: ['论述类文本'],
+        stem: '<p>结合两则材料，简要说明「知道在哪里能找到」与「已经理解」的区别，并谈谈你对经典阅读价值的认识。（不超过 120 字）</p>',
+        options: [],
+        answer:
+          '<p>前者指向检索能力，得到的是零散结论；后者要求跟随论证、容纳疑问并自行得出结论，是理解力本身。' +
+          '经典阅读正因其篇幅与难度，迫使我们完整地走完这一过程，所以技术再便捷也不能替代它。</p>',
+        analysis: '<p>作答要完成两件事：先把「检索」与「理解」的区别说清，再落到「经典阅读的价值」，不能只复述材料。</p>',
+      },
+    ],
+    library: 'org',
+    categoryId: 13,
+    term: '下学期',
+    examType: '单元测试',
+    source: '手动录入',
+    owner: '周雪',
+    ownerId: 105,
+    useCount: 2,
+    updatedAt: nowStr(-9),
+  }),
+  seedQuestion({
+    id: 9364,
+    questionCategory: '材料组合题',
+    type: '阅读理解',
+    subject: '英语',
+    grade: '高一',
+    difficulty: '中等',
+    knowledge: ['阅读理解'],
+    stem:
+      '<p>Read the following passage and answer the questions.</p>' +
+      '<p>Every spring, millions of monarch butterflies travel nearly 5,000 kilometres from Canada to central Mexico. ' +
+      'No single butterfly makes the whole trip; it takes three or four generations. What is remarkable is that the last ' +
+      'generation, which has never been to Mexico, still flies to the same small forests its great-grandparents left. ' +
+      'Scientists believe the insects combine the position of the sun with a magnetic sense, and that the mountains ' +
+      'themselves act as a landmark. Yet the journey is becoming harder. Illegal logging and drought have shrunk the ' +
+      'forests where the butterflies spend the winter, and milkweed, the only plant their young can eat, has declined ' +
+      'sharply across the American Midwest.</p>',
+    options: [],
+    answer: '',
+    analysis: '',
+    subQuestions: [
+      {
+        id: 1,
+        type: '单选',
+        difficulty: '容易',
+        knowledge: ['阅读理解'],
+        stem: '<p>According to the passage, how many generations does it take to complete the journey? （　　）</p>',
+        options: ['One', 'Two', 'Three or four', 'More than ten'],
+        answer: 'C',
+        optionColumns: 1,
+        analysis: '<p>文中「it takes three or four generations」直接给出答案。</p>',
+      },
+      {
+        id: 2,
+        type: '单选',
+        difficulty: '中等',
+        knowledge: ['阅读理解'],
+        stem: '<p>What do scientists think helps the last generation find the same forests? （　　）</p>',
+        options: [
+          'The memory of its parents',
+          'The position of the sun, a magnetic sense and the mountains',
+          'A map passed on by older butterflies',
+          'The smell of milkweed along the way',
+        ],
+        answer: 'B',
+        optionColumns: 1,
+        analysis: '<p>「combine the position of the sun with a magnetic sense, and … the mountains … act as a landmark」三项并列。</p>',
+      },
+      {
+        id: 3,
+        type: '填空',
+        difficulty: '中等',
+        knowledge: ['阅读理解'],
+        stem: '<p>Besides illegal logging, what else has made the journey harder?（用英文作答，不超过 8 个词）　______</p>',
+        options: [],
+        answer: 'Drought and the decline of milkweed.',
+        fillAnswers: [
+          {
+            value: '<p>Drought and the decline of milkweed.</p>',
+            equivalents: '<p>The drought and less milkweed.</p>',
+          },
+        ],
+        analysis: '<p>定位「Illegal logging and drought have shrunk … and milkweed … has declined sharply」一句，两点并列作答。</p>',
+      },
+    ],
+    library: 'org',
+    categoryId: 14,
+    term: '上学期',
+    examType: '期中考试',
+    source: '手动录入',
+    owner: '周雪',
+    ownerId: 105,
+    useCount: 6,
+    updatedAt: nowStr(-15),
+  }),
+  seedQuestion({
+    id: 9365,
+    questionCategory: '材料组合题',
+    type: '材料分析',
+    subject: '生物',
+    grade: '高一',
+    difficulty: '较难',
+    knowledge: ['细胞结构'],
+    stem:
+      '<p>某研究小组用小球藻（一种单细胞绿藻）探究光照强度对光合作用的影响。他们将等量的小球藻培养液分装到 ' +
+      '5 个密闭透明容器中，分别置于 0、200、400、800、1600 lx 的光照下，其余条件相同且适宜，' +
+      '1 小时后测定各容器内氧气浓度的变化量，结果如下：0 lx 为 −12 μmol，200 lx 为 +8 μmol，' +
+      '400 lx 为 +19 μmol，800 lx 为 +26 μmol，1600 lx 为 +26 μmol。</p>',
+    options: [],
+    answer: '',
+    analysis: '',
+    subQuestions: [
+      {
+        id: 1,
+        type: '单选',
+        difficulty: '容易',
+        knowledge: ['细胞结构'],
+        stem: '<p>光照强度为 0 lx 时，容器内氧气浓度下降的原因是（　　）</p>',
+        options: ['小球藻只进行光合作用', '小球藻只进行细胞呼吸', '小球藻不再进行任何代谢', '容器漏气导致氧气逸出'],
+        answer: 'B',
+        optionColumns: 1,
+        analysis: '<p>无光时叶绿体无法进行光合作用，线粒体仍在进行细胞呼吸，消耗氧气、释放二氧化碳。</p>',
+      },
+      {
+        id: 2,
+        type: '单选',
+        difficulty: '中等',
+        knowledge: ['细胞结构'],
+        stem: '<p>光照强度由 800 lx 增加到 1600 lx 时，容器内氧气的增加量不再上升，最可能的原因是（　　）</p>',
+        options: [
+          '小球藻已经全部死亡',
+          '光照已不再是限制因素，二氧化碳浓度或酶的数量成为限制因素',
+          '温度过低抑制了酶的活性',
+          '容器内的氧气浓度已经达到饱和',
+        ],
+        answer: 'B',
+        optionColumns: 1,
+        analysis:
+          '<p>曲线出现平台说明光照已经饱和，此时限制因素转向二氧化碳浓度、酶的数量等其他条件；' +
+          '题干已说明「其余条件相同且适宜」，故排除温度。</p>',
+      },
+      {
+        id: 3,
+        type: '解答',
+        difficulty: '较难',
+        knowledge: ['细胞结构'],
+        stem: '<p>若要进一步验证「此时二氧化碳浓度是主要的限制因素」，请写出简要的实验思路和预期结果。</p>',
+        options: [],
+        answer:
+          '<p>在 1600 lx 的条件下另设一组，向容器中通入适量二氧化碳（即提高二氧化碳浓度），' +
+          '其他条件与原 1600 lx 组完全相同，同样测定 1 小时内氧气浓度的变化量。' +
+          '若该组的氧气增加量明显高于原 1600 lx 组，则说明二氧化碳浓度是此时的限制因素。</p>',
+        analysis: '<p>实验设计要抓住三点：单一变量（二氧化碳浓度）、其余条件相同且适宜、有可观测的预期结果。</p>',
+      },
+    ],
+    library: 'org',
+    categoryId: 22,
+    term: '上学期',
+    examType: '单元测试',
+    source: '手动录入',
+    owner: '吴刚',
+    ownerId: 104,
+    useCount: 3,
+    updatedAt: nowStr(-6),
+  }),
+  seedQuestion({
+    id: 9366,
+    questionCategory: '材料组合题',
+    type: '材料分析',
+    subject: '生物',
+    grade: '高一',
+    difficulty: '中等',
+    knowledge: ['遗传定律'],
+    stem:
+      '<p>人类白化病由常染色体上的隐性基因 a 控制。某家族的发病情况如下：Ⅰ-1 与Ⅰ-2 表现正常，' +
+      '婚后生育一个患病女儿Ⅱ-1 和一个表现正常的儿子Ⅱ-2；Ⅱ-2 与一位表现正常、但其母亲患白化病的女性Ⅲ-1 结婚，' +
+      '婚后生育了一个孩子。</p>',
+    options: [],
+    answer: '',
+    analysis: '',
+    subQuestions: [
+      {
+        id: 1,
+        type: '单选',
+        difficulty: '容易',
+        knowledge: ['遗传定律'],
+        stem: '<p>Ⅰ-1 和Ⅰ-2 的基因型分别是（　　）</p>',
+        options: ['AA 和 AA', 'AA 和 Aa', 'Aa 和 Aa', 'Aa 和 aa'],
+        answer: 'C',
+        optionColumns: 1,
+        analysis: '<p>双亲表现正常却生出患病女儿（aa），说明双亲各含一个 a，均为 Aa。</p>',
+      },
+      {
+        id: 2,
+        type: '单选',
+        difficulty: '中等',
+        knowledge: ['遗传定律'],
+        stem: '<p>Ⅲ-1 的基因型是（　　）</p>',
+        options: ['AA', 'Aa', 'aa', '无法确定'],
+        answer: 'B',
+        optionColumns: 1,
+        analysis: '<p>Ⅲ-1 的母亲患病（aa），必然传给她一个 a；而Ⅲ-1 本身表现正常，故基因型只能为 Aa。</p>',
+      },
+      {
+        id: 3,
+        type: '解答',
+        difficulty: '较难',
+        knowledge: ['遗传定律'],
+        stem: '<p>若Ⅱ-2 与Ⅲ-1 婚后生育一个孩子，该孩子患白化病的概率是多少？请写出推算过程。</p>',
+        options: [],
+        answer:
+          '<p>Ⅱ-2 表现正常，而其父母均为 Aa，故Ⅱ-2 的基因型为 AA 的概率是 1/3、为 Aa 的概率是 2/3；' +
+          'Ⅲ-1 必为 Aa。后代患病需同时满足「Ⅱ-2 为 Aa」且「Aa×Aa 的后代为 aa」，' +
+          '故概率为 2/3 × 1/4 = 1/6。</p>',
+        analysis: '<p>关键是先定出Ⅱ-2 为携带者的条件概率 2/3，再乘上 Aa×Aa 生出 aa 的 1/4；直接答 1/4 是最常见的失分点。</p>',
+      },
+    ],
+    library: 'org',
+    categoryId: 22,
+    term: '下学期',
+    examType: '期中考试',
+    source: '手动录入',
+    owner: '吴刚',
+    ownerId: 104,
+    useCount: 5,
+    updatedAt: nowStr(-27),
+  }),
   ...EXAM_QUESTIONS,
 ]
 
@@ -3253,7 +3663,7 @@ export function saveQuestion(input: Partial<OrgQuestion> & { stem: string; submi
     // 演示：AI 校验即时完成 → 待终审
     window_setTimeout(() => {
       target.status = 'pending'
-      target.aiChecks = aiChecksFor(target.stem)
+      target.aiChecks = aiChecksFor(target)
       target.aiSuspects = []
     }, 0)
   } else if (!isEdit) {
@@ -3273,7 +3683,7 @@ export function submitQuestions(ids: number[]): number {
     const item = questions.find((row) => row.id === id)
     if (item && (item.status === 'draft' || item.status === 'rejected')) {
       item.status = 'pending'
-      item.aiChecks = aiChecksFor(item.stem)
+      item.aiChecks = aiChecksFor(item)
       item.aiSuspects = []
       count += 1
     }
@@ -3491,7 +3901,7 @@ export function adoptGenerated(item: GeneratedQuestion, subject: string, grade: 
   questions.unshift(q)
   window_setTimeout(() => {
     q.status = 'pending'
-    q.aiChecks = aiChecksFor(q.stem)
+    q.aiChecks = aiChecksFor(q)
     q.aiSuspects = []
   }, 0)
   return q
@@ -3636,7 +4046,7 @@ export function decidePhotoResult(
     questions.unshift(q)
     window_setTimeout(() => {
       q.status = 'pending'
-      q.aiChecks = aiChecksFor(q.stem)
+      q.aiChecks = aiChecksFor(q)
       q.aiSuspects = []
     }, 0)
   }
@@ -5677,6 +6087,8 @@ function seedTeachDoc(input: Partial<TeachDoc> & { id: number; kind: TeachDocKin
     textbook: '人教 A 版 必修一',
     knowledge: [],
     status: 'draft',
+    /* 缺省「个人」：种子数据里显式给了 school / platform 的会覆盖它 */
+    source: 'personal',
     blocks: input.kind === 'lecture' ? defaultLectureBlocks() : input.kind === 'guide' ? defaultGuideBlocks() : [],
     slides: input.kind === 'courseware' ? defaultSlides(input.name) : [],
     plan: input.kind === 'plan' ? defaultPlan() : undefined,
@@ -5758,6 +6170,7 @@ export const teachDocs: TeachDoc[] = [
     knowledge: ['单调性', '函数性质'],
     status: 'published',
     views: 96,
+    source: 'personal',
     owner: '陈明远',
     updatedAt: nowStr(-26),
   }),
@@ -5766,8 +6179,35 @@ export const teachDocs: TeachDoc[] = [
     kind: 'plan',
     name: '集合的运算 · 教学设计（2 课时）',
     knowledge: ['集合'],
+    source: 'personal',
     owner: '李文博',
     updatedAt: nowStr(-96),
+  }),
+  /* 校本稿：教研组统一定版，教师只读、可复制副本 —— 用来验证权限矩阵 */
+  seedTeachDoc({
+    id: ++teachSeq,
+    kind: 'plan',
+    name: '指数函数及其性质 · 校本教学设计',
+    knowledge: ['指数函数', '函数性质'],
+    status: 'published',
+    views: 312,
+    source: 'school',
+    textbook: '人教 A 版 必修一',
+    owner: '数学教研组',
+    updatedAt: nowStr(-14),
+  }),
+  /* 平台稿：平台侧沉淀的范式稿，全员只读 */
+  seedTeachDoc({
+    id: ++teachSeq,
+    kind: 'plan',
+    name: '导数的几何意义 · 平台范式教学设计',
+    knowledge: ['导数', '切线'],
+    status: 'published',
+    views: 1284,
+    source: 'platform',
+    textbook: '人教 A 版 选择性必修二',
+    owner: '平台教研中心',
+    updatedAt: nowStr(-8),
   }),
   seedTeachDoc({
     id: ++teachSeq,
@@ -5806,11 +6246,20 @@ export function saveTeachDoc(input: Partial<TeachDoc> & { kind: TeachDocKind; na
     subject: input.subject ?? target.subject,
     grade: input.grade ?? target.grade,
     textbook: input.textbook ?? target.textbook,
+    chapter: input.chapter ?? target.chapter,
     knowledge: input.knowledge ?? target.knowledge,
     status: input.status ?? target.status,
     blocks: input.blocks ?? target.blocks,
     slides: input.slides ?? target.slides,
+    /* 正文（文档编辑器写入的那一份）。为空串时按「没传」处理 —— 归一后的空文档不该把
+       已有的正文覆盖掉（`normalizeRichHtml` 会把空文档折成空串，见 utils/richtext.ts） */
+    content: (input.content ?? target.content) || target.content,
+    /* 页面设置：整块替换（前端每次提交的都是完整的一份），未传则保留原值 */
+    page: input.page ?? target.page,
     plan: input.plan ?? target.plan,
+    /* 来源不允许被「保存」改写：校本 / 平台稿的归属是学校与平台定的，
+       前端保存正文时把它原样带回即可，改由专门的流转流程负责 */
+    source: target.source ?? input.source ?? 'personal',
     updatedAt: nowStr(),
   })
   if (!isEdit) teachDocs.unshift(target)
@@ -5834,6 +6283,8 @@ export function duplicateTeachDoc(id: number): TeachDoc {
   copy.status = 'draft'
   copy.views = 0
   copy.owner = CURRENT.name
+  /* 复制出来的副本归当前教师个人所有：校本 / 平台稿「复制后即可编辑」正是靠这一步落地 */
+  copy.source = 'personal'
   copy.updatedAt = nowStr()
   copy.blocks = copy.blocks.map((row) => ({ ...row, id: ++lectureBlockSeq }))
   copy.slides = copy.slides.map((row) => ({ ...row, id: ++slideSeq }))
@@ -5851,8 +6302,1095 @@ export function toggleTeachDocPublish(id: number): TeachDoc {
   return item
 }
 
-/* ================= 教辅（FR-JC-001 ~ 004） ================= */
+/* ================= 教案 / 学案 / 讲义模板（备课中心「模板维护」） ================= */
 
+let teachTemplateSeq = 100
+
+/**
+ * 模板的正文骨架。
+ *
+ * 三个类型各给一套「学校真会用的」骨架：新授课 / 复习课 / 习题讲评课，标准导学案 / 复习导学案，
+ * 新课讲授讲义 / 复习课讲义 / 培优讲义。骨架用 h1~h3 表达层级 —— 文档编辑器左侧目录
+ * 就是按这些标题推导的（见 components/doc/DocOutline.vue），所以骨架既是「初始内容」
+ * 也是「目录预置」。
+ */
+const TEACH_TEMPLATE_SEEDS: Array<{
+  kind: TeachTemplateKind
+  name: string
+  desc: string
+  scope: 'org' | 'personal'
+  periods: number
+  content: string
+}> = [
+  {
+    kind: 'plan',
+    name: '新授课教案',
+    desc: '三维目标 → 重难点 → 方法教具 → 教学过程 → 板书 → 反思',
+    scope: 'org',
+    periods: 1,
+    content: [
+      '<h1>（课题名称）</h1>',
+      '<h2>一、教学目标</h2>',
+      '<p><strong>知识与技能：</strong>学生能理解 / 掌握 / 运用……</p>',
+      '<p><strong>过程与方法：</strong>通过……活动，经历……的过程，体会……方法。</p>',
+      '<p><strong>情感态度与价值观：</strong>感受……，形成……的态度。</p>',
+      '<h2>二、教学重点与难点</h2>',
+      '<p><strong>教学重点：</strong>本节课必须落实的核心知识与能力。</p>',
+      '<p><strong>教学难点：</strong>难点在哪 + 怎么突破（只写知识点等于没写难点）。</p>',
+      '<h2>三、教学方法与教具</h2>',
+      '<p>教学方法：讲授法、探究式学习、合作交流</p>',
+      '<p>教具与媒体：多媒体课件</p>',
+      '<h2>四、教学过程</h2>',
+      '<h3>环节一　情境导入（5 分钟）</h3>',
+      '<p><strong>教师活动：</strong>呈现生活情境，提出驱动性问题。</p>',
+      '<p><strong>学生活动：</strong>观察情境，尝试用已有知识解释。</p>',
+      '<p><strong>设计意图：</strong>从熟悉的情境切入，暴露认知冲突。</p>',
+      '<h3>环节二　新知探究（20 分钟）</h3>',
+      '<p><strong>教师活动：</strong>引导学生观察、猜想、论证，板书规范步骤。</p>',
+      '<p><strong>学生活动：</strong>小组合作探究，代表板演与互评。</p>',
+      '<p><strong>设计意图：</strong>让学生经历知识的形成过程。</p>',
+      '<h3>环节三　巩固应用（12 分钟）</h3>',
+      '<p><strong>教师活动：</strong>出示分层例题，巡视点拨，归纳通法。</p>',
+      '<p><strong>学生活动：</strong>独立完成基础题，尝试变式题。</p>',
+      '<p><strong>设计意图：</strong>及时检测达成度，形成可迁移的方法。</p>',
+      '<h3>环节四　课堂小结（5 分钟）</h3>',
+      '<p><strong>教师活动：</strong>与学生共同梳理知识结构与方法要点。</p>',
+      '<p><strong>学生活动：</strong>用自己的话复述本节收获与易错点。</p>',
+      '<h3>环节五　作业布置（3 分钟）</h3>',
+      '<p>分层作业：基础必做 + 提升选做。</p>',
+      '<h2>五、板书设计</h2>',
+      '<p>左侧主板书（知识结构），右侧副板书（例题演算）。</p>',
+      '<h2>六、教学反思</h2>',
+      '<p>（课后填写：目标达成情况、环节时间是否合理、学生的意外生成、下次改进点）</p>',
+    ].join(''),
+  },
+  {
+    kind: 'plan',
+    name: '复习课教案',
+    desc: '考情回顾 → 知识网络 → 方法归纳 → 真题变式 → 易错提醒',
+    scope: 'org',
+    periods: 2,
+    content: [
+      '<h1>（复习课题名称）</h1>',
+      '<h2>一、复习目标</h2>',
+      '<p>梳理本章知识网络，形成解题方法体系，能在综合情境中稳定迁移。</p>',
+      '<h2>二、重点与难点</h2>',
+      '<p><strong>复习重点：</strong>通性通法与适用条件。</p>',
+      '<p><strong>复习难点：</strong>多知识点交汇处的识别与转化。</p>',
+      '<h2>三、复习过程</h2>',
+      '<h3>环节一　考情回顾（5 分钟）</h3>',
+      '<p>展示本章考点分布与常见题型，学生对照自己的掌握情况做标记。</p>',
+      '<h3>环节二　知识网络构建（18 分钟）</h3>',
+      '<p>学生独立绘制知识网络，小组互评补充；教师只补关键缺环。</p>',
+      '<h3>环节三　方法归纳（15 分钟）</h3>',
+      '<p>归纳通法、适用条件与常见变形，形成方法清单。</p>',
+      '<h3>环节四　真题精讲与变式（30 分钟）</h3>',
+      '<p>精讲近年真题，暴露思维过程；随后变式训练，验证方法迁移。</p>',
+      '<h3>环节五　易错提醒（7 分钟）</h3>',
+      '<p>汇总高频错误与规范书写要求，学生整理个人易错清单。</p>',
+      '<h2>四、板书设计</h2>',
+      '<p>（知识网络图 + 方法对照表）</p>',
+      '<h2>五、教学反思</h2>',
+      '<p>（课后填写）</p>',
+    ].join(''),
+  },
+  {
+    kind: 'plan',
+    name: '习题 / 讲评课教案',
+    desc: '错情通报 → 典型讲评 → 变式补偿 → 反思整理',
+    scope: 'org',
+    periods: 1,
+    content: [
+      '<h1>（讲评课：试卷 / 作业名称）</h1>',
+      '<h2>一、讲评目标</h2>',
+      '<p>纠正典型错误概念，建立规范表达，把错误资源化。</p>',
+      '<h2>二、错情分析</h2>',
+      '<p>得分率分布、典型错误分类（概念不清 / 计算失误 / 审题偏差 / 表达不规范）。</p>',
+      '<h2>三、讲评过程</h2>',
+      '<h3>环节一　错情通报（5 分钟）</h3>',
+      '<p>公布得分率与典型错误分布，学生对照自己的答卷定位问题。</p>',
+      '<h3>环节二　典型错题讲评（20 分钟）</h3>',
+      '<p>按错因分类讲评，示范规范书写；学生订正并标注错因。</p>',
+      '<h3>环节三　变式补偿训练（12 分钟）</h3>',
+      '<p>给出同类变式题限时训练，独立完成并互批。</p>',
+      '<h3>环节四　反思整理（8 分钟）</h3>',
+      '<p>引导整理错因与通法，完善错题本。</p>',
+      '<h2>四、教学反思</h2>',
+      '<p>（课后填写）</p>',
+    ].join(''),
+  },
+  {
+    kind: 'guide',
+    name: '标准导学案',
+    desc: '预习导学 → 课堂探究 → 达标检测 → 拓展提升',
+    scope: 'org',
+    periods: 1,
+    content: [
+      '<h1>（课题名称）· 导学案</h1>',
+      '<p><strong>班级：</strong>__________　<strong>姓名：</strong>__________　<strong>小组：</strong>__________</p>',
+      '<h2>一、学习目标</h2>',
+      '<p>1. 能……<br>2. 会……<br>3. 体会……</p>',
+      '<h2>二、预习导学</h2>',
+      '<p>阅读教材第 ____ 页，完成下列预习任务：</p>',
+      '<p>1. ______________________________________________________________________</p>',
+      '<p>2. ______________________________________________________________________</p>',
+      '<h2>三、课堂探究</h2>',
+      '<h3>探究一：观察下列实例，归纳共同特征</h3>',
+      '<p>（此处留白，学生当堂书写）</p>',
+      '<h3>探究二：尝试用本节方法解决下面的问题</h3>',
+      '<p>（此处留白，学生当堂书写）</p>',
+      '<h2>四、达标检测</h2>',
+      '<p>当堂完成，检验本节课掌握情况。（限时 ____ 分钟）</p>',
+      '<h2>五、拓展提升</h2>',
+      '<p>选做：综合运用本节方法解决实际问题。</p>',
+      '<h2>六、课堂小结</h2>',
+      '<p>本节课我掌握的方法：____________________________________</p>',
+      '<p>仍存在的疑问：__________________________________________</p>',
+    ].join(''),
+  },
+  {
+    kind: 'guide',
+    name: '复习导学案',
+    desc: '知识梳理 → 典例回顾 → 易错诊断 → 综合检测',
+    scope: 'org',
+    periods: 1,
+    content: [
+      '<h1>（章节名称）· 复习导学案</h1>',
+      '<h2>一、复习目标</h2>',
+      '<p>自主构建本章知识网络，熟练运用通性通法。</p>',
+      '<h2>二、知识梳理</h2>',
+      '<p>（在下面的空白处画出本章知识网络图）</p>',
+      '<p>&nbsp;</p>',
+      '<h2>三、典例回顾</h2>',
+      '<p>回顾本章典型例题的通法与适用条件，完成下列填空：</p>',
+      '<p>1. ______________________________________________________________</p>',
+      '<h2>四、易错诊断</h2>',
+      '<p>判断下列说法是否正确，错的请改正：</p>',
+      '<p>（1）____________________________________________________________</p>',
+      '<h2>五、综合检测</h2>',
+      '<p>限时 40 分钟独立完成。</p>',
+      '<h2>六、错题与疑问</h2>',
+      '<p>（整理本次复习中仍未解决的问题）</p>',
+    ].join(''),
+  },
+  {
+    kind: 'lecture',
+    name: '新课讲授讲义',
+    desc: '目标 → 讲解 → 例题 → 练习 → 小结 → 作业',
+    scope: 'org',
+    periods: 1,
+    content: [
+      '<h1>（课题名称）</h1>',
+      '<h2>一、学习目标</h2>',
+      '<p>1. 理解本节核心概念；<br>2. 掌握基本方法并能解决基础问题。</p>',
+      '<h2>二、知识点讲解</h2>',
+      '<h3>1. 概念与表示</h3>',
+      '<p>（在此编辑讲解内容，可插入公式与配图）</p>',
+      '<h3>2. 关键性质</h3>',
+      '<p>（性质及其适用条件）</p>',
+      '<h2>三、典型例题</h2>',
+      '<p><strong>例 1</strong>　（题干）</p>',
+      '<p><strong>分析：</strong></p>',
+      '<p><strong>解：</strong></p>',
+      '<h2>四、随堂练习</h2>',
+      '<p>学生当堂完成，教师巡视指导。</p>',
+      '<h2>五、课堂小结</h2>',
+      '<p>回顾知识结构与易错点。</p>',
+      '<h2>六、课后作业</h2>',
+      '<p>分层作业：基础必做 + 提升选做。</p>',
+    ].join(''),
+  },
+  {
+    kind: 'lecture',
+    name: '复习课讲义',
+    desc: '知识网络 → 方法归纳 → 真题精讲 → 变式训练 → 易错提醒',
+    scope: 'org',
+    periods: 1,
+    content: [
+      '<h1>（章节名称）· 复习讲义</h1>',
+      '<h2>一、复习目标</h2>',
+      '<p>梳理本章知识网络，形成解题方法体系。</p>',
+      '<h2>二、知识网络梳理</h2>',
+      '<p>（在此编辑知识结构图或思维导图要点）</p>',
+      '<h2>三、解题方法归纳</h2>',
+      '<p>（在此归纳通法与技巧）</p>',
+      '<h2>四、真题精讲</h2>',
+      '<p>选取近年真题精讲，突出通性通法。</p>',
+      '<h2>五、变式训练</h2>',
+      '<p>一变多练，检验方法迁移能力。</p>',
+      '<h2>六、易错提醒</h2>',
+      '<p>（在此列出本届学生的高频错误）</p>',
+      '<h2>七、课后巩固</h2>',
+      '<p>布置综合练习。</p>',
+    ].join(''),
+  },
+  {
+    kind: 'lecture',
+    name: '培优 / 竞赛讲义',
+    desc: '思维起点 → 高阶方法 → 竞赛真题 → 拓展探究',
+    scope: 'org',
+    periods: 2,
+    content: [
+      '<h1>（专题名称）· 培优讲义</h1>',
+      '<h2>一、培优目标</h2>',
+      '<p>突破中档题瓶颈，接触高阶思维方法。</p>',
+      '<h2>二、高阶方法</h2>',
+      '<p>（在此讲解高阶方法，如不等式放缩、构造法）</p>',
+      '<h2>三、经典难题</h2>',
+      '<p>选取压轴题精讲，暴露思维过程。</p>',
+      '<h2>四、拓展探究</h2>',
+      '<p>给出开放性探究任务。</p>',
+      '<h2>五、思维总结</h2>',
+      '<p>总结可迁移的思维方式。</p>',
+    ].join(''),
+  },
+]
+
+/**
+ * 模板集合。
+ *
+ * `id` 从 101 起（`teachTemplateSeq` 同步到 100），seed 首条设为该类型的默认模板 ——
+ * 「默认」必须恰好一条，因此下面用「同类型第一条」的口径统一打标，不逐条手写，
+ * 手写的结果迟早出现「一个类型两条默认」或「一条都没有」。
+ */
+export const teachTemplates: TeachTemplate[] = TEACH_TEMPLATE_SEEDS.map((seed, index) => {
+  const firstOfKind = TEACH_TEMPLATE_SEEDS.findIndex((row) => row.kind === seed.kind) === index
+  return {
+    id: ++teachTemplateSeq,
+    kind: seed.kind,
+    name: seed.name,
+    desc: seed.desc,
+    scope: seed.scope,
+    builtin: true,
+    enabled: true,
+    isDefault: firstOfKind,
+    periods: seed.periods,
+    content: seed.content,
+    owner: '平台预置',
+    updatedAt: nowStr(-24 * 20),
+  }
+})
+
+/** 按类型（不传则全部）取模板。默认模板排最前，方便「新建」弹窗直接预选第一条 */
+export function listTeachTemplates(kind?: string): TeachTemplate[] {
+  const rows = kind ? teachTemplates.filter((row) => row.kind === kind) : [...teachTemplates]
+  return rows.sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.id - b.id)
+}
+
+export function saveTeachTemplate(
+  input: Partial<TeachTemplate> & { kind: TeachTemplateKind; name: string; content: string },
+): TeachTemplate {
+  const name = input.name.trim()
+  if (name.length < 2 || name.length > 30) throw new Error('模板名称须为 2-30 字')
+  if (toPlainText(input.content).length < 2) throw new Error('模板正文不能为空')
+  const isEdit = input.id != null
+  const item = isEdit ? teachTemplates.find((row) => row.id === input.id) : undefined
+  if (isEdit && !item) throw new Error('模板不存在')
+  /* 内置模板允许改内容与停用，但不允许改名与删除 —— 它们是「一个类型至少有一套骨架」的兜底 */
+  if (item?.builtin && name !== item.name) throw new Error('系统预置模板不支持改名，可另存为我的模板')
+  const target: TeachTemplate = item ?? {
+    id: ++teachTemplateSeq,
+    kind: input.kind,
+    name,
+    desc: '',
+    scope: input.scope ?? 'personal',
+    builtin: false,
+    enabled: true,
+    isDefault: false,
+    content: input.content,
+    owner: CURRENT.name,
+    updatedAt: nowStr(),
+  }
+  Object.assign(target, {
+    kind: input.kind,
+    name,
+    desc: input.desc ?? target.desc,
+    scope: input.scope ?? target.scope,
+    enabled: input.enabled ?? target.enabled,
+    subject: input.subject ?? target.subject,
+    grade: input.grade ?? target.grade,
+    periods: input.periods ?? target.periods,
+    content: input.content,
+    updatedAt: nowStr(),
+  })
+  if (!isEdit) teachTemplates.push(target)
+  return target
+}
+
+/** 设为默认：同一类型下只能有一条，其余全部摘掉 */
+export function setDefaultTeachTemplate(id: number): TeachTemplate {
+  const item = teachTemplates.find((row) => row.id === id)
+  if (!item) throw new Error('模板不存在')
+  teachTemplates.filter((row) => row.kind === item.kind).forEach((row) => (row.isDefault = row.id === id))
+  item.enabled = true
+  item.updatedAt = nowStr()
+  return item
+}
+
+/** 启用 / 停用。停用的模板不出现在「新建 / 引用模板」的候选里，但已用它的文档不受影响 */
+export function toggleTeachTemplate(id: number): TeachTemplate {
+  const item = teachTemplates.find((row) => row.id === id)
+  if (!item) throw new Error('模板不存在')
+  if (item.isDefault && item.enabled) throw new Error('默认模板不能停用，请先把其它模板设为默认')
+  item.enabled = !item.enabled
+  item.updatedAt = nowStr()
+  return item
+}
+
+export function deleteTeachTemplate(id: number): void {
+  const index = teachTemplates.findIndex((row) => row.id === id)
+  if (index < 0) throw new Error('模板不存在')
+  const item = teachTemplates[index]
+  if (item.builtin) throw new Error('系统预置模板不可删除')
+  if (item.owner !== CURRENT.name && item.scope === 'personal') throw new Error('只能删除自己创建的模板')
+  teachTemplates.splice(index, 1)
+}
+
+/* ================= AI 生成：内容语汇 ================= */
+
+/**
+ * 各学科的「课堂语汇」。生成器不调模型，但它不能输出「学生能理解 / 掌握 / 运用……」这种
+ * 占位句子 —— 一份看不出学科、看不出这节课的稿子，老师只能整篇重写，等于没有生成。
+ * 所以给每个学科备一小套句式与典型难点，让它写出来的句子**像这门课的话**。
+ */
+interface DraftLexicon {
+  /** 情境导入的素材方向（按索引轮换） */
+  intro: string[]
+  /** 探究活动的组织方式 */
+  explore: string[]
+  /** 本学科最常见的难点（越具体越有用） */
+  hard: string[]
+  methods: string[]
+  aids: string[]
+  /** 板书怎么排 */
+  board: string
+  /** 当堂检测的形式 */
+  check: string
+}
+
+const DRAFT_LEXICON: Record<string, DraftLexicon> = {
+  数学: {
+    intro: [
+      '给出 y=x² 与 y=1/x 的图像，请学生指出「哪一段在上升、哪一段在下降」，并追问判断依据',
+      '用一次函数与反比例函数的图像对比切入，让学生用一句话说清「上升」到底是什么意思',
+      '从「爬山」的坡度示意图引入：都在往上走，但有的陡有的缓，怎么用算式把这种差别说清',
+    ],
+    explore: [
+      '先让学生在图像上标出上升 / 下降的区间，再尝试用「x₁<x₂ 时 f(x₁) 与 f(x₂) 谁大」把图像语言翻译成符号语言',
+      '组织学生比较三种说法（图像上升 / 函数值变大 / 任意两点满足不等式）是否等价，用反例逼出「必须在区间上」这个条件',
+      '给出反例，讨论「为什么不能笼统地说整个定义域上都单调」，从而明确单调区间必须写成区间',
+    ],
+    hard: [
+      '作差变形后的定号（分式通分、根式有理化）容易漏讨论，学生常常算完不复号',
+      '「单调区间」必须写成区间或明确的集合，「x₁<x₂ 时 f(x₁)<f(x₂)」不能当作区间的写法',
+      '分段函数在分界点两侧的单调性不能直接拼接，需分别判断再合并结论',
+    ],
+    methods: ['启发式讲授', '数形结合', '小组探究', '变式训练'],
+    aids: ['GeoGebra 动态图像', '多媒体课件', '板书演算'],
+    board: '左侧主板书写定义（符号语言）与「取值—作差—变形—定号—结论」五步框架；右侧副板书留给例题的完整作差过程',
+    check: '当堂 2 道检测：一道写单调区间，一道用定义证明，限时 6 分钟',
+  },
+  语文: {
+    intro: [
+      '请学生朗读课文的相关段落，圈出最能体现作者情感倾向的句子，并说出圈它的理由',
+      '用一段同类文本（或同一作者的另一篇）对比导入，先感受差异，再回到课文找证据',
+      '从标题与文末的呼应处切入，问「题目里的这个词，读完全文后你怎么理解」',
+    ],
+    explore: [
+      '组织学生按「找语句 → 标手法 → 说效果」三步走，把感受落成可检查的文本证据',
+      '分组承担不同段落，各自整理「写了什么 / 怎么写 / 为什么这样写」，再拼成整篇的理解',
+      '用删改比较法：把原文某句换成平淡说法，让学生判断哪种更好并说明理由',
+    ],
+    hard: [
+      '学生容易只给感受（「写得很美」）而给不出文本依据，需要在「哪句话、哪个词」上追问到底',
+      '手法与效果容易贴标签，要逼出「这个手法在这一句里具体改变了什么」',
+      '文言字词的语境义与常见义混用，需回到原句做替换检验',
+    ],
+    methods: ['诵读品味', '问题引领', '合作探究', '读写结合'],
+    aids: ['朗读音频', '多媒体课件', '学习任务单'],
+    board: '主板书按「写了什么 → 怎么写 → 为什么这样写」三栏排；副板书留学生的关键词与争议点',
+    check: '当堂完成 1 段 100 字左右的鉴赏微写作，用上本节讲到的一种手法',
+  },
+  英语: {
+    intro: [
+      '播放一段与本单元主题相关的短音频，请学生记下 3 个关键词并预测内容',
+      '用两张对比图片引出本课时的话题，先让学生用已学句型描述，再暴露表达缺口',
+      '从学生上次作业的错例切入，请他们判断哪一句「更像英语母语者的说法」',
+    ],
+    explore: [
+      '按「听 / 读输入 → 提取结构 → 控制性操练 → 半开放输出」推进，每一步都给可对照的样例',
+      '用信息差任务组织 pair work：双方各持一半信息，必须用目标句型提问才能补全',
+      '先做机械替换，再做情境改写，最后让学生自编一句用于真实场景',
+    ],
+    hard: [
+      '目标句型在第三人称单数与时态上的变形容易掉，需要在操练中反复回扣',
+      '学生习惯逐词翻译，导致语序与搭配受母语干扰',
+      '输出环节容易退回已学的简单句，需给「必须用上本课结构」的硬约束',
+    ],
+    methods: ['任务型教学', '情境教学', 'pair work', '听读结合'],
+    aids: ['音频 / 视频素材', '多媒体课件', '图片与词卡'],
+    board: '主板书列目标句型与替换词块；副板书留易错变形（第三人称、时态）的对照',
+    check: '当堂完成一个 4 句以上的 mini-task 输出，同桌按「结构是否用上」互评',
+  },
+  物理: {
+    intro: [
+      '演示一个与直觉相反的小实验（如抽出纸片而硬币落入杯中），先猜结果再解释',
+      '从生活现象（刹车距离、电梯里的失重感）引入，请学生说出「感觉到什么」并尝试归因',
+      '给出两组实验数据，让学生先找规律，再引出今天的物理量',
+    ],
+    explore: [
+      '按「现象 → 猜想 → 设计实验 → 采集数据 → 作图 / 求比值 → 得结论」推进，学生动手、教师只把控变量',
+      '强调控制变量：先讨论「要改什么、必须保持不变的是什么」，再动手',
+      '用图像处理数据，让学生说出图线的斜率 / 截距在物理上代表什么',
+    ],
+    hard: [
+      '物理量与单位的对应关系容易混（尤其是比值定义的量），学生常把公式当结论背',
+      '图像斜率与截距的物理意义说不清，只会代公式算数',
+      '实验误差分析停留在「仪器不准」，说不出具体的系统误差 / 偶然误差',
+    ],
+    methods: ['实验探究', '控制变量法', '问题驱动', '讲练结合'],
+    aids: ['演示实验器材', '数据采集 / 传感器', '多媒体课件'],
+    board: '主板书写物理量的定义式、单位与适用条件；副板书留实验数据表与图线示意',
+    check: '当堂 2 道：一道概念判断，一道用本节规律做定量计算（含单位）',
+  },
+  化学: {
+    intro: [
+      '做一组对比实验（两支试管分别加不同试剂），请学生描述现象并尝试解释',
+      '从生活中的化学（铁生锈、面团发酵）引入，追问「变化的本质是什么」',
+      '展示微观示意图，请学生把宏观现象与微粒变化对应起来',
+    ],
+    explore: [
+      '按「实验现象 → 微观解释 → 符号表征（方程式）」三重表征推进，每层都要求写下来',
+      '让学生先预测现象，再做实验验证；预测与结果不一致的地方正是讲解重点',
+      '组织学生板演方程式，集体订正配平与反应条件标注',
+    ],
+    hard: [
+      '离子方程式的拆分与守恒（电荷、原子）容易漏项',
+      '现象描述不规范，说不清「什么条件下才产生沉淀 / 气体」',
+      '微观解释停留在「因为反应了」，说不出微粒如何重新组合',
+    ],
+    methods: ['实验探究', '三重表征', '对比归纳', '讲练结合'],
+    aids: ['分组实验器材', '分子模型 / 微观动画', '多媒体课件'],
+    board: '主板书写现象、化学方程式与离子方程式三行对照；副板书留配平与条件标注',
+    check: '当堂 1 道方程式书写 + 1 道现象判断，同桌互批',
+  },
+  生物: {
+    intro: [
+      '展示一组生活现象或实验数据（如光照对叶片颜色的影响），请学生提出可检验的问题',
+      '用模型 / 示意图引入结构，先认结构再谈功能，落实「结构与功能相适应」',
+      '从农业生产或健康情境切入，把本节概念放进真实问题里',
+    ],
+    explore: [
+      '按「观察 → 提出问题 → 设计对照实验 → 分析结果 → 得出结论」推进，强调单一变量与重复原则',
+      '让学生用图解或概念图表达过程，再互相补全因果链',
+      '把本节概念放回系统（细胞 / 个体 / 生态系统）中定位，说明它与上下游的关系',
+    ],
+    hard: [
+      '对照实验的变量与对照组设置容易含糊，学生常把「有对比」当成「有对照」',
+      '过程类知识只会背步骤，说不出每一步的因果',
+      '概念图里把并列关系画成包含关系',
+    ],
+    methods: ['探究式学习', '模型建构', '概念图', '合作学习'],
+    aids: ['显微 / 解剖材料', '模型与挂图', '多媒体动画'],
+    board: '主板书用概念图呈现本节在系统中的位置；副板书留实验设计与变量对照表',
+    check: '当堂完成 1 张本节概念图（不少于 5 个节点）并口述一条因果链',
+  },
+  历史: {
+    intro: [
+      '出示两则立场不同的史料，请学生先判断「谁在说、说给谁听」，再谈可信度',
+      '从一张地图或一幅时局漫画切入，请学生描述看到的与推测的，区分史实与推论',
+      '用「同一事件的两个时间点」制造疑问，引出本课的因果链',
+    ],
+    explore: [
+      '按「史料研读 → 提取信息 → 互证 → 形成解释」推进，每一步都要求回到材料出处',
+      '组织学生用时间轴梳理事件，再在图轴上标出背景、导火索、结果与影响',
+      '设置角色代入：站在不同立场，同一政策会得到什么评价',
+    ],
+    hard: [
+      '把「影响」写成口号式评价，缺少「对谁、在哪个方面、多久之内」的具体化',
+      '史实与史观混淆：结论先行、材料只作装饰',
+      '时间线混乱，把不同阶段的事件并置在同一因果链上',
+    ],
+    methods: ['史料教学', '问题探究', '时空定位', '合作讨论'],
+    aids: ['史料文本', '历史地图与时间轴', '多媒体课件'],
+    board: '主板书一条时间轴加「背景 / 过程 / 影响」三栏；副板书留史料出处与关键引文',
+    check: '当堂完成 1 道材料题（提取信息 + 一句评价），要求标注所用材料',
+  },
+  地理: {
+    intro: [
+      '出示一张区域地图或卫星影像，请学生描述分布特征并提出「为什么在这里」',
+      '用生活现象（昼夜长短、城市热岛）引入，先让学生给出直觉解释，再用原理修正',
+      '给出一组气温 / 降水数据，请学生判断气候类型并说明依据',
+    ],
+    explore: [
+      '按「读图 → 描述分布 → 解释成因 → 联系人类活动」推进，每一步都落到图上',
+      '让学生用图层叠加的方式分析区位：自然要素一层、社会经济要素一层，再综合',
+      '设置区域对比任务，先找差异，再找差异的原因',
+    ],
+    hard: [
+      '只会背结论而不会用图表数据支撑',
+      '成因分析漏掉尺度：全球性规律不能直接解释局地现象',
+      '区位分析罗列要素却不分主次，说不出主导因素',
+    ],
+    methods: ['地图教学', '案例探究', '对比分析', '小组合作'],
+    aids: ['地图 / 遥感影像', '数据图表', '多媒体课件'],
+    board: '主板书留一幅手绘区域示意图与要素分析框架；副板书列数据与结论的对应',
+    check: '当堂 1 道读图题：描述分布 + 说明一条成因',
+  },
+  政治: {
+    intro: [
+      '用一则真实新闻或校园情境引入，请学生先判断「该怎么做」，再追问依据',
+      '呈现一个两难情境，分组给出方案并互相质询',
+      '从学生熟悉的规则（校规、交通法规）切入，引出本课的法律 / 制度概念',
+    ],
+    explore: [
+      '按「情境 → 冲突 → 辨析 → 提炼观点 → 回到情境解决」推进，观点必须有依据',
+      '组织小型辩论：正反方各准备两条论据，辩论后共同归纳「分歧真正的焦点在哪」',
+      '用案例对照法：同一法律条文在两个不同案例中如何适用',
+    ],
+    hard: [
+      '观点表达停留在口号，缺少「依据 + 具体做法」两层',
+      '把「道德倡导」与「法律要求」混为一谈',
+      '案例分析只给结论，不说明适用的条件与边界',
+    ],
+    methods: ['情境教学', '议题式教学', '辩论辨析', '案例研讨'],
+    aids: ['新闻素材 / 案例', '法律条文摘录', '多媒体课件'],
+    board: '主板书按「情境—问题—依据—做法」四栏排；副板书留学生的观点与分歧点',
+    check: '当堂完成 1 个情境判断并写出依据（一句话理据 + 一条具体做法）',
+  },
+  通用: {
+    intro: [
+      '从一个与学生经验相关的具体情境切入，先让学生说出自己的判断，再暴露判断依据的差异',
+      '给出两组可对比的材料 / 数据，请学生找出共同点与差异',
+      '用上一节课留下的疑问导入，把新旧知识接上',
+    ],
+    explore: [
+      '按「观察 → 归纳 → 形成结论 → 用于新情境」推进，每个环节都要求写下依据',
+      '组织小组合作：分工完成任务单，组间互评并补充',
+      '设置一个反例，让学生修正自己刚得出的结论',
+    ],
+    hard: ['结论记住了但说不出依据，换个情境就不会用', '把相邻概念混用，边界不清', '表达不规范，步骤跳跃导致无法自查'],
+    methods: ['启发式讲授', '合作探究', '讲练结合'],
+    aids: ['多媒体课件', '学习任务单'],
+    board: '主板书留本节的结构图与核心结论；副板书留例题步骤与易错点',
+    check: '当堂 2 道检测题，覆盖本节的两个核心结论',
+  },
+}
+
+/** 学科的方法论落点：写在「过程与方法」目标里的那半句 */
+const DRAFT_THINKING: Record<string, string> = {
+  数学: '数形结合与分类讨论',
+  语文: '从文本证据出发的细读',
+  英语: '在真实语境中运用语言',
+  物理: '控制变量与模型建构',
+  化学: '宏观—微观—符号三重表征',
+  生物: '结构与功能相适应',
+  历史: '史料实证与时空定位',
+  地理: '要素综合与区域比较',
+  政治: '观点必须有依据',
+}
+
+interface DraftSection {
+  title: string
+  subs: string[]
+  /** 骨架里保留下来的表单行（学案的「班级 / 姓名」这类，不是占位文字） */
+  lines: string[]
+}
+
+interface DraftCtx {
+  subject: string
+  grade: string
+  textbook: string
+  chapter: string
+  title: string
+  /** 知识点（为空时退化为「章节名」一条） */
+  kps: string[]
+  periods: number
+  requirement: string
+  lex: DraftLexicon
+}
+
+const escapeDraftHtml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+/** 取第 index 条知识点（循环取，环节比知识点多时不会越界） */
+const kpAt = (ctx: DraftCtx, index: number) => escapeDraftHtml(ctx.kps[index % ctx.kps.length] ?? ctx.title)
+
+/**
+ * 把模板正文拆成「h1 + 若干 h2 段（每段带 h3 子标题）」。
+ *
+ * 只关心**标题**：模板里的正文段落是占位文字（「学生能理解 / 掌握 / 运用……」），
+ * 照抄进来等于没生成。唯一例外是学案里的填空表单行（含下划线、且不含括号说明），
+ * 它们是真要印在纸上的东西。
+ */
+function splitDraftSkeleton(content: string): { h1: string; sections: DraftSection[] } {
+  let h1 = ''
+  const sections: DraftSection[] = []
+  const re = /<(h[1-6]|p)\b[^>]*>([\s\S]*?)<\/\1>/gi
+  let match: RegExpExecArray | null
+  while ((match = re.exec(content))) {
+    const tag = match[1].toLowerCase()
+    const text = toPlainText(match[2]).trim()
+    if (!text) continue
+    if (tag === 'h1') {
+      if (!h1) h1 = text
+      continue
+    }
+    if (tag === 'h2') {
+      sections.push({ title: text, subs: [], lines: [] })
+      continue
+    }
+    if (!sections.length) continue
+    const current = sections[sections.length - 1]
+    if (tag === 'h3') current.subs.push(text)
+    else if (/[＿_]/.test(text) && !/[（(]/.test(text)) current.lines.push(text)
+  }
+  return { h1, sections }
+}
+
+/** 三段式：教师活动 / 学生活动 / 设计意图 */
+const draftTri = (teacher: string, student: string, intent: string) =>
+  `<p><strong>教师活动：</strong>${teacher}</p><p><strong>学生活动：</strong>${student}</p><p><strong>设计意图：</strong>${intent}</p>`
+
+/* ---- 各个环节 / 章节的内容 ---- */
+
+function renderObjectives(ctx: DraftCtx): string {
+  const core = kpAt(ctx, 0)
+  const second = ctx.kps.length > 1 ? kpAt(ctx, 1) : core
+  const thinking = DRAFT_THINKING[ctx.subject] ?? '从材料到结论的推理'
+  return [
+    `<p><strong>知识与技能：</strong>能说出${core}的定义与成立条件，能独立完成课本本节「练习」层次的 2 道基础题；对${second}能说清它与前一节的关系。</p>`,
+    `<p><strong>过程与方法：</strong>通过「${ctx.lex.intro[0]}」这一情境，经历从具体到抽象、再用结论解释新问题的过程，体会${thinking}。</p>`,
+    `<p><strong>情感态度与价值观：</strong>在把直观感受改写成规范表述的过程中，愿意接受同伴的质疑并修正自己的说法；对${ctx.subject}中「说清依据」这件事产生认同。</p>`,
+  ].join('')
+}
+
+function renderKeyPoints(ctx: DraftCtx): string {
+  const core = kpAt(ctx, 0)
+  return [
+    `<p><strong>教学重点：</strong>${core}的定义（或判定条件）与它的直接应用 —— 本节课必须落实到「能独立复述、能用于判断」。</p>`,
+    `<p><strong>教学难点：</strong>${ctx.lex.hard[0]}。</p>`,
+    `<p><strong>突破办法：</strong>先让学生用自己的话说一遍，再逐条对照规范表述找差距；给出 1 个反例，让「缺了条件会怎样」变得可见。</p>`,
+  ].join('')
+}
+
+function renderMethods(ctx: DraftCtx): string {
+  return [
+    `<p><strong>教学方法：</strong>${ctx.lex.methods.join('、')}</p>`,
+    `<p><strong>教具与媒体：</strong>${ctx.lex.aids.join('、')}</p>`,
+    `<p><strong>学法指导：</strong>先独立尝试并写下依据，再小组互评，最后对照课本表述自查 —— 三步都留痕，便于课后回看。</p>`,
+  ].join('')
+}
+
+function renderErrorAnalysis(ctx: DraftCtx): string {
+  return [
+    `<p><strong>数据：</strong>本次共 ${Math.max(12, ctx.kps.length * 8)} 人次提交，整体得分率约 68%；${kpAt(ctx, 0)}相关题目失分最集中。</p>`,
+    `<p><strong>错因分类：</strong>①概念不清（占 ${ctx.lex.hard[0].slice(0, 12)}…）—— 需要重讲定义与条件；②步骤跳跃、书写不规范 —— 需要示范完整过程；③审题偏差 —— 需要训练圈画关键条件。</p>`,
+    `<p><strong>讲评取舍：</strong>只精讲 2 道（一道概念型、一道综合型），其余同错因的题目归并处理，避免逐题念答案。</p>`,
+  ].join('')
+}
+
+function renderBoard(ctx: DraftCtx): string {
+  const list = ctx.kps.slice(0, 3).map((row) => escapeDraftHtml(row)).join(' / ')
+  return [
+    `<p>${ctx.lex.board}。</p>`,
+    `<p><strong>结构：</strong>${list}${ctx.kps.length > 3 ? ' 等' : ''} —— 主板书只留「定义 + 框架」，演算过程随讲随擦，避免板书拥挤。</p>`,
+    `<p><strong>要求：</strong>课题居中；标题用彩色粉笔区分层级；例题的每一步都对齐写，学生抄板书时不至于漏行。</p>`,
+  ].join('')
+}
+
+function renderReflection(ctx: DraftCtx): string {
+  return [
+    `<p><strong>目标达成：</strong>（课后填写）${kpAt(ctx, 0)}的当堂检测正确率是否达到 80%？未达成的原因是什么？</p>`,
+    `<p><strong>环节时间：</strong>（课后填写）探究环节是否超时？若超时，是被哪个追问拖住的？</p>`,
+    `<p><strong>改进点：</strong>（课后填写）写下 1 条下次可直接照做的改动，例如「导入换成${ctx.lex.intro[1]}」。</p>`,
+  ].join('')
+}
+
+function renderNetwork(ctx: DraftCtx): string {
+  return [
+    `<p><strong>梳理方式：</strong>请学生用 5 分钟独立画出本节与相邻章节的关系图，节点不少于 ${Math.max(4, ctx.kps.length + 1)} 个。</p>`,
+    `<p><strong>关键连接：</strong>${ctx.kps.map((row) => escapeDraftHtml(row)).join(' → ')}，并标出每一条连接的依据（定义 / 定理 / 实验事实）。</p>`,
+    `<p><strong>教师只补缺环：</strong>巡视时找出「连不起来」的位置，集中讲 1～2 处，不重复学生已说清的内容。</p>`,
+  ].join('')
+}
+
+function renderExamples(ctx: DraftCtx): string {
+  const core = kpAt(ctx, 0)
+  return [
+    `<p><strong>例 1（基础）：</strong>直接考查${core}的识别与套用 —— 先让学生独立做 3 分钟，再请一名学生完整讲思路。</p>`,
+    `<p><strong>例 2（变式）：</strong>把${core}放进新情境，条件是隐含的。讲评重点放在「从哪里看出该用这一条」，而不是计算。</p>`,
+    `<p><strong>规范要求：</strong>每一步都要写清依据；${ctx.lex.hard[0]}。</p>`,
+  ].join('')
+}
+
+function renderPractice(ctx: DraftCtx): string {
+  return [
+    `<p><strong>题组设计：</strong>基础 2 道（对应${kpAt(ctx, 0)}、${kpAt(ctx, 1)}）+ 变式 1 道（换情境不换方法），限时 8 分钟。</p>`,
+    `<p><strong>巡视要点：</strong>盯住这一步 —— ${ctx.lex.hard[0]}。发现共性问题先停笔集体订正，不等到最后。</p>`,
+    `<p><strong>反馈方式：</strong>${ctx.lex.check}；同桌互批后，只统计「错在哪一步」，不公布分数。</p>`,
+  ].join('')
+}
+
+function renderSummary(ctx: DraftCtx): string {
+  return [
+    `<p><strong>结构化回顾：</strong>用板书带学生回看 —— 今天学了什么（${ctx.kps.map((row) => escapeDraftHtml(row)).join('、')}）、凭什么这么学、下次遇到同类问题从哪儿下手。</p>`,
+    `<p><strong>易错提醒：</strong>${ctx.lex.hard.slice(0, 2).join('；')}。</p>`,
+    `<p><strong>出口检测：</strong>合上课本，用自己的话复述一遍，并写下仍然不确定的 1 个问题交给老师。</p>`,
+  ].join('')
+}
+
+function renderHomework(ctx: DraftCtx): string {
+  return [
+    `<p><strong>基础必做：</strong>课本本节练习第 1、2 题（${kpAt(ctx, 0)}的直接应用），要求写清每一步依据。</p>`,
+    `<p><strong>提升选做：</strong>完成 1 道变式题并写出完整过程；学有余力的同学整理一张本节方法清单。</p>`,
+    `<p><strong>要求：</strong>明天课前 3 分钟对答案，只讲错因不讲答案。</p>`,
+  ].join('')
+}
+
+function renderPreview(ctx: DraftCtx): string {
+  return [
+    `<p><strong>预习任务：</strong>通读教材本节，用波浪线画出${kpAt(ctx, 0)}的定义，用问号标出读不懂的地方（至少 1 处）。</p>`,
+    `<p><strong>尝试完成：</strong>课本「想一想」第 1 题，写出你的猜想，不必求对 —— 课堂上要用它做对照。</p>`,
+  ].join('')
+}
+
+/** 过程类章节（有 h3 环节） */
+function renderProcess(section: DraftSection, ctx: DraftCtx): string {
+  if (!section.subs.length) {
+    return [
+      `<p><strong>推进顺序：</strong>导入 → 探究 → 巩固 → 小结 → 作业，共 ${ctx.periods} 课时。</p>`,
+      `<p><strong>逐条展开：</strong>${ctx.kps.map((row) => escapeDraftHtml(row)).join('；')} —— 每条按「是什么 → 为什么 → 怎么用 → 什么时候会错」四问讲透。</p>`,
+    ].join('')
+  }
+  return section.subs.map((title, index) => renderStep(title, index, ctx)).join('')
+}
+
+function renderStep(title: string, index: number, ctx: DraftCtx): string {
+  const clock = /[（(]\s*(\d+)\s*分钟\s*[）)]/.exec(title)
+  const name = title
+    .replace(/[（(]\s*\d+\s*分钟\s*[）)]/g, '')
+    .replace(/^环节[一二三四五六七八九十]+[\s　]*/, '')
+    .trim()
+  return `<h3>${escapeDraftHtml(title)}</h3>${stepBody(name, index, ctx)}`
+}
+
+function stepBody(name: string, index: number, ctx: DraftCtx): string {
+  const lex = ctx.lex
+  const core = kpAt(ctx, index)
+
+  /* 顺序有讲究：越具体的环节名越要排在前面（「知识网络构建」不能被「构建」抢走） */
+  if (/网络|梳理|结构图/.test(name)) {
+    return draftTri(
+      `出示本章目录，请学生把${core}放进整体结构中；只在学生连不起来的地方补一句。`,
+      '独立画出关系图（不少于 4 个节点），小组互评后补全缺环。',
+      '把零散的结论连成网，之后提取时才有线索。',
+    )
+  }
+  if (/考情|回顾|通报|错情/.test(name)) {
+    return draftTri(
+      `展示本节在近期试卷中的出现形式与分值分布，指出${core}是高频点。`,
+      '对照自己的作业 / 测验，在知识清单上标出「会 / 半会 / 不会」。',
+      '先定复习的靶心，避免平均用力。',
+    )
+  }
+  if (/讲评|订正/.test(name)) {
+    return draftTri(
+      `按错因归类讲评 2 道典型题，先让学生说思路，再示范规范书写；重点讲${lex.hard[0]}。`,
+      '订正并在旁边标注错因（概念 / 步骤 / 审题），同桌互查是否标注到位。',
+      '讲评的价值在「错因可复用」，不是把答案念一遍。',
+    )
+  }
+  if (/导入|情境|激趣/.test(name)) {
+    return draftTri(
+      `${lex.intro[index % lex.intro.length]}；学生答完后追问「你是怎么判断的」，把他们的口语表述原样板书，留作后面定义化的素材。`,
+      '观察、举手回答；把自己的判断写成一句话，同桌互查是否说清了「在什么条件下」。',
+      '用学生已有的直觉制造认知冲突 ——「看着像」与「说得清」之间差的正是今天要学的东西。',
+    )
+  }
+  if (/方法|归纳|通法/.test(name)) {
+    return draftTri(
+      `带着学生把刚才的做法归纳成可迁移的步骤，板书成「适用条件 + 操作步骤 + 检验方式」三行。`,
+      '每人整理一份方法清单，用一道新题检验清单是否够用。',
+      '从「会做一道」走到「会做一类」。',
+    )
+  }
+  if (/真题|变式|拓展/.test(name)) {
+    return draftTri(
+      '出示真题 / 变式题，限时完成；讲评时暴露思维过程（怎么想到的），而不只是怎么写。',
+      '限时独立完成，对照答案标注「卡在哪一步」。',
+      '在真实难度下检验方法能否迁移。',
+    )
+  }
+  if (/作业|布置/.test(name)) {
+    return `<p><strong>布置：</strong>基础必做课本本节练习第 1、2 题；提升选做 1 道变式题并写出完整过程。</p><p><strong>说明：</strong>作业要求「先写依据、再写结论」，明天课前 3 分钟对答案、只讲错因。</p>`
+  }
+  if (/小结|总结|梳理收获/.test(name)) {
+    return draftTri(
+      `用板书带学生回看：今天学了什么（${ctx.kps.map((row) => escapeDraftHtml(row)).join('、')}）、凭什么这么学、下次从哪儿下手。`,
+      '合上课本复述定义与步骤；写下仍然不确定的 1 个问题。',
+      '把零散结论结构化，并留下「还不懂」的钩子供下节课衔接。',
+    )
+  }
+  if (/易错|反思|整理/.test(name)) {
+    return draftTri(
+      `汇总高频错误：${lex.hard.slice(0, 2).join('；')}。每条都配一个「正确写法」对照。`,
+      '整理个人易错清单，把错题按错因归类（不抄题，只写错因与正确做法）。',
+      '把错误资源化，避免同一处反复失分。',
+    )
+  }
+  if (/巩固|应用|练习|训练|检测|补偿/.test(name)) {
+    return draftTri(
+      `出示分层题组（基础 2 道、变式 1 道），巡视时盯住这一步：${lex.hard[0]}。共性问题当场停笔订正。`,
+      '先独立完成基础题（限时 4 分钟），再尝试变式题，对照答案标注错因。',
+      `${lex.check} —— 用当堂反馈确认「会做」，而不是「听懂」。`,
+    )
+  }
+  if (/探究|新知|讲解|构建|学习/.test(name)) {
+    return draftTri(
+      `围绕${ctx.kps.map((row) => escapeDraftHtml(row)).join('、')}逐条展开：先${lex.explore[index % lex.explore.length]}；每讲完一条，用「条件是什么、结论是什么、反例是什么」三问收口。`,
+      '小组合作完成探究单：每组负责一条知识点，派代表板演，其余组补充或反驳。',
+      '让知识由学生自己说出口，教师只做规范化与纠偏 —— 直接给结论会跳过最关键的那一步。',
+    )
+  }
+  return draftTri(
+    `围绕${core}组织本环节：先交代任务与要求，再巡视点拨，最后集中订正共性错误。`,
+    '按任务单完成本环节的 1～2 项任务，写下依据，同伴互查。',
+    '把环节目标落到可检查的产出上，避免「讲过了」等于「学会了」。',
+  )
+}
+
+/** h2 一级的内容（按标题语义匹配） */
+function renderDraftSection(section: DraftSection, ctx: DraftCtx): string {
+  const head = section.title ? `<h2>${escapeDraftHtml(section.title)}</h2>` : ''
+  const kept = section.lines.map((line) => `<p>${escapeDraftHtml(line)}</p>`).join('')
+  const title = section.title
+
+  let body = ''
+  if (/目标/.test(title)) body = renderObjectives(ctx)
+  else if (/重点|难点/.test(title)) body = renderKeyPoints(ctx)
+  else if (/方法|教具/.test(title)) body = renderMethods(ctx)
+  else if (/错情|学情|错因|数据/.test(title)) body = renderErrorAnalysis(ctx)
+  else if (/板书/.test(title)) body = renderBoard(ctx)
+  else if (/反思/.test(title)) body = renderReflection(ctx)
+  else if (/网络|梳理|知识结构/.test(title)) body = renderNetwork(ctx)
+  else if (/例题|真题|难题/.test(title)) body = renderExamples(ctx)
+  else if (/作业|巩固/.test(title)) body = renderHomework(ctx)
+  else if (/练习|检测|变式|拓展/.test(title)) body = renderPractice(ctx)
+  else if (/小结|总结|易错|提醒/.test(title)) body = renderSummary(ctx)
+  else if (/预习/.test(title)) body = renderPreview(ctx)
+  else if (/过程|探究|环节|讲评/.test(title)) body = renderProcess(section, ctx)
+  else if (/讲解|知识|概念/.test(title)) body = renderKnowledgeExplain(section, ctx)
+  else if (section.subs.length) body = renderKnowledgeExplain(section, ctx)
+  else body = `<p>${kpAt(ctx, 0)}：围绕本节主题展开，先明确「要解决什么问题」，再给出方法与依据。${ctx.lex.hard[0]}。</p>`
+
+  /* 该章节带着 h3 子标题、而上面生成的内容没覆盖到它们时，逐条补上（自定义模板很常见：
+     「二、知识点讲解」下面挂三四个 h3，标题语义不在上面任何一条分支里） */
+  if (section.subs.length && !body.includes('<h3>')) body += renderKnowledgeExplain(section, ctx)
+
+  return head + kept + body
+}
+
+/** 知识点逐条讲解：h3 是「1. 概念与表示」这种小标题时用 */
+function renderKnowledgeExplain(section: DraftSection, ctx: DraftCtx): string {
+  if (!section.subs.length) return ''
+  return section.subs
+    .map((sub, index) => {
+      const core = kpAt(ctx, index)
+      const lex = ctx.lex
+      return `<h3>${escapeDraftHtml(sub)}</h3><p>这一条要讲清三件事：${core}是什么（定义或判定条件）、它为什么成立（依据）、它在什么情况下失效（反例）。</p><p><strong>讲解步骤：</strong>先${lex.explore[index % lex.explore.length]}；再回到导入的情境，用新学的说法重述一遍；最后给出一个反例，请学生指出缺了哪个条件。</p><p><strong>易错提醒：</strong>${lex.hard[index % lex.hard.length]}。</p>`
+    })
+    .join('')
+}
+
+const DEFAULT_DRAFT_SKELETON = [
+  '<h1>（课题名称）</h1>',
+  '<h2>一、教学目标</h2>',
+  '<h2>二、教学重点与难点</h2>',
+  '<h2>三、教学方法与教具</h2>',
+  '<h2>四、教学过程</h2>',
+  '<h3>环节一　情境导入（5 分钟）</h3>',
+  '<h3>环节二　新知探究（20 分钟）</h3>',
+  '<h3>环节三　巩固应用（12 分钟）</h3>',
+  '<h3>环节四　课堂小结（5 分钟）</h3>',
+  '<h3>环节五　作业布置（3 分钟）</h3>',
+  '<h2>五、板书设计</h2>',
+  '<h2>六、教学反思</h2>',
+].join('')
+
+/**
+ * AI 生成教案 / 学案 / 讲义草稿。
+ *
+ * 演示口径：不真调模型，而是**按模板骨架 + 年级学科 + 章节知识点**逐节写出具体内容。
+ *
+ * 上一版只做占位符替换（「学生能理解 / 掌握 / 运用……」），出来的稿子只有骨架，
+ * 老师拿到手还得整篇重写 —— 那不是生成，是把空白表格换个字体。现在改成：
+ *
+ * 1. 从模板里只取**标题结构**（h1 / h2 / h3），占位段落一律丢弃；
+ * 2. 每个 h2 / h3 按**标题语义**填内容（目标、重难点、过程各环节、板书、反思……各有专门的写法）；
+ * 3. 教学过程按知识点逐条展开「教师活动 / 学生活动 / 设计意图」，句子里带上学科的教学语汇
+ *    （见 DRAFT_LEXICON）与本节的具体难点。
+ *
+ * 这样「生成的稿子能直接用」是可验证的：每一段都能读出这节课、这门课。
+ */
+export function generateTeachDocDraft(input: {
+  kind: TeachTemplateKind
+  subject?: string
+  grade?: string
+  textbook?: string
+  chapter?: string
+  knowledge?: string[]
+  periods?: number
+  topic?: string
+  templateId?: number
+  requirement?: string
+}): { content: string; promptName: string; tokens: number; costMs: number } {
+  const start = Date.now()
+  const kindText = input.kind === 'plan' ? '教案' : input.kind === 'guide' ? '学案' : '讲义'
+  const subject = (input.subject ?? '').trim() || '数学'
+  const grade = (input.grade ?? '').trim() || '高一'
+  const textbook = (input.textbook ?? '').trim()
+  const chapter = (input.chapter ?? '').trim()
+  const knowledge = (input.knowledge ?? []).map((row) => row.trim()).filter(Boolean)
+  const periods = Math.max(1, Math.min(6, Number(input.periods) || 1))
+  const requirement = (input.requirement ?? '').trim()
+  const title = (input.topic ?? '').trim() || chapter || `（${subject}）新授课`
+  /* 没有填知识点就按「章节整体」写：一条兜底，避免生成器在空数组上转不动 */
+  const kps = knowledge.length ? knowledge : [title]
+
+  const template =
+    teachTemplates.find((row) => row.id === input.templateId) ??
+    teachTemplates.find((row) => row.kind === input.kind && row.isDefault) ??
+    teachTemplates.find((row) => row.kind === input.kind)
+
+  const { h1, sections } = splitDraftSkeleton(template?.content ?? DEFAULT_DRAFT_SKELETON)
+  const ctx: DraftCtx = {
+    subject,
+    grade,
+    textbook,
+    chapter,
+    title,
+    kps,
+    periods,
+    requirement,
+    lex: DRAFT_LEXICON[subject] ?? DRAFT_LEXICON['通用'],
+  }
+
+  /* 模板的 h1 常带后缀（「（课题名称）· 导学案」）—— 只换括号里的占位，后缀留着 */
+  const heading = escapeDraftHtml(h1 ? h1.replace(/（[^）]*）/g, () => title) : title)
+  const meta = [grade, subject, textbook, chapter && chapter !== title ? chapter : '', `${periods} 课时`, requirement ? `要求：${requirement}` : '']
+    .filter(Boolean)
+    .join(' · ')
+  const body = sections.length
+    ? sections.map((section) => renderDraftSection(section, ctx)).join('')
+    : renderDraftSection({ title: '', subs: [], lines: [] }, ctx)
+
+  const content = `<h1>${heading}</h1><p><em>${escapeDraftHtml(meta)}</em></p>${body}`
+
+  return {
+    content,
+    promptName: `${kindText}生成助手${template ? ` · ${template.name}` : ''}`,
+    /* token 与耗时只是给「AI 用量」一个像样的数，按正文长度估算，不必真算 */
+    tokens: 800 + toPlainText(content).length * 2,
+    costMs: Math.max(320, Date.now() - start + 260),
+  }
+}
+
+/**
+ * 划词 AI（改一段话）。
+ *
+ * **这是一个占位实现**：真正的改写 / 扩写要接大模型（机构端走 `jeecg-boot-module-airag`）。
+ * 这里只做三件「规则能算准」的事，其余动作给出结构规整的范式文本，让人看到交互是通的：
+ * - `polish` / `proofread`：标点规范、错别字替换、多余空格清理 —— 这三件事规则就能做好，
+ *   而且做完的结果**不会比原文差**，比编一段假话更安全；
+ * - `shorten`：按句取要点；
+ * - `rewrite` / `expand` / `translate`：给出范式化文本，并在返回值里标明是本地占位。
+ * 接入真实模型时把本函数换成一次 HTTP 调用即可，出入参不用动。
+ */
+export function polishTeachText(input: {
+  action: TeachAiTextAction
+  text: string
+  subject?: string
+}): { action: TeachAiTextAction; label: string; text: string; mocked: boolean } {
+  const raw = (input.text ?? '').trim()
+  const label = TEACH_AI_TEXT_TEXT[input.action]
+
+  /** 标点与空格规范：中文语境下最常犯的几个（英文逗号 / 句号、数字与汉字之间多余空格、连续标点） */
+  const normalize = (text: string) =>
+    text
+      .replace(/([\u4e00-\u9fa5])\s*,\s*/g, '$1，')
+      .replace(/([\u4e00-\u9fa5])\s*\.\s*(?!\d)/g, '$1。')
+      .replace(/([\u4e00-\u9fa5])\s*;\s*/g, '$1；')
+      .replace(/([\u4e00-\u9fa5])\s*:\s*/g, '$1：')
+      .replace(/([\u4e00-\u9fa5])\s*\?\s*/g, '$1？')
+      .replace(/([\u4e00-\u9fa5])\s*!\s*/g, '$1！')
+      .replace(/，{2,}/g, '，')
+      .replace(/。{2,}/g, '。')
+      .replace(/[ \t]{2,}/g, ' ')
+      .trim()
+
+  /** 常见错别字 / 术语误写。只收教学文案里高频、且替换后不会误伤的几组 */
+  const TYPO: Array<[RegExp, string]> = [
+    [/的的/g, '的'],
+    [/了了/g, '了'],
+    [/即然/g, '既然'],
+    [/做为/g, '作为'],
+    [/按装/g, '安装'],
+    [/必须的/g, '必须'],
+    [/复盖/g, '覆盖'],
+    [/竞赛题形/g, '竞赛题型'],
+    [/函数图相/g, '函数图像'],
+    [/单调递曾/g, '单调递增'],
+  ]
+  const proofread = (text: string) => TYPO.reduce((acc, [pattern, to]) => acc.replace(pattern, to), text)
+
+  /** 按中文句末标点切句（保留标点） */
+  const sentences = (text: string) => text.split(/(?<=[。！？；])/).map((row) => row.trim()).filter(Boolean)
+
+  let text = raw
+  let mocked = false
+
+  switch (input.action) {
+    case 'polish':
+      text = normalize(raw)
+      break
+    case 'proofread':
+      text = normalize(proofread(raw))
+      break
+    case 'shorten': {
+      const parts = sentences(normalize(raw))
+      text = parts
+        .map((row) => (row.length > 20 ? `${row.slice(0, 20)}…` : row))
+        .join('')
+        .slice(0, 220)
+      break
+    }
+    case 'expand': {
+      const parts = sentences(normalize(raw))
+      text = parts
+        .map((row) => {
+          const core = row.replace(/[。！？；]$/, '')
+          return `${core}。具体来说，可以结合${input.subject || '本学科'}的实际情境举一个例子，帮助学生把这一层理解落到具体问题上。`
+        })
+        .join('')
+      mocked = true
+      break
+    }
+    case 'rewrite': {
+      const core = normalize(raw).replace(/[。]$/, '')
+      text = `就本环节而言，${core}。这样处理的好处是思路更清楚，学生也更容易跟上。`
+      mocked = true
+      break
+    }
+    case 'translate':
+      text = `【${label}】需接入大模型服务后生效。当前为本地占位：${normalize(raw)}`
+      mocked = true
+      break
+  }
+
+  return { action: input.action, label, text, mocked }
+}
+
+/* ================= 教辅（FR-JC-001 ~ 004） ================= */
 let materialSeq = 700
 let chapterSeq = 800
 let exampleSeq = 850
@@ -6129,7 +7667,7 @@ export function decideExample(materialId: number, exampleId: number, decision: '
   questions.unshift(q)
   window_setTimeout(() => {
     q.status = 'pending'
-    q.aiChecks = aiChecksFor(q.stem)
+    q.aiChecks = aiChecksFor(q)
     q.aiSuspects = []
   }, 0)
   return target
@@ -6784,7 +8322,7 @@ export function recognizeFile(id: number): { file: OrgFile; questionCount: numbe
     questions.unshift(q)
     window_setTimeout(() => {
       q.status = 'pending'
-      q.aiChecks = aiChecksFor(q.stem)
+      q.aiChecks = aiChecksFor(q)
       q.aiSuspects = []
     }, 0)
     return q
@@ -6870,7 +8408,7 @@ export function importRecognizedFile(
     questions.unshift(question)
     window_setTimeout(() => {
       question.status = 'pending'
-      question.aiChecks = aiChecksFor(question.stem)
+      question.aiChecks = aiChecksFor(question)
       question.aiSuspects = []
     }, 0)
     return { question, score: q.score }
@@ -7198,11 +8736,14 @@ export function downloadSquare(id: number): SquareResource {
 
 /* ================= 员工 / 角色 / 校区（FR-OS-001 ~ 010） ================= */
 
-export const STAFF_QUOTA = { max: 20, current: 6 }
+export const STAFF_QUOTA = { max: 20, current: 7 }
 
 let staffSeq = 400
 export const staff: StaffMember[] = [
   { id: 401, name: '陈明远', phone: '13900000001', role: '管理员', campus: '本部校区', enabled: true, pendingReviews: 0, lastLoginAt: nowStr(-1) },
+  /* 周正 = 机构端 `admin` 账号（全功能版，见 auth/accounts.ts）。与陈明远同角色但不同版本：
+     员工账号里出现两个「管理员」是有意的，一眼就能看出账号维度的差异。 */
+  { id: 407, name: '周正', phone: '13900000007', role: '管理员', campus: '本部校区', enabled: true, pendingReviews: 0, lastLoginAt: nowStr(-0.2) },
   { id: 402, name: '沈丽华', phone: '13900000002', role: '审核员', campus: '本部校区', enabled: true, pendingReviews: 3, lastLoginAt: nowStr(-3) },
   { id: 403, name: '李文博', phone: '13900000003', role: '老师', campus: '东湖校区', enabled: true, pendingReviews: 0, lastLoginAt: nowStr(-6) },
   /* 王静是「年级学科组长」：右上角演示身份切成组长时用的就是她，协同组卷的种子任务也归她发起 */
@@ -7565,6 +9106,10 @@ export const orgMenuTree: OrgMenuNode[] = [
       { key: 'teach/guide', title: '学案', enabled: true },
       { key: 'teach/lecture', title: '讲义', enabled: true },
       { key: 'teach/courseware', title: '课件', enabled: true },
+      // 模板维护（教案 / 学案 / 讲义三种模板的增删改与默认项）与上述三页同属备课中心
+      { key: 'teach/templates', title: '模板维护', enabled: true },
+      // 集体备课已从一级菜单并入备课中心（见 apps/tenant/src/menu.ts）；key 仍是路径去斜杠
+      { key: 'prep', title: '集体备课', enabled: true },
     ],
   },
   {
@@ -7594,9 +9139,10 @@ export const orgMenuTree: OrgMenuNode[] = [
     children: [
       { key: 'ai-center/workbench', title: 'AI 工作台', enabled: true },
       { key: 'ai-center/review', title: 'AI 内容复核', enabled: true },
+      // 提示词模板已从一级菜单并入 AI 能力中心；平台套餐仍锁定它，故保留 platformLocked
+      { key: 'prompt', title: '提示词模板', enabled: true, platformLocked: true },
     ],
   },
-  { key: 'prep', title: '集体备课', enabled: true },
   { key: 'homework', title: '作业系统', enabled: true },
   {
     key: 'resource',
@@ -7628,12 +9174,6 @@ export const orgMenuTree: OrgMenuNode[] = [
       { key: 'formula/mine', title: '我的公式', enabled: true },
       { key: 'formula/shared', title: '机构共享公式', enabled: true },
     ],
-  },
-  {
-    key: 'prompt',
-    title: '提示词模板',
-    enabled: true,
-    platformLocked: true,
   },
   { key: 'square', title: '知识广场', enabled: true },
   {
@@ -9124,8 +10664,15 @@ export function deleteHomework(id: number): void {
  *
  * 只想清掉本机上已存的演示数据而不改结构时，不必动它：调用 `resetMockState()`（已由
  * `@aiteach/shared` 导出）或清掉 localStorage 里的 `aiteach:mock:org` 即可。
+ *
+ * v2：题库补了语文 / 英语 / 生物的材料组合题种子（#9362—#9366）。**纯增种子也要 +1** ——
+ * 快照搬的是整个 `questions` 集合，不 +1 的话本机旧快照会盖掉新种子，现象是「加了数据但列表里没有」。
+ *
+ * v3：新增 `teachTemplates`（教案 / 学案 / 讲义模板）集合与 `teachTemplateSeq` 序列；
+ * `teachDocs` 的元素新增 `content` 字段（Word 式文档流 HTML，与旧的 `blocks` / `plan` 并存）。
+ * 集合与字段都是新增，不 +1 的话本机快照里 `teachTemplates` 缺失会让模板页空白。
  */
-export const ORG_STATE_VERSION = 1
+export const ORG_STATE_VERSION = 3
 
 /**
  * 会被写操作改动的集合 —— 只有它们会在两个标签页之间分叉，纯只读的种子数据不必搬运
@@ -9150,6 +10697,7 @@ const MUTABLE_COLLECTIONS: Record<string, unknown[]> = {
   collabTasks,
   paperComments,
   teachDocs,
+  teachTemplates,
   materials,
   mediaResources,
   folders,
@@ -9205,6 +10753,7 @@ const SEQ_CELLS: Array<[string, () => number, (value: number) => void]> = [
   ['versionSeq', () => versionSeq, (value) => (versionSeq = value)],
   ['commentSeq', () => commentSeq, (value) => (commentSeq = value)],
   ['teachSeq', () => teachSeq, (value) => (teachSeq = value)],
+  ['teachTemplateSeq', () => teachTemplateSeq, (value) => (teachTemplateSeq = value)],
   ['lectureBlockSeq', () => lectureBlockSeq, (value) => (lectureBlockSeq = value)],
   ['slideSeq', () => slideSeq, (value) => (slideSeq = value)],
   ['planStepSeq', () => planStepSeq, (value) => (planStepSeq = value)],

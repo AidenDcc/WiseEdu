@@ -14,6 +14,10 @@
  * 分值输入用失焦时提交而非逐字符提交：输入「1」到「12」的中间态会先把分值改成 1，
  * 有 `savePaper` 的分值区间校验在，逐字符提交会不停弹出非法提示。
  *
+ * **材料组合题在车里是「一道题」**：条目存的是母题 id，行内标出小问数，展开后把每一道子题
+ * 列出来（只读），另有整题预览入口。分值只有一个输入框、拖拽与移出都以整题为单位 ——
+ * 子题没有独立 id，因此车里不可能出现「只加 / 只预览 / 只改分某一道子题」的状态。
+ *
  * **题与资源分成两组页签展示**：媒体（图片 / 视频 / 小程序）进车后是「随卷参考资料」，
  * 不参与分值与大题结构，所以它们**不走 `buildSections`**，独立渲染一份列表 —— 硬塞进
  * 题目分组里会得到一个既没有分值、也不该被拖拽排序的假题目行。
@@ -25,6 +29,9 @@ import type { MediaKind, OrgQuestion } from '@aiteach/shared'
 import { useComposeData } from '@aiteach/business-common'
 import { useComposeBasket, type BasketEntry, type BasketResource } from '@aiteach/business-common'
 import { duplicatePairs } from '@aiteach/business-common'
+import { CompositeSubList } from '@aiteach/business-common'
+import { QuestionPreviewDrawer } from '@aiteach/business-common'
+import { isCompositeQuestion, subQuestionCount, subQuestionsOf } from '@aiteach/business-common'
 import { difficultyRank } from '@/views/paper/compose/blueprint'
 import { MAX_SECTIONS, defaultScore, objectiveScoreOfSections, scoreOfSections } from '@aiteach/business-common'
 
@@ -157,6 +164,29 @@ const expanded = ref<number | null>(null)
 async function toggleExpand(id: number) {
   expanded.value = expanded.value === id ? null : id
   await nextTick()
+}
+
+/* ===== 材料组合题：整题一起看 =====
+   组卷车条目存的是**母题 id**，子题没有独立 id —— 所以车里既不可能、也不提供
+   「只预览 / 只加入某一道子题」的入口，预览抽屉打开的就是整道组合题（材料 + 全部子题）。 */
+
+/** 预览目标题号（null = 未打开）；非空即渲染 QuestionPreviewDrawer */
+const previewId = ref<number | null>(null)
+const previewQuestion = computed(() =>
+  previewId.value == null ? null : questionOf(previewId.value) ?? null,
+)
+
+function isCompositeEntry(questionId: number): boolean {
+  const row = questionOf(questionId)
+  return !!row && isCompositeQuestion(row)
+}
+function subCountOf(questionId: number): number {
+  const row = questionOf(questionId)
+  return row ? subQuestionCount(row) : 0
+}
+function subsOf(questionId: number) {
+  const row = questionOf(questionId)
+  return row ? subQuestionsOf(row) : []
 }
 
 function resetScoreAll() {
@@ -406,7 +436,12 @@ const duplicates = computed(() => duplicatePairs(basketQuestions.value, 0.82).sl
               @change="toggleCheck(item.questionId)"
             />
             <span class="bk-id">#{{ item.questionId }}</span>
-            <span class="bk-type">{{ questionOf(item.questionId)?.type ?? '题目缺失' }}</span>
+            <!-- 组合题在行内标出小问数：一个「阅读理解 · 4 小问」的条目与一道单选的
+                 分值/工作量完全不同，行内不标就要点开才知道 -->
+            <span class="bk-type">
+              {{ questionOf(item.questionId)?.type ?? '题目缺失' }}
+              <template v-if="isCompositeEntry(item.questionId)">· {{ subCountOf(item.questionId) }} 小问</template>
+            </span>
 
             <input
               class="bk-score"
@@ -421,6 +456,15 @@ const duplicates = computed(() => duplicatePairs(basketQuestions.value, 0.82).sl
             />
             <span class="bk-unit">分</span>
 
+            <!-- 组合题：整题预览（材料 + 全部子题）。单题也可以点开看，入口统一在这里 -->
+            <button
+              class="bk-icon"
+              type="button"
+              :title="isCompositeEntry(item.questionId) ? '预览整道组合题（共用材料 + 全部子题）' : '预览这道题'"
+              @click="previewId = item.questionId"
+            >
+              <AppIcon name="eye" :size="13" />
+            </button>
             <button class="bk-icon" type="button" title="查看题干" @click="toggleExpand(item.questionId)">
               <AppIcon :name="expanded === item.questionId ? 'chevron-down' : 'chevron-right'" :size="13" />
             </button>
@@ -433,6 +477,15 @@ const duplicates = computed(() => duplicatePairs(basketQuestions.value, 0.82).sl
             <span class="bk-source">{{ SOURCE_TEXT[basket.entries.value.find((e) => e.questionId === item.questionId)?.source ?? 'pool'] }}</span>
             {{ questionOf(item.questionId)?.knowledge.join('、') || '未标注知识点' }}
           </p>
+
+          <!-- 组合题展开：把每一道子题都列出来（只读）。入卷的单位仍是整道组合题，
+               这里不给任何逐题动作 —— 分值也只有一个输入框，改的是整题的分 -->
+          <CompositeSubList
+            v-if="expanded === item.questionId && isCompositeEntry(item.questionId)"
+            class="bk-subs"
+            :subs="subsOf(item.questionId)"
+            empty-text="该组合题还没有子题。"
+          />
         </div>
       </section>
     </div>
@@ -483,6 +536,16 @@ const duplicates = computed(() => duplicatePairs(basketQuestions.value, 0.82).sl
 
     <!-- 资源预览：与媒体页签同一套呈现（有字节直接播，无字节的存量记录给占位说明）。
          层级跟着抽屉走 +10：抽屉被调用方抬到 310 时，这个弹窗要压在它上面 -->
+
+    <!-- 题目预览：与选题页签用同一个抽屉组件（材料组合题打开的就是整道题）。
+         层级跟着本抽屉 +10，压在组卷车之上 -->
+
+    <QuestionPreviewDrawer
+      v-if="previewQuestion"
+      :question="previewQuestion"
+      :z-index="zIndex + 10"
+      @close="previewId = null"
+    />
 
     <AppModal
       v-if="previewResource"
@@ -665,6 +728,9 @@ const duplicates = computed(() => duplicatePairs(basketQuestions.value, 0.82).sl
 .bk-score:focus { border-color: var(--brand); outline: none; }
 .bk-unit { color: var(--sub); font-size: 11.5px; }
 
+/* 组合题展开后的子题列表：抽屉只有 420px，序号与题型标签已占去一截，
+   子题题干按剩余宽度软换行（CompositeSubList 内部已处理） */
+.bk-subs { margin: 6px 0 2px 22px; font-size: 12px; }
 .bk-detail { margin-top: 5px; font-size: 11.5px; color: var(--sub); display: flex; gap: 6px; align-items: baseline; }
 .bk-source {
   flex-shrink: 0;

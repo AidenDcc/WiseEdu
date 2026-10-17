@@ -33,6 +33,28 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/paper/PaperEditView.vue'),
     meta: { title: '试卷编辑' },
   },
+  /* 教案 / 学案 / 讲义编辑：同一条理由（见上）—— 纸面型编辑要满宽画布 + 常驻左右两栏，
+     套在带侧边栏的 AppLayout 里 A4 纸展不开。入口也一律是新标签页（见 utils/teach-edit.ts）。
+     三者都是全屏工作台；学案 / 讲义共用一份实现（BlocksEditView，靠 `meta.kind` 区分），
+     教案因为「结构化编辑」是另一套模型（plan.steps）单开一页。 */
+  {
+    path: '/teach/plan/edit',
+    name: 'teach-plan-edit',
+    component: () => import('@/views/teach/PlanEditView.vue'),
+    meta: { title: '教案编辑' },
+  },
+  {
+    path: '/teach/guide/edit',
+    name: 'teach-guide-edit',
+    component: () => import('@/views/teach/BlocksEditView.vue'),
+    meta: { title: '学案编辑', kind: 'guide' },
+  },
+  {
+    path: '/teach/lecture/edit',
+    name: 'teach-lecture-edit',
+    component: () => import('@/views/teach/BlocksEditView.vue'),
+    meta: { title: '讲义编辑', kind: 'lecture' },
+  },
   {
     path: '/',
     component: () => import('@/layouts/AppLayout.vue'),
@@ -122,18 +144,29 @@ const routes: RouteRecordRaw[] = [
         name: 'teach-guide',
         component: () => import('@/views/teach/GuideView.vue'),
         meta: { title: '学案' },
+        /* 老地址兼容：学案编辑器从列表页里搬到了全屏页（`/teach/guide/edit?id=`），
+           书签 / 演示脚本 / 旧文档里还会带 `?id=`，原样把 id 转过去而不是掉回列表 */
+        beforeEnter: (to) => (to.query.id ? { path: '/teach/guide/edit', query: { ...to.query } } : true),
       },
       {
         path: 'teach/lecture',
         name: 'teach-lecture',
         component: () => import('@/views/teach/LectureView.vue'),
         meta: { title: '讲义' },
+        beforeEnter: (to) => (to.query.id ? { path: '/teach/lecture/edit', query: { ...to.query } } : true),
       },
       {
         path: 'teach/courseware',
         name: 'teach-courseware',
         component: () => import('@/views/teach/CoursewareView.vue'),
         meta: { title: '课件' },
+      },
+      /* 教案 / 学案 / 讲义模板维护：三类模板共用一页，类型由页面内的分段切换决定 */
+      {
+        path: 'teach/templates',
+        name: 'teach-templates',
+        component: () => import('@/views/teach/TemplateView.vue'),
+        meta: { title: '模板维护' },
       },
       /* ===== 考试阅卷：在线阅卷 / 试卷分析 / 错题本 ===== */
       {

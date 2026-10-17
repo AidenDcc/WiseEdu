@@ -33,6 +33,22 @@ export const mockUsers: MockUser[] = [
     tenantId: 1000,
   },
   {
+    id: 106,
+    appId: 'tenant',
+    account: 'admin',
+    name: '周正',
+    role: 'orgAdmin',
+    roleName: '超级管理员',
+    orgName: '星辰实验中学',
+    avatarHue: 210,
+    tenantId: 1000,
+    /* 联系方式直接放在账号资料里：这个账号不参与「演示身份」切换（见 useDemoRole 的
+       DEMO_ACCOUNT），个人中心没有身份表可回落，缺了这三项会显示成空白。 */
+    phone: '139****0007',
+    email: 'zhouzheng@xingchen.edu.cn',
+    intro: '机构超级管理员，负责版本能力与全部业务模块的演示验收。',
+  },
+  {
     id: 102,
     appId: 'tenant',
     account: 'auditor',

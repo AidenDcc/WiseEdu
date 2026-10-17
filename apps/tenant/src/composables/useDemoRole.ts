@@ -2,7 +2,7 @@
  * 机构端「演示身份」：右上角下拉里点一下，就把当前是谁、能看哪些菜单、能审批什么一起换掉。
  *
  * **为什么需要它**：机构端真实场景里，机构管理员 / 年级学科组长 / 参与组卷老师看到的菜单与能做的
- * 操作完全不同，而演示只有一个登录账号（orgadmin）。逐个建账号、逐个退出重登，演示一遍要登三次；
+ * 操作完全不同，而演示主账号只有一个（orgadmin）。逐个建账号、逐个退出重登，演示一遍要登三次；
  * 这里用「就地换身份」把这三次登录变成三次点击。
  *
  * 切换时改三处，缺一处就会出现自相矛盾的界面：
@@ -16,6 +16,9 @@
  * **全仓不得调用 `/auth/me`（shared 的 `fetchCurrentUser`）**。真实后端会用 token 反查用户，
  * 那样一调，演示身份立刻被打回陈明远，且刷新后菜单与身份对不上。当前该函数调用点为 0，
  * 以后要接真实登录态时，第一步就是删掉本文件。
+ *
+ * 演示身份只对 `DEMO_ACCOUNT`（orgadmin）生效；`admin` 账号登录后保留自己的资料，
+ * 见下方 DEMO_ACCOUNT 的注释。
  *
  * 会话有效期（30 分钟固定窗口）由**前端**按 `aiteach:<app>:tokenExpire` 强制，token 本身仍不
  * 会过期。因此切换身份**不能**调 `setSession`（那会把有效期续满 30 分钟），只用
@@ -31,6 +34,16 @@ import { useAuthStore } from '@/stores/auth'
  * （理由见 shared/mock/types.ts 的同名注释）。
  */
 export type DemoRole = 'orgAdmin' | 'leader' | 'teacher'
+
+/**
+ * 演示身份**只作用于这一个账号**。
+ *
+ * 机构端现在有两个账号：`orgadmin`（标准版，用来换身份演示「同一个机构里不同角色看到什么」）
+ * 与 `admin`（全功能版，用来演示「全部菜单」）。`admin` 是实打实的一个人（周正），
+ * 若也按身份表贴一遍，登录后右上角会变成「陈明远 · 机构管理员」——账号与界面对不上。
+ * 所以非演示账号一律保留自己的会话资料，只把 mock 的当前操作人同步成本人。
+ */
+export const DEMO_ACCOUNT = 'orgadmin'
 
 export interface DemoIdentity {
   role: DemoRole
@@ -132,10 +145,47 @@ const role = ref<DemoRole>('orgAdmin')
 const identity = computed(() => identityOf(role.value))
 
 /**
+ * 头像归属键。
+ *
+ * 演示账号按**身份**存（三个身份共用 orgadmin 一个账号，按账号存会让「切到王静还顶着
+ * 陈明远的照片」）；其它账号（如 admin）按**账号**存 —— 它不换身份，按身份存会跟
+ * orgadmin 的「机构管理员」共用同一个槽位，一个人换头像，另一个人跟着变。
+ */
+function avatarOwner(account: string, target: DemoRole = role.value): string {
+  return account === DEMO_ACCOUNT ? target : `account:${account}`
+}
+
+/**
  * 把某个演示身份落到 mock 与会话上。**必须由顶栏在挂载时也调一次**：
  * mock 是内存态，刷新后会回到种子的默认身份，需要按缓存再把身份贴回去。
+ *
+ * 非演示账号（`admin`）只做一件事：把 mock 的当前操作人同步成本人，右上角保留自己的
+ * 姓名与角色 —— 理由见 DEMO_ACCOUNT 的注释。
  */
 export function applyDemoIdentity(target: DemoRole): SessionUser | null {
+  const store = useAuthStore()
+  const current = store.user
+  if (!current) return null
+
+  if (current.account !== DEMO_ACCOUNT) {
+    /* 不动 localStorage 里的演示身份缓存：它不是这个账号的东西，留着只会被下一个
+       登录 orgadmin 的会话（登出会清，但会话过期未必）误用 */
+    role.value = 'orgAdmin'
+    const self: SessionUser = { ...current, avatar: getAvatarOverride(avatarOwner(current.account)) }
+    /* 会话里的 role 类型含管理端的 `super`，机构端只可能是这四档之一；这里收窄给 mock 层 */
+    const mockRole = current.role === 'leader' || current.role === 'auditor' || current.role === 'teacher'
+      ? current.role
+      : 'orgAdmin'
+    setMockCurrent({
+      id: typeof current.id === 'number' ? current.id : undefined,
+      name: current.name,
+      role: mockRole,
+    })
+    store.user = self
+    updateSessionUser(self)
+    return self
+  }
+
   const next = identityOf(target)
   role.value = target
   localStorage.setItem(storageKey(), target)
@@ -145,9 +195,6 @@ export function applyDemoIdentity(target: DemoRole): SessionUser | null {
 
   /* 2. 会话用户。account / orgName 保持登录账号原样：我们确实是拿 orgadmin 登进来的，
      编一个「王静的账号」反而在个人中心里露馅，不如让「用谁的视角看」这件事如实呈现。 */
-  const store = useAuthStore()
-  const current = store.user
-  if (!current) return null
   const user: SessionUser = {
     ...current,
     id: next.id,
@@ -155,9 +202,7 @@ export function applyDemoIdentity(target: DemoRole): SessionUser | null {
     role: next.role,
     roleName: next.roleName,
     avatarHue: next.avatarHue,
-    /* 头像按**身份**取，不是按账号：三个身份共用 orgadmin 这一个账号，
-       按账号存会让「切到王静还顶着陈明远的照片」。见 shared/auth/avatar.ts */
-    avatar: getAvatarOverride(next.role),
+    avatar: getAvatarOverride(avatarOwner(current.account, next.role)),
   }
   store.user = user
 
@@ -199,17 +244,26 @@ export function clearDemoIdentity(): void {
 }
 
 /**
- * 设置**当前演示身份**的自定义头像（`null` 为恢复默认字母头像）。
+ * 设置**当前身份**的自定义头像（`null` 为恢复默认字母头像）。
  *
  * 必须经由这里而不是直接写 `updateSessionUser`：头像落在按身份分的覆盖表里，
  * 再走一遍 `applyDemoIdentity` 把它贴回会话（顺带把 mock 的当前操作人也同步一次），
  * 两处谁先谁后都成 —— 但只要有一处漏了，「换完头像切个身份再切回来」就会发现头像没了。
  */
 export function setIdentityAvatar(dataUrl: string | null): SessionUser | null {
-  setAvatarOverride(role.value, dataUrl)
+  const account = useAuthStore().user?.account ?? ''
+  setAvatarOverride(avatarOwner(account), dataUrl)
   return applyDemoIdentity(role.value)
 }
 
 export function useDemoRole() {
-  return { role, identity, identities: DEMO_IDENTITIES, apply: applyDemoIdentity }
+  /**
+   * 只有演示账号能就地换身份：`admin` 是另一个真实账号，换身份只会让姓名与账号对不上。
+   *
+   * `useAuthStore()` 必须写在 computed 里而不是这行外面：router/index.ts 在**模块作用域**
+   * 调 `usePermission()` → `useDemoRole()`，那时 pinia 还没装（main.ts 才 install），
+   * 提前取 store 会直接抛「no active Pinia」。computed 的 getter 等到渲染时才跑，那时已经有了。
+   */
+  const canSwitch = computed(() => useAuthStore().user?.account === DEMO_ACCOUNT)
+  return { role, identity, identities: DEMO_IDENTITIES, canSwitch, apply: applyDemoIdentity }
 }

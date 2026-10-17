@@ -44,7 +44,7 @@ import QuestionPreviewDrawer from '../question/QuestionPreviewDrawer.vue'
 import QuestionCorrectionDialog from '../question/QuestionCorrectionDialog.vue'
 import SimilarQuestionsModal from '../compose/SimilarQuestionsModal.vue'
 import { useBusinessApi } from '../../api/business-api'
-import { difficultyClass } from '../../utils/question-card'
+import { difficultyClass, isCompositeQuestion } from '../../utils/question-card'
 import { distributionOf } from './paper-stats'
 import {
   ANSWER_LINES,
@@ -313,8 +313,10 @@ const cardBlocks = computed<PaperBlockModel[]>(() => {
         hint: CARD_HINT.write,
       })
       written.forEach((q) => {
-        /* 填空题给作答横线，解答题 / 问答题按分值给作答框 */
-        const lines = q.item?.type.includes('填空') ? ANSWER_LINES : 0
+        /* 填空题给作答横线，解答题 / 问答题按分值给作答框。
+           材料组合题两者都不走：它的作答位由 PaperBlock 按**子题逐题**画
+           （整题一个题号，故 lines / boxH 在这里都不适用）。 */
+        const lines = q.item && !isCompositeQuestion(q.item) && q.item.type.includes('填空') ? ANSWER_LINES : 0
         list.push({
           key: `c-ans-${q.no}`,
           kind: 'card-answer',

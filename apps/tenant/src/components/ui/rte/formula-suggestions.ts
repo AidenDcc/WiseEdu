@@ -133,8 +133,9 @@ export function matchLatexSuggestions(query: string, limit = 8): LatexSuggestion
   if (!raw) return COMMON_SUGGESTIONS.slice(0, limit)
 
   const lower = raw.toLowerCase()
-  const scored: Array<{ row: LatexSuggestion; score: number; template: number; blanks: number }> = []
-  for (const row of SUGGESTABLE) {
+  const scored: Array<{ row: LatexSuggestion; score: number; template: number; order: number }> = []
+  for (let order = 0; order < SUGGESTABLE.length; order += 1) {
+    const row = SUGGESTABLE[order]
     const command = commandOf(row.latex)
     let score = 0
     if (row.label.startsWith(raw)) score = 100
@@ -148,22 +149,21 @@ export function matchLatexSuggestions(query: string, limit = 8): LatexSuggestion
       scored.push({
         row,
         score,
-        template: row.latex.includes(PLACEHOLDER) ? 1 : 0,
-        blanks: row.latex.split(PLACEHOLDER).length - 1,
+        /* 「模板」= 带占位符、且自己不是占位符本身。
+           `\square`（空心方框）这条的源码恰好等于 PLACEHOLDER，不排除的话它会被当成模板，
+           输入 sq 时跟 `\sqrt{□}` 平起平坐、还可能靠定义顺序挤到前面。 */
+        template: row.latex.includes(PLACEHOLDER) && row.latex !== PLACEHOLDER ? 1 : 0,
+        /* order 就是符号表里的定义下标（SUGGESTABLE 是过滤后的，仍保持原顺序） */
+        order,
       })
     }
   }
 
-  /* 排序：命中优先级 → 带占位符的模板优先 → 占位符多的在前 → 源码短的在前。
-     中间两条是「输入 frac 想插的显然是能填的 \frac{□}{□}，而不是 \frac{□}{100} 或 \frac{1}{2}」：
-     先排除写死的常量项，再让可填位置最多的通用模板胜出；
-     最后一条让输入 x 时先看到 x^{□} 而不是更长的变体。 */
-  scored.sort(
-    (a, b) =>
-      b.score - a.score ||
-      b.template - a.template ||
-      b.blanks - a.blanks ||
-      a.row.latex.length - b.row.latex.length,
-  )
+  /* 排序：命中优先级 → 带占位符的模板优先 → 符号表里的定义顺序。
+     中间那条是「输入 frac 想插的显然是能填的 \frac{□}{□}，而不是 \frac{1}{2}」。
+     最后一条**用定义顺序而不是「占位符个数」**：占位符多 ≠ 更常用 ——
+     输入 sq 时 \sqrt[□]{□}（2 个占位符）会因此压过更常用的 \sqrt{□}（1 个）。
+     定义顺序是人工排的，本身就是「常用度」的排序，比数占位符靠谱。 */
+  scored.sort((a, b) => b.score - a.score || b.template - a.template || a.order - b.order)
   return scored.slice(0, limit).map((item) => item.row)
 }

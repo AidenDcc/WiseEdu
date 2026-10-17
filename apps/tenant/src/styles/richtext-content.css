@@ -1,0 +1,185 @@
+/**
+ * 富文本正文（`.rte-content`）的**共用渲染样式**。
+ *
+ * 哪些规则该在这里、哪些该留在组件里，按一条线划分：
+ * - **内容的观感**放这里 —— 段落与列表的间距、链接、图片、引用块、表格的边框与拖拽手柄、
+ *   公式节点的排版。它们与「谁在编辑这份内容」无关：同一个 `.rte-content` 无论是在录题编辑器、
+ *   备课文档编辑器、还是只读渲染里，长得都应该一样。
+ * - **编辑器的外壳**留在组件里 —— 内边距、字号、正文最大宽度、聚焦描边、占位文案。
+ *   录题的题干框是一行小字，备课文档是一整张 A4 纸，这两处的「外壳」本来就该不同。
+ *
+ * 分成两份而不是塞进某一个组件，是因为这几个编辑器的内容模型是同一套（同一批 Tiptap 扩展、
+ * 同一套白名单标签），样式却只能由其中一个组件持有 —— 另一处要用就只能复制，复制出来的两份
+ * 迟早会分叉（「表格边框在讲义里是灰的、在学案里是蓝的」这类问题查起来极其费时）。
+ *
+ * 选择器统一以 `.rte-content` 为根：它挂在 ProseMirror 的 contenteditable 元素上
+ * （见各编辑器的 `editorProps.attributes.class`），也挂在只读渲染的根上。
+ */
+
+/* ===== 文本块 ===== */
+.rte-content {
+  /* 下划线默认离文字太近，抬开一点。text-underline-offset 是继承属性，写在这里即覆盖正文全部
+     （`<u>` 与 span 上的 text-decoration 都吃这一条）。只读端与导出端各有一份同样的声明。 */
+  text-underline-offset: 0.2em;
+}
+
+.rte-content p { margin: 0 0 6px; }
+.rte-content p:last-child { margin-bottom: 0; }
+.rte-content ul,
+.rte-content ol { padding-left: 22px; margin: 0 0 6px; }
+.rte-content ul { list-style: disc; }
+.rte-content a { color: var(--brand-deep, #0aa396); text-decoration: underline; }
+
+/* 有序列表的序号样式有两条通路：自定义序号（① / (1) / 一、）落内联 style，原生序号（1 / a / A / i / I）
+   落 `type` 属性。所以这一条只写「没设过序号」的兜底，**`ol[type='a']` 那类补丁千万别加** ——
+   HTML 文档里属性选择器对 `type` 是大小写不敏感地匹配的，`[type='a']` 连 `type="A"` 一起命中，
+   后写的 upper-* 会通吃，**i / a 就永远显示成 I / A**（这个 bug 真出现过）。
+   浏览器的 UA 样式表里那套映射带 `s` 大小写标志，是唯一能区分大小写的地方，让路给它即可。 */
+.rte-content ol:not([type]) { list-style: decimal; }
+
+/* 尺寸改由四角控制点表达；圆角保留，与只读渲染端 RichTextViewer 的外观保持一致 */
+.rte-content img { max-width: 100%; height: auto; border-radius: 8px; }
+.rte-content blockquote {
+  border-left: 3px solid var(--border, #e8ecf4);
+  padding-left: 10px;
+  color: var(--sub, #8a94a8);
+  margin: 0 0 6px;
+}
+
+/* ===== 表格 =====
+   下面这一组是 prosemirror-tables 参考样式（它的拖拽与选区高亮都依赖这些定位）：
+   `table-layout: fixed` + 单元格 `position: relative` 是拖列边界能落点、`.selectedCell` 能铺满的前提。
+   表格自身宽度不在这里定：整表宽度写内联 `style="width: Npx"`（没设过才是这里的 width: 100%），
+   列宽靠 colgroup，行高靠 tr 的 height，单元格底纹靠 td/th 的 background-color —— 都在行内，
+   优先级更高，正好盖住这里的 width: 100% 与表头那条默认灰底（底纹选「无」时表头会回到这条灰底，
+   这是「没显式设过」的正常含义）。
+
+   position: relative 是整表宽度拖拽手柄（.rte-table-grip）的锚 —— 手柄绝对定位在 wrapper 里、
+   贴着表格右边缘，横向滚动时跟着表格一起滚，不会漂。 */
+.rte-content .tableWrapper { position: relative; overflow-x: auto; margin: 0 0 6px; }
+.rte-content table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  margin: 0;
+}
+.rte-content td,
+.rte-content th {
+  position: relative;
+  vertical-align: top;
+  min-width: 25px;
+  padding: 4px 8px;
+  border: 1px solid var(--border, #e8ecf4);
+}
+/* 单元格里也放段落，保留段落的下边距会导致每格底部都多一截 */
+.rte-content td > p,
+.rte-content th > p { margin: 0; }
+.rte-content th { background: #f4f6fa; font-weight: 600; text-align: left; }
+
+/* 拖列边界时跟在光标下的那条竖线 */
+.rte-content .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--brand, #00b4a6);
+  pointer-events: none;
+}
+.rte-content.resize-cursor { cursor: col-resize; }
+
+/* 整表宽度的拖拽手柄：由 PaperTableView（tiptap-extensions/tableSizing.ts）挂在 tableWrapper 里，
+   位置随表格宽度同步。挂在表格**内侧**（margin-left 负一个自身宽度）而不是跨越边缘 ——
+   wrapper 是 overflow-x: auto 的滚动容器，探出去一截会凭空多出一条横向滚动条。
+   平时隐形、鼠标进表格才显形，免得每张表旁边都杵着一根竖条。 */
+.rte-table-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  /* 贴着表格右缘往内让 10px，正好压住最后一列的右边缘，而不是探到表格外面 */
+  margin-left: -10px;
+  cursor: col-resize;
+  opacity: 0;
+  /* 隐形时也不能挡鼠标：opacity: 0 的元素照样吃 pointer 事件，不加这一条最后一列右边缘
+     那 10px 就点不出光标了（想在那儿落光标得点两下） */
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+.tableWrapper:hover .rte-table-grip { opacity: 1; pointer-events: auto; }
+.rte-table-grip::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 3px;
+  height: 30px;
+  border-radius: 2px;
+  background: var(--brand, #00b4a6);
+  transform: translateY(-50%);
+}
+
+/* 行高的拖拽手柄：同一套路子（PaperTableView 挂的），只是横过来 —— 一条通栏横带，贴着鼠标所在行的
+   下边界。top 由 JS 按行的位置写；显示/隐藏走 is-on 类（相邻两行共用一条边，鼠标一靠近那条边
+   就亮出来）。同样不能常驻吃 pointer 事件：那一带正是某一行的下半截，常驻会让最后几像素点不进光标。 */
+.rte-row-grip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 8px;
+  /* 让横带的**中线**落在边界上（top 写的是边界位置） */
+  margin-top: -4px;
+  cursor: row-resize;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+.rte-row-grip.is-on { opacity: 1; pointer-events: auto; }
+.rte-row-grip::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 30px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--brand, #00b4a6);
+  transform: translate(-50%, -50%);
+}
+
+/* 单元格区域选区（拖动跨格选中时的高亮） */
+.rte-content .selectedCell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: var(--brand-soft, rgba(0, 180, 166, 0.1));
+  pointer-events: none;
+}
+
+/* ===== 公式节点：与正文基线对齐，并给出「可点击编辑」的暗示 ===== */
+.rte-content [data-type='inline-math'] {
+  display: inline-block;
+  vertical-align: baseline;
+  cursor: pointer;
+  padding: 0 2px;
+  border-radius: 4px;
+}
+.rte-content [data-type='block-math'] {
+  display: block;
+  text-align: center;
+  margin: 8px 0;
+  padding: 6px 0;
+  border-radius: 6px;
+  cursor: pointer;
+  background: #f7fafa;
+}
+.rte-content [data-type='inline-math']:hover,
+.rte-content [data-type='block-math']:hover { background: var(--brand-soft, rgba(0, 180, 166, 0.1)); }
+/* LaTeX 非法时 KaTeX 的 errorColor 已足够显眼，这里只保证源码可见 */
+.rte-content .inline-math-error,
+.rte-content .block-math-error { color: var(--danger, #d64545); }
+
+/* ===== 理科配图节点 ===== */
+.rte-content [data-type='draw-svg-image'] { display: inline-block; max-width: 100%; }
+.rte-content [data-type='draw-svg-image'] img { max-width: 100%; height: auto; }

@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { AppIcon, AppModal, QUESTION_STATUS_TEXT, appConfirm, showToast, toPlainText, truncateRich } from '@aiteach/shared'
 import type { AiCheckResult, OrgQuestion, StaffMember } from '@aiteach/shared'
 import { fetchQuestions, fetchStaff, reviewQuestion } from '@/api/org'
-import { checkQuestionByAi } from '@/api/ai-check'
+import { checkInputOfQuestion, checkQuestionByAi } from '@/api/ai-check'
 import type { AiCheckItem } from '@/api/ai-check'
 import { QuestionPreviewBody } from '@aiteach/business-common'
 
@@ -109,6 +109,18 @@ const ASPECT_TO_CHECK: Record<string, string> = {
 }
 const KEEP_TAG = '（本次未复检，沿用上次）'
 
+/**
+ * 检测项 → 报告项名。
+ *
+ * 材料组合题的检测项带 `scope`（`共用材料` / `第 N 题`），报告项名因此是「单元 · 维度」两级 ——
+ * 一道组合题有四五道子题、每道都有题干/选项/答案/解析，只用「答案」当名字会出现四五条同名项，
+ * 疑点清单里根本分不清是哪一道子题的问题。独立单题没有 scope，名字与改造前完全一致。
+ */
+function checkNameOf(item: AiCheckItem): string {
+  const aspect = ASPECT_TO_CHECK[item.aspect] ?? item.aspect
+  return item.scope ? `${item.scope} · ${aspect}` : aspect
+}
+
 /** 未通过检测项拼成终审意见文案（检测后自动预填用；驳回意见 ≥5 字的要求天然满足）。
  *  结构化分行：首行结论 + 每个问题一行；去掉沿用标注与句尾标点，避免出现「。。」 */
 function aiOpinionText(row: OrgQuestion): string {
@@ -120,13 +132,13 @@ function aiOpinionText(row: OrgQuestion): string {
   return [`AI 检测发现 ${issues.length} 处待修改问题，请作者修改后重新提交：`, ...lines].join('\n')
 }
 
-/** 引擎结果合并进既有 8 项报告：按项目名原位更新（同项多次命中时全过才算过、说明拼接），
+/** 引擎结果合并进既有报告：按项目名原位更新（同项多次命中时全过才算过、说明拼接），
  *  框架外的新维度追加尾部；重复检测幂等，不会重复追加也不会叠加标注 */
 function mergeChecks(row: OrgQuestion, items: AiCheckItem[]): AiCheckResult[] {
   const original = row.aiChecks ?? []
   const grouped = new Map<string, AiCheckItem[]>()
   for (const item of items) {
-    const target = ASPECT_TO_CHECK[item.aspect] ?? item.aspect
+    const target = checkNameOf(item)
     grouped.set(target, [...(grouped.get(target) ?? []), item])
   }
   const refreshed = new Map<string, AiCheckResult>()
@@ -151,23 +163,14 @@ function mergeChecks(row: OrgQuestion, items: AiCheckItem[]): AiCheckResult[] {
 }
 
 /** 对当前题目重新跑一次 AI 多智能体检测，报告就地刷新（真实引擎未配置时为本地演示口径）。
+ *  入参走 checkInputOfQuestion：材料组合题会带上共用材料与全部子题，逐题审查、逐题出报告项。
  *  检测发现待修改问题时，若终审意见还是空的，直接把 AI 意见预填进去（已有手写内容则不覆盖）。 */
 async function recheck() {
   if (!active.value || checking.value) return
   checking.value = true
   try {
     const row = active.value
-    const report = await checkQuestionByAi({
-      subject: row.subject,
-      grade: row.grade,
-      type: row.type,
-      difficulty: row.difficulty,
-      knowledge: [...row.knowledge],
-      stem: row.stem,
-      options: row.options,
-      answer: row.answer,
-      analysis: row.analysis,
-    })
+    const report = await checkQuestionByAi(checkInputOfQuestion(row))
     row.aiChecks = mergeChecks(row, report.items)
     const engineText = report.engine === 'deepseek' ? '真实引擎' : '本地演示引擎'
     if (row.aiChecks.some((item) => !item.pass)) {

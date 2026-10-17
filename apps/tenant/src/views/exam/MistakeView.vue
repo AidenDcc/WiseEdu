@@ -23,8 +23,11 @@ import {
 import { QuestionOptions } from '@aiteach/business-common'
 import { optionColumnsOf } from '@aiteach/business-common'
 import { useBaseData } from '@aiteach/business-common'
+import { useMenuAccess } from '@/composables/useVisibleMenus'
 
 const router = useRouter()
+/* 「布置作业」跳的是作业系统：标准版没有这个模块，按钮跟着藏 */
+const { canSee } = useMenuAccess()
 const { difficulties, ensure } = useBaseData()
 
 const mistakes = ref<MistakeEntry[]>([])
@@ -352,7 +355,7 @@ onMounted(async () => {
       <div class="op-group" style="justify-content: flex-end; gap: 8px">
         <button class="btn btn-ghost" @click="drillResult = null">稍后处理</button>
         <button class="btn btn-ghost" @click="router.push('/paper/compose')"><AppIcon name="layers" :size="14" /> 去组卷</button>
-        <button class="btn btn-primary" @click="router.push('/homework')"><AppIcon name="clipboard" :size="14" /> 布置作业</button>
+        <button v-if="canSee('/homework')" class="btn btn-primary" @click="router.push('/homework')"><AppIcon name="clipboard" :size="14" /> 布置作业</button>
       </div>
     </AppModal>
 

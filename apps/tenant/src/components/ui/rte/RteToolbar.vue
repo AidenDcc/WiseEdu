@@ -139,8 +139,11 @@ const indentLevel = computed(() => {
   }
   return Number((props.editor.getAttributes('paragraph') as { indentLevel?: number }).indentLevel ?? 0)
 })
+/* 首行缩进是**字符数**（0 = 没缩进）：`indent.ts` 里改成可调的字符数之后，
+   录题工具栏这里只需要「有没有」这一个布尔量 —— 但它必须读同一个属性名，
+   否则会出现「点了按钮、正文缩进了、按钮不亮」的错位。 */
 const firstLineIndent = computed(
-  () => Boolean((props.editor.getAttributes('paragraph') as { firstLineIndent?: boolean }).firstLineIndent),
+  () => Number((props.editor.getAttributes('paragraph') as { firstLineChars?: number }).firstLineChars ?? 0) > 0,
 )
 
 /* ===== 表格 ===== */
@@ -732,135 +735,6 @@ function insertParen() {
 .rte-color-glyph { display: inline-flex; flex-direction: column; align-items: center; gap: 1px; font-size: 15px; font-weight: 700; line-height: 1; }
 .rte-color-glyph i { display: block; width: 15px; height: 3px; border-radius: 2px; }
 
-/* ===== 弹层内的通用件 ===== */
-.rte-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  height: 32px;
-  padding: 0 10px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--ink-2);
-  font-family: inherit;
-  font-size: 13px;
-  text-align: left;
-  transition: background 0.15s;
-}
-.rte-menu-item:hover:not(:disabled) { background: #f2f4fa; }
-.rte-menu-item.on { background: var(--brand-soft); color: var(--brand-deep); }
-.rte-menu-item:disabled { color: #c3cad8; cursor: not-allowed; }
-.rte-menu-hint { margin-left: auto; color: var(--sub); font-size: 12px; }
-
-/* 下划线三档的预览：菜单里直接把样式画出来，省得去猜「双重下划线」长什么样。
-   基准类带一条实线，下面两档各自覆盖；「取消下划线」则把线去掉，并转灰表示「不设」 */
-.rte-underline-preview { text-decoration: underline; text-underline-offset: 0.2em; }
-.rte-underline-preview.u-wavy { text-decoration: underline wavy; }
-.rte-underline-preview.u-double { text-decoration: underline double; }
-.rte-underline-preview.u-none { text-decoration: none; color: var(--sub); }
-
-.rte-swatches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 4px; }
-/* 表格面板里的色板（单元格底纹 / 表格边框）：一排横向铺开、放不下就换行，
-   与上面弹层里的取色网格同一个 .rte-swatch */
-.rte-swatch-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 3px 2px 0; }
-.rte-swatch {
-  width: 24px;
-  height: 24px;
-  border: 1px solid rgb(0 0 0 / 10%);
-  border-radius: 7px;
-  cursor: pointer;
-  transition: transform 0.12s, box-shadow 0.12s;
-}
-.rte-swatch:hover { transform: scale(1.08); }
-.rte-swatch.on { box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--brand); }
-/* 边框色板：白底 + 粗彩边，与底纹色板（纯色块）一眼区分开 —— 这一档改的是边线不是填充 */
-.rte-swatch.is-border { background: #fff; border-width: 3px; }
-/* 「默认颜色」那一格没有色值可填，画一道斜杠表示「清掉颜色」，不然看起来像个白格子 */
-.rte-swatch.is-default { background: #fff; position: relative; overflow: hidden; }
-.rte-swatch.is-default::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(to top right, transparent 44%, var(--danger) 44%, var(--danger) 56%, transparent 56%);
-}
-
-/* ===== 有序列表序号的候选项 =====
-   每项是一段真的 `<ol>`，画 1-2-3：与正文同源（list-style-type 的取值就在 RICH_LIST_MARKERS.css 里），
-   所以 ① / (1) / 一、 这些自定义序号在这里也能如实显示 —— 换成一串文字标签就还原不出来了。
-   八项各三行、竖排要滚一屏，故两列。 */
-/* 每行一种序号，一屏看全八种 */
-.rte-markers { display: flex; flex-direction: column; gap: 2px; padding: 4px; }
-.rte-marker-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 6px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--ink-2);
-  text-align: left;
-  transition: background 0.15s, border-color 0.15s;
-}
-.rte-marker-option:hover { background: #f2f4fa; }
-.rte-marker-option.on { background: var(--brand-soft); border-color: var(--brand); color: var(--brand-deep); }
-/* 一格里只放一个空 `<li>`，序号由 list-style-type + start 画出来；内边距给序号让位
-   （UA 默认的 40px 太宽，横排三格摆不下），行高收紧让三格对齐得更整齐。
-   **不能**在这里写 width / flex —— 见模板上的注释。 */
-.rte-marker-preview {
-  margin: 0;
-  padding-left: 26px;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-/* ===== 插入表格的网格选择器 ===== */
-.rte-grid { display: flex; flex-direction: column; gap: 3px; padding: 4px; }
-.rte-grid-row { display: flex; gap: 3px; }
-.rte-grid-cell {
-  width: 18px;
-  height: 18px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  background: #fff;
-  cursor: pointer;
-}
-.rte-grid-cell.on { border-color: var(--brand); background: var(--brand-soft); }
-.rte-grid-hint { padding: 2px 4px 0; color: var(--sub); font-size: 12px; text-align: center; }
-
-/* ===== 表格操作面板 ===== */
-.rte-panel-title { padding: 6px 4px 2px; color: var(--sub); font-size: 12px; }
-.rte-panel-row { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 2px; }
-.rte-mini {
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: #fff;
-  color: var(--ink-2);
-  font-family: inherit;
-  font-size: 12.5px;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-.rte-mini:hover { background: var(--brand-soft); border-color: var(--brand); color: var(--brand-deep); }
-.rte-mini.on { background: var(--brand-soft); border-color: var(--brand); color: var(--brand-deep); }
-.rte-mini.danger { color: var(--danger); border-color: var(--danger-soft); }
-.rte-mini.danger:hover { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
-
-.rte-size-row { display: flex; align-items: center; gap: 6px; padding: 4px 2px 0; }
-.rte-size-label { width: 28px; color: var(--sub); font-size: 12.5px; }
-.rte-num {
-  width: 74px;
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: #fff;
-  color: var(--ink);
-  font-family: inherit;
-  font-size: 13px;
-}
-.rte-num:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+/* 弹层内部的原子件（.rte-menu-item / .rte-swatch / .rte-grid / .rte-mini ……）在
+   styles/rte-popover.css 里 —— 文档编辑器的工具栏共用同一批，写在组件里就会各留一份 */
 </style>

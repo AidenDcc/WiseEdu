@@ -38,6 +38,7 @@ import type {
   OrgPaper,
   OrgQuestion,
   QuestionCorrection,
+  TeachAiTextAction,
   QuestionCorrectionType,
   OrgPrompt,
   OrgRole,
@@ -54,6 +55,8 @@ import type {
   StandardFormula,
   TeachDoc,
   TeachDocKind,
+  TeachTemplate,
+  TeachTemplateKind,
   TextbookOption,
   VideoClip,
 } from '@aiteach/shared'
@@ -376,6 +379,57 @@ export function duplicateTeachDoc(id: number) {
 }
 export function toggleTeachDocPublish(id: number) {
   return request<TeachDoc>('/tenant/teach/docs/publish', { method: 'POST', data: { id } })
+}
+
+/**
+ * 划词 AI：改一段话。
+ *
+ * 出入参就是「一段纯文本进、一段纯文本出」—— 富文本的包裹（加粗、公式）不由这里管：
+ * 选区在调用方已经按纯文本取出，结果整段替换回去，格式一律重排（与 Word 的「AI 改写」
+ * 同义：改写过的段落不再保留原来的局部加粗）。
+ */
+export function polishText(data: { action: TeachAiTextAction; text: string; subject?: string }) {
+  return request<{ action: TeachAiTextAction; label: string; text: string; mocked: boolean }>('/tenant/teach/ai-text', {
+    method: 'POST',
+    data,
+  })
+}
+
+/* ===== 教案 / 学案 / 讲义模板（备课中心「模板维护」） ===== */
+export function fetchTeachTemplates(kind?: TeachTemplateKind) {
+  return request<TeachTemplate[]>(withQuery('/tenant/teach/templates', { kind }))
+}
+export function saveTeachTemplate(data: Partial<TeachTemplate> & { kind: TeachTemplateKind; name: string; content: string }) {
+  return request<TeachTemplate>('/tenant/teach/templates/save', { method: 'POST', data })
+}
+export function deleteTeachTemplate(id: number) {
+  return request<null>('/tenant/teach/templates/delete', { method: 'POST', data: { id } })
+}
+export function setDefaultTeachTemplate(id: number) {
+  return request<TeachTemplate>('/tenant/teach/templates/default', { method: 'POST', data: { id } })
+}
+export function toggleTeachTemplate(id: number) {
+  return request<TeachTemplate>('/tenant/teach/templates/toggle', { method: 'POST', data: { id } })
+}
+/** AI 生成草稿：按所选模板骨架 + 课题要求拼出文档流 HTML，直接灌进编辑器正文 */
+export function generateTeachDraft(data: {
+  kind: TeachTemplateKind
+  subject?: string
+  grade?: string
+  textbook?: string
+  /** 章节（教材目录里的那一节）；与知识点一起决定内容范围 */
+  chapter?: string
+  /** 知识点：这一节具体讲到哪几条 —— 生成器会逐条展开成讲解与练习 */
+  knowledge?: string[]
+  periods?: number
+  topic?: string
+  templateId?: number
+  requirement?: string
+}) {
+  return request<{ content: string; promptName: string; tokens: number; costMs: number }>('/tenant/teach/ai-draft', {
+    method: 'POST',
+    data,
+  })
 }
 
 /* ===== 教辅 ===== */

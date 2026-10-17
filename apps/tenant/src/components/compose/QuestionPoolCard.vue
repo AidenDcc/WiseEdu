@@ -1,18 +1,33 @@
 <script setup lang="ts">
 /**
-* 组卷工作台的题目卡片：题干 / 选项 / 标签 / 答案与解析 / 加入组卷车。
+* 组卷工作台的题目卡片：题干 / 选项 / 标签 / 答案与解析 / 加入组卷车；
+ * 材料组合题则把子题整块铺开（题干变成共用材料 + （1）（2）子题）。
  *
  * 为什么这里抽成公共组件，而题库管理与 AI 生成结果各有一份 scoped 副本（见
  * `question/QuestionResultList.vue` 头部注释）：那两处的卡片各自背了对方没有的状态
  * （题库有 status / useCount / 变式，生成结果有质检结论），抽出公共件要挂一堆可选字段；
  * 而这里的三个使用处（试题池、知识点组卷、同步练习组卷）**卡片内容与操作完全一致**，
  * 差异只在「谁筛选出这批题」，所以抽出公共件反而更短。
+ *
+ * **组合题整卡进出**：卡片上只有一枚「加入组卷车」，作用于整道组合题；
+ * 子题是只读铺陈（`CompositeSubList`），不给任何单题级入口 —— 组卷车条目存的是母题 id。
  */
 import { computed, ref } from 'vue'
-import { AppIcon, RichTextViewer, QUESTION_STATUS_TEXT, hasImage, toPlainText } from '@aiteach/shared'
+import { AppIcon, RichTextViewer, QUESTION_STATUS_TEXT } from '@aiteach/shared'
 import type { OrgQuestion } from '@aiteach/shared'
+import { CompositeSubList } from '@aiteach/business-common'
+import { CompositeTag } from '@aiteach/business-common'
 import { QuestionOptions } from '@aiteach/business-common'
-import { isJudgeNoOptions, judgeAnswerText, optionColumnsOf } from '@aiteach/business-common'
+import {
+  difficultyClass as difficultyTag,
+  isCompositeQuestion,
+  isJudgeNoOptions,
+  judgeAnswerText,
+  needsFigure as figureNeeded,
+  optionColumnsOf,
+  subQuestionCount,
+  subQuestionsOf,
+} from '@aiteach/business-common'
 
 const props = defineProps<{
   row: OrgQuestion
@@ -36,28 +51,27 @@ const emit = defineEmits<{
 
 const analysisOpen = ref(false)
 
-/** 难度标签配色，与题库列表一致 */
-const difficultyClass = computed(() => {
-  const value = props.row.difficulty
-  if (value === '困难' || value === '较难') return 'tag-red'
-  return value === '中等' ? 'tag-orange' : 'tag-green'
-})
-
-/** 图形占位框：题干提到配图、且题内确实没有嵌入图片时才显示 */
-const needsFigure = computed(() => {
-  if (hasImage(props.row.stem)) return false
-  const text = toPlainText(props.row.stem)
-  return text.includes('如图') || text.includes('图）')
-})
+/**
+ * 难度配色与配图判定都取公共纯函数（既有的本地副本与它们逐字相同）。
+ * 三处使用方（试题池 / 知识点组卷 / 同步练习组卷）本来共用本组件，
+ * 但这两条判定若在这里再留一份，题库列表与本卡片就有两套实现 —— 改一处必然漏一处。
+ */
+const difficultyClass = computed(() => difficultyTag(props.row.difficulty))
+const needsFigure = computed(() => !isCompositeQuestion(props.row) && figureNeeded(props.row))
 
 /** 未入库题目不能进试卷（FR-PP-003），按钮禁用并说明原因 */
 const blocked = computed(() => props.row.status !== 'approved')
+
+/** 材料组合题：母题的 `stem` 是共用材料，作答单位在子题里 */
+const composite = computed(() => isCompositeQuestion(props.row))
 </script>
 
 <template>
   <article class="q-card" :class="{ blocked }">
     <div class="qc-meta">
       <span class="qc-id">#{{ row.id }}</span>
+      <!-- 组合题先点明类别与小问数：母题那一段文字是共用材料，光看它认不出题的分量 -->
+      <CompositeTag v-if="composite" :count="subQuestionCount(row)" />
       <span class="tag tag-blue">{{ row.type }}</span>
       <span class="tag" :class="difficultyClass">{{ row.difficulty }}</span>
       <span class="tag tag-gray">{{ row.subject }} · {{ row.grade }}</span>
@@ -73,19 +87,33 @@ const blocked = computed(() => props.row.status !== 'approved')
       <span>题目配图（演示占位）</span>
     </div>
 
-    <!-- 不传 answer：选题态不在选项里透露正确项，答案在下方「解析」展开 -->
-    <QuestionOptions class="qc-options" :options="row.options" :columns="optionColumnsOf(row)" />
+    <!-- 材料组合题：母题没有选项 / 答案，作答结构全在子题里 —— 逐题铺开（含选项），
+         展开「答案与解析」时再逐题补答案；子题在此**没有任何可点的动作**，
+         加入组卷车的单位恒为整道组合题 -->
+    <CompositeSubList
+      v-if="composite"
+      class="qc-subs"
+      :subs="subQuestionsOf(row)"
+      options
+      :answers="analysisOpen"
+      empty-text="该组合题还没有子题。"
+    />
 
-    <div v-if="analysisOpen" class="qc-answer">
-      <p>
-        <b>答案：</b>
-        <span v-if="row.options.length || isJudgeNoOptions(row)" class="qc-answer-text">
-          {{ isJudgeNoOptions(row) ? judgeAnswerText(row.answer) : row.answer || '—' }}
-        </span>
-        <RichTextViewer v-else :content="row.answer" tag="span" empty="—" />
-      </p>
-      <p><b>解析：</b><RichTextViewer :content="row.analysis" tag="span" empty="—" /></p>
-    </div>
+    <template v-else>
+      <!-- 不传 answer：选题态不在选项里透露正确项，答案在下方「解析」展开 -->
+      <QuestionOptions class="qc-options" :options="row.options" :columns="optionColumnsOf(row)" />
+
+      <div v-if="analysisOpen" class="qc-answer">
+        <p>
+          <b>答案：</b>
+          <span v-if="row.options.length || isJudgeNoOptions(row)" class="qc-answer-text">
+            {{ isJudgeNoOptions(row) ? judgeAnswerText(row.answer) : row.answer || '—' }}
+          </span>
+          <RichTextViewer v-else :content="row.answer" tag="span" empty="—" />
+        </p>
+        <p><b>解析：</b><RichTextViewer :content="row.analysis" tag="span" empty="—" /></p>
+      </div>
+    </template>
 
     <div class="qc-ops">
       <button class="mini-btn" type="button" @click="analysisOpen = !analysisOpen">
@@ -167,6 +195,8 @@ const blocked = computed(() => props.row.status !== 'approved')
 
 /* 选项外观（描边块 / 一行 N 个）由 QuestionOptions 负责，这里只管与题干的间距 */
 .qc-options { margin-top: 10px; }
+/* 组合题的子题列表：只管与上方材料的间距（子题自身样式在 CompositeSubList 里） */
+.qc-subs { margin-top: 10px; }
 
 .qc-answer {
   margin-top: 10px;

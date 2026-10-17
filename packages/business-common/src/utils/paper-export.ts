@@ -10,11 +10,22 @@
  * 的 HTML 文档（Word 可直接打开并另存为 .docx），PDF 走新窗口 + 系统打印。
  *
  * 注意：公式节点在导出文档里没有 KaTeX 可渲染，统一转成 `$LaTeX$` 源码，保证可读、可补。
+ *
+ * 材料组合题与 PaperBlock 同一口径：**一道题一个题号**，材料之后按（1）（2）铺开子题
+ * （子题各带选项、逐题答案 / 解析、主观子题的作答空白）。导出件若只印共用材料，
+ * 印出来的就是一张没法做的卷子 —— 这是「所见即所得」里最不能省的一处。
  */
 import type { OrgPaper, OrgQuestion } from '@aiteach/shared'
 import { isRichContent, sanitizeRichHtml } from '@aiteach/shared'
 import { ANSWER_LINES, DEFAULT_PAPER_NOTICES } from '../components/paper/paper-layouts'
-import { isJudgeNoOptions, judgeAnswerText, optionColumnsOf } from './question-card'
+import {
+  isCompositeQuestion,
+  isJudgeNoOptions,
+  judgeAnswerText,
+  optionColumnsOf,
+  subAnswerText,
+  subQuestionsOf,
+} from './question-card'
 
 /** 学生版（只有题）/ 教师版（附答案与解析）/ 纯答案页 */
 export type ExportVersion = 'student' | 'teacher' | 'answer'
@@ -115,6 +126,12 @@ function baseCss(): string {
     .q-opt.c4 .q-opt-line { display: inline-block; width: 24%; vertical-align: top; }
     .q-ans { margin: 6px 0 0 22px; font-size: 10.5pt; color: #0a5; border-left: 3px solid #0a5; padding-left: 8px; }
     .q-space { height: 60px; border-bottom: 1px dashed #bbb; margin: 8px 0 0 22px; }
+    /* 材料组合题的子题：整块用缩进 + 「（1）（2）」表示从属关系（与卷面 PaperBlock 同一读法）。
+       子题内部的选项 / 答案 / 作答空白不再各留一次 22px —— 父级的缩进已经把它们归到子题下了。 */
+    .q-sub { margin: 6px 0 0 22px; }
+    .q-sub-no { font-weight: bold; }
+    .q-sub-stem { display: inline; }
+    .q-sub .q-opt, .q-sub .q-ans, .q-sub .q-space { margin-left: 0; }
     .card-title { font-family: "Heiti SC", "Microsoft YaHei", sans-serif; font-size: 13pt; margin: 20px 0 8px; }
     .card-hint { font-size: 10pt; color: #666; margin-bottom: 8px; }
     table.ans { border-collapse: collapse; width: 100%; font-size: 11pt; }
@@ -196,21 +213,77 @@ function sectionNote(view: { count: number; score: number; perScore: number | nu
   return `（共 ${view.count} 小题${per}，共 ${view.score} 分）`
 }
 
+/**
+ * 一组选项的 HTML（母题与子题共用；判断题按卷面习惯标 √ / ×，其余标 A/B/C…）。
+ *
+ * 一行 N 个走 `c2` / `c4`（行内块分列，Word 对 grid / flex 支持不稳），
+ * 与母题侧同一套写法 —— 组合题的子题选项因此与普通选择题长得完全一样。
+ */
+function optionsHtml(row: { type: string; options: string[]; optionColumns?: 1 | 2 | 4 }): string {
+  if (!row.options.length) return ''
+  const columns = optionColumnsOf(row)
+  return `<div class="q-opt${columns > 1 ? ` c${columns}` : ''}">${row.options
+    .map(
+      (opt, i) =>
+        `<span class="q-opt-line"><span class="q-opt-letter">${optionMark(row.type, i)}.</span>${richHtml(opt)}</span>`,
+    )
+    .join('')}</div>`
+}
+
+/** 主观题（含组合题的**主观子题**）的作答空白行数，与卷面 PaperBlock 的 subWriteLines 同一口径 */
+function subSpaceLines(row: { type: string; options: string[] }): number {
+  if (row.options.length > 0 || isJudgeNoOptions(row)) return 0
+  return row.type.includes('填空') ? 2 : 3
+}
+
+/**
+ * 材料组合题：题号 + 共用材料 + 按（1）（2）铺开的子题。
+ *
+ * 组合题在卷面上是**一道题**（一个题号、一个分值），所以这里不拆行、不另起题号 ——
+ * 与 PaperBlock 的渲染口径完全一致，导出件与预览看到的才是同一份卷子。
+ * 学生版逐题给主观子题留作答空白；教师版逐题给答案与解析（答案都在子题里，母题那层是空的）。
+ */
+function compositeQuestionHtml(q: ExportQuestion, item: OrgQuestion, teacher: boolean): string {
+  const score = `<span class="q-score">（${q.score} 分）</span>`
+  const subs = subQuestionsOf(item)
+  const body = subs
+    .map((sub, i) => {
+      const lines = teacher ? 0 : subSpaceLines(sub)
+      const space = lines ? `<div class="q-space" style="height:${lines * 26}px"></div>` : ''
+      const answer =
+        teacher && (sub.answer || sub.analysis)
+          ? `<div class="q-ans"><b>答案：</b>${richHtml(subAnswerText(sub)) || '—'}${
+              sub.analysis ? `<br><b>解析：</b>${richHtml(sub.analysis)}` : ''
+            }</div>`
+          : ''
+      return (
+        `<div class="q-sub"><span class="q-sub-no">（${i + 1}）</span>` +
+        `<span class="q-sub-stem">${richHtml(sub.stem)}</span>${optionsHtml(sub)}${space}${answer}</div>`
+      )
+    })
+    .join('')
+  /* 一道子题都没有时给一句说明：导出件里出现一段没头没尾的材料，比空白更让人困惑 */
+  const empty = subs.length ? '' : '<div class="q-sub">（本题尚未录入子题）</div>'
+  return `<div class="q"><div class="q-inner"><span class="q-no">${q.no}.</span>${score}<span class="q-stem">${richHtml(item.stem)}</span></div>${body}${empty}</div>`
+}
+
+/** 组合题的答案串：逐小题「（1）B　（2）82.5　…」，答案页与答题卡参考答案共用 */
+function compositeAnswerHtml(item: OrgQuestion): string {
+  const rows = subQuestionsOf(item).map(
+    (sub, i) => `（${i + 1}）${richHtml(subAnswerText(sub)) || '—'}`,
+  )
+  return rows.length ? rows.join('　') : '—'
+}
+
 function questionHtml(q: ExportQuestion, teacher: boolean): string {
   const item = q.item
   if (!item) return `<div class="q"><span class="q-no">${q.no}.</span> （题目已不存在）</div>`
 
+  if (isCompositeQuestion(item)) return compositeQuestionHtml(q, item, teacher)
+
   const score = `<span class="q-score">（${q.score} 分）</span>`
   const stem = `<span class="q-stem">${richHtml(item.stem)}</span>`
-  const columns = optionColumnsOf(item)
-  const options = item.options.length
-    ? `<div class="q-opt${columns > 1 ? ` c${columns}` : ''}">${item.options
-        .map(
-          (opt, i) =>
-            `<span class="q-opt-line"><span class="q-opt-letter">${optionMark(item.type, i)}.</span>${richHtml(opt)}</span>`,
-        )
-        .join('')}</div>`
-    : ''
+  const options = optionsHtml(item)
 
   /* 学生版给解答题留作答空白：填空 2 行、其余按分值给高度。
      无选项判断不留 —— 它在题干前的（　　）里作答（见 isJudgeNoOptions）。 */
@@ -232,10 +305,13 @@ function questionHtml(q: ExportQuestion, teacher: boolean): string {
   return `<div class="q"><div class="q-inner"><span class="q-no">${q.no}.</span>${score}${stem}</div>${options}${space}${answer}</div>`
 }
 
-/** 纯答案页：一题一行，客观题给选项字母，主观题给答案全文 */
+/** 纯答案页：一题一行，客观题给选项字母，主观题给答案全文，组合题逐小题给答案 */
 function answerOnlyHtml(q: ExportQuestion): string {
   const item = q.item
   if (!item) return `<tr><td class="no">${q.no}</td><td>题目已不存在</td></tr>`
+  if (isCompositeQuestion(item)) {
+    return `<tr><td class="no">${q.no}</td><td>${compositeAnswerHtml(item)}</td></tr>`
+  }
   const answer = item.options.length ? item.answer : answerHtml(item) || '—'
   return `<tr><td class="no">${q.no}</td><td>${answer}</td></tr>`
 }
@@ -268,20 +344,30 @@ function extrasHtml(paper: OrgPaper): string {
 function answerCardHtml(views: ReturnType<typeof buildViews>): string {
   const rows: string[] = []
   views.forEach((view) => {
-    const objective = view.questions.filter((q) => q.item && q.item.options.length > 0)
-    if (!objective.length) return
+    /* 客观题填答案字母；材料组合题也进这张表 —— 它的答案在子题里，
+       而阅卷核对答案时同样要逐小题对，只列客观题会让组合题的答案无处可查 */
+    const fillable = view.questions.filter(
+      (q) => q.item && (q.item.options.length > 0 || isCompositeQuestion(q.item)),
+    )
+    if (!fillable.length) return
     /* 每行 5 题，与常见答题卡的填涂区排布一致 */
-    for (let i = 0; i < objective.length; i += 5) {
-      const chunk = objective.slice(i, i + 5)
+    for (let i = 0; i < fillable.length; i += 5) {
+      const chunk = fillable.slice(i, i + 5)
       rows.push(
         `<tr>${chunk
-          .map((q) => `<td class="no">${q.no}</td><td>${escapeHtml(q.item?.answer ?? '')}</td>`)
+          .map((q) => {
+            const item = q.item as OrgQuestion
+            const answer = isCompositeQuestion(item)
+              ? compositeAnswerHtml(item)
+              : escapeHtml(item.answer ?? '')
+            return `<td class="no">${q.no}</td><td>${answer}</td>`
+          })
           .join('')}</tr>`,
       )
     }
   })
   if (!rows.length) return ''
-  return `<h2 class="card-title">答题卡 · 参考答案</h2><div class="card-hint">客观题答案，供阅卷核对使用。</div><table class="ans">${rows.join('')}</table>`
+  return `<h2 class="card-title">答题卡 · 参考答案</h2><div class="card-hint">客观题与材料组合题（逐小题）的答案，供阅卷核对使用。</div><table class="ans">${rows.join('')}</table>`
 }
 
 /**

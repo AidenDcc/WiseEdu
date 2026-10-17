@@ -3,27 +3,17 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { EditorContent, useEditor } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
 import { Mathematics } from '@tiptap/extension-mathematics'
-import { Image } from '@tiptap/extension-image'
 import { FontFamily, FontSize, TextStyle } from '@tiptap/extension-text-style'
 import { TableKit } from '@tiptap/extension-table'
-import { ResizableNodeView } from '@tiptap/core'
-/* 只用它的 Selection.atEnd：求「文档末尾」的插入落点（没有光标时的兜底位置） */
-import { Selection } from '@tiptap/pm/state'
 import {
   isRichContent,
   normalizeRichHtml,
-  resolveMediaSrc,
-  showToast,
   toPlainText,
 } from '@aiteach/shared'
-import type { DrawEditorType, OrgMedia } from '@aiteach/shared'
-import FormulaPickerModal from './FormulaPickerModal.vue'
-import FormulaInlineInput from './rte/FormulaInlineInput.vue'
-import MediaPickerModal from './MediaPickerModal.vue'
 import RteToolbar from './rte/RteToolbar.vue'
-import MediaDrawSelectDialog from '@/components/draw/MediaDrawSelectDialog.vue'
-import AiDrawGenerateDialog from '@/components/draw/AiDrawGenerateDialog.vue'
-import DrawEditorHost from '@/components/draw/DrawEditorHost.vue'
+import RichMediaDialogs from './rte/RichMediaDialogs.vue'
+import { useRichMediaPlumbing } from './rte/useRichMediaPlumbing'
+import { ResizableImage } from './rte/resizableImage'
 import { DrawSvgImage } from '@/tiptap-extensions/drawSvgImage'
 import { TextDecoration } from '@/tiptap-extensions/textDecoration'
 import { HexColor } from '@/tiptap-extensions/color'
@@ -32,100 +22,6 @@ import { ListMarker } from '@/tiptap-extensions/listMarker'
 import { Indent } from '@/tiptap-extensions/indent'
 import { PaperTable, RowHeight } from '@/tiptap-extensions/tableSizing'
 import { PaperTableCell, PaperTableHeader } from '@/tiptap-extensions/tableCellStyle'
-import { fetchMediaDetail, uploadMedia } from '@/api/org'
-
-/** 拖拽的最小边长：再小控制点就糊成一个点，也失去了「缩回去」的手感 */
-const MIN_IMAGE_PX = 40
-
-/**
- * 图片节点：正文里存的是 `/api/tenant/media/12/raw` 这类规范地址，浏览器直接请求拿不到字节
- * （mock 阶段没有托管服务），编辑器内因此渲染成破图。
- *
- * 用 NodeView 做显示层的地址还原，而不是改 renderHTML —— `getHTML()` 走的就是 renderHTML，
- * 在那里换地址会把 data URL 写进存储，正文就不再是「只存 URL」了。
- *
- * 缩放也挂在这个 NodeView 上：四角 + 四边共八个控制点，松手写回节点的 width / height 属性，
- * 存下来是 `<img src="…" width="320" height="180">` —— 只读渲染端（RichTextViewer）靠属性就能
- * 还原尺寸，不需要知道编辑器里发生过什么。缩放本身复用 @tiptap/core 的 ResizableNodeView，
- * 不自己写拖拽数学；这里只负责给它一个「地址已还原、尺寸已回填」的 img。
- *
- * 方向语义：四角拖 = 等比缩放（几何图、照片不被拉变形）；四边中点拖 = 单向拉伸 —
- * 水平边只改宽、垂直边只改高（裁掉 AI 配图多余的留白）。等比锁不是全局开关，
- * 而是每次拖拽开始时按把手方向切换（见下方对 handleResizeStart 的实例级遮蔽）。
- */
-const ResizableImage = Image.extend({
-  addNodeView() {
-    return ({ node, getPos, editor }) => {
-      const el = document.createElement('img')
-
-      /** DOM 与节点属性对齐：初始渲染与每次 update 都走这里，撤销 / 重做才带得回旧尺寸 */
-      const paint = (attrs: Record<string, unknown>) => {
-        const src = String(attrs.src ?? '')
-        if (src) el.src = resolveMediaSrc(src)
-        if (attrs.alt) el.alt = String(attrs.alt)
-        if (attrs.title) el.title = String(attrs.title)
-        /* 没有 width 就清掉内联尺寸，退回 CSS 的 max-width: 100% 自适应 */
-        el.style.width = attrs.width ? `${attrs.width}px` : ''
-        el.style.height = attrs.height ? `${attrs.height}px` : ''
-      }
-      paint(node.attrs)
-
-      const view = new ResizableNodeView({
-        element: el,
-        editor,
-        node,
-        getPos,
-        /* 拖拽过程只动 DOM，松手才写节点：逐帧 updateAttributes 会把撤销栈切成几百步 */
-        onResize: (width, height) => {
-          el.style.width = `${width}px`
-          el.style.height = `${height}px`
-        },
-        onCommit: (width, height) => {
-          const pos = getPos()
-          if (pos === undefined) return
-          /* 先选中再写属性：松手后控制点不消失，可以接着微调 */
-          editor.chain().setNodeSelection(pos).updateAttributes(node.type.name, { width, height }).run()
-        },
-        onUpdate: (updated) => {
-          if (updated.type !== node.type) return false
-          paint(updated.attrs)
-          return true
-        },
-        options: {
-          directions: [
-            'top-left', 'top', 'top-right',
-            'left', 'right',
-            'bottom-left', 'bottom', 'bottom-right',
-          ],
-          min: { width: MIN_IMAGE_PX, height: MIN_IMAGE_PX },
-          /* 全局等比锁关闭（否则边中点也变成等比，单向拉伸就失效了）；按下面对
-             handleResizeStart 的遮蔽，在每次拖拽开始时按把手方向重新设定 */
-          preserveAspectRatio: false,
-        },
-      })
-
-      /* preserveAspectRatio 是拖拽期间实时读取的实例属性，而方向只有拖拽开始那一刻可知，
-         库又没有提供按方向配置的口子 —— 实例级遮蔽私有方法（运行时即普通原型方法，
-         赋值成自有属性后库的监听闭包读到的就是这里设定的值）。d.ts 标了 private，
-         故做一次类型断言。 */
-      const protoStart = (
-        view as unknown as {
-          handleResizeStart: (event: MouseEvent | TouchEvent, direction: string) => void
-        }
-      ).handleResizeStart
-      ;(
-        view as unknown as {
-          handleResizeStart: (event: MouseEvent | TouchEvent, direction: string) => void
-        }
-      ).handleResizeStart = (event, direction) => {
-        view.preserveAspectRatio = direction.includes('-')
-        protoStart.call(view, event, direction)
-      }
-
-      return view
-    }
-  },
-})
 
 /**
  * 题目富文本编辑器（FR-TM-008）。
@@ -134,6 +30,11 @@ const ResizableImage = Image.extend({
  * - 公式走 Tiptap 官方 Mathematics 扩展（KaTeX），节点内只存 data-latex，可反复回改；
  * - 图片走 Mock 媒体库，正文里只落 URL，不内联 base64；
  * - 标题、代码块、分割线与题干无关，关掉以精简工具栏与内容模型。
+ *
+ * 可拖拽改尺寸的图片节点（ResizableImage）已抽到 ./rte/resizableImage.ts；
+ * 公式 / 图片 / 配图三条媒体通路抽到 ./rte/useRichMediaPlumbing.ts，弹窗宿主抽到
+ * ./rte/RichMediaDialogs.vue —— 备课文档编辑器（doc/DocEditor.vue）用同一份，
+ * 两处的行为必须一致。
  */
 const props = withDefaults(
   defineProps<{
@@ -176,324 +77,6 @@ function toEditorHtml(input: string): string {
 /* 填空下横线 / 括号两个按钮跟着工具栏走了（纯编辑器命令，不需要父级状态）：
    见 components/ui/rte/RteToolbar.vue。 */
 
-/* ===== 公式落点：内联输入框与公式编辑器弹窗共用的唯一出口 ===== */
-
-/**
- * 内联输入框的一次会话（浮层自己不带文档状态，这里记「贴哪个位置、初始源码、什么模式」）。
- * `editPos` 非 null 表示在改已有的公式节点 —— 同一个浮层既要能新插，也要能就地改。
- */
-interface InlineMathAnchor {
-  /** 浮层贴哪个文档位置：新插入时是落点，编辑已有节点时是节点位置 */
-  pos: number
-  latex: string
-  block: boolean
-  /** 非 null = 在改这个位置的已有公式节点；null = 新插入 */
-  editPos: number | null
-}
-
-/**
- * 落公式的唯一出口 —— 内联输入框和公式编辑器弹窗都走这里，不各写一份。
- *
- * @param editPos   非 null 时改这个位置的已有公式节点
- * @param insertPos 新插入时的落点；null 表示交给当前选区
- */
-function placeMath(latex: string, block: boolean, editPos: number | null, insertPos: number | null) {
-  const instance = editor.value
-  if (!instance) return
-
-  if (editPos !== null) {
-    const node = instance.state.doc.nodeAt(editPos)
-    if (!node) {
-      showToast('公式已不在原位置，请重新编辑', 'error')
-      return
-    }
-    /* 模式没变：原地改 attrs 就够（扩展的 update* 会自己校验节点类型，pos 必须显式给 ——
-       不给的话它回退到 selection.$from.pos，而此刻焦点在浮层里，选区已不代表用户看着的位置） */
-    if (block === (node.type.name === 'blockMath')) {
-      const ok = block
-        ? instance.chain().focus().updateBlockMath({ latex, pos: editPos }).run()
-        : instance.chain().focus().updateInlineMath({ latex, pos: editPos }).run()
-      if (!ok) showToast('公式更新失败，请删除后重新插入', 'error')
-      return
-    }
-    /* 行内 ↔ 独立：节点类型都换了，update* 改不了，只能把这个节点整个换掉 */
-    const chain = instance.chain().focus().deleteRange({ from: editPos, to: editPos + node.nodeSize })
-    const swapped = block
-      ? chain.insertBlockMath({ latex, pos: editPos }).run()
-      : chain.insertInlineMath({ latex, pos: editPos }).run()
-    if (!swapped) showToast('公式更新失败，请删除后重新插入', 'error')
-    return
-  }
-
-  const target = insertPos === null ? null : clampPos(insertPos)
-  const chain = instance.chain().focus()
-  const ok =
-    target === null
-      ? (block ? chain.insertBlockMath({ latex }) : chain.insertInlineMath({ latex })).run()
-      : (block ? chain.insertBlockMath({ latex, pos: target }) : chain.insertInlineMath({ latex, pos: target })).run()
-  if (!ok) showToast('公式插入失败，请重试', 'error')
-}
-
-/* ===== 公式编辑器弹窗 =====
-   工具栏的「插入公式」和点正文里已有的公式，默认都是**就地**开内联输入框；
-   这个大弹窗只在「内联输入框 → 下拉 → 公式编辑器」这条回跳里出现。 */
-const mathOpen = ref(false)
-/** 弹窗在改哪个已有公式节点（null = 新插入） */
-const mathEditingPos = ref<number | null>(null)
-/** 打开弹窗时公式原本是块级还是行内 —— 决定弹窗里插入方式的初始态 */
-const mathEditingBlock = ref(false)
-const mathInitialLatex = ref('')
-/** 弹窗路径的新插入落点（null 表示退回当前选区） */
-const mathInsertPos = ref<number | null>(null)
-/** 弹窗若由内联输入框跳来，记下那个会话：取消时把草稿原样还原回内联框（见 onMathClose） */
-const mathInlineAnchor = ref<InlineMathAnchor | null>(null)
-
-/** 工具栏「插入公式」：贴光标开一个空的轻量输入框 */
-function openMathInsert() {
-  const instance = editor.value
-  if (!instance) return
-  inlineMath.value = null
-  /* 每次自增 → 子组件按 key 重挂：再点一次「公式」是「重新贴当前光标开一个」，而不是沿用旧锚点 */
-  inlineMathSession.value += 1
-  inlineMath.value = { pos: resolveInsertPos(), latex: '', block: false, editPos: null }
-}
-
-/**
- * 点正文里已有的公式节点：就地开内联输入框改。
- * 以前这里是直接弹公式编辑器面板，可「改个系数也要过一遍 920px 的大弹窗」太重了；
- * 确实需要符号库 / 公式库时，再从输入框下拉里点「公式编辑器」，源码会一起带过去。
- */
-function openMathEdit(node: { attrs: { latex?: string } }, pos: number, block: boolean) {
-  inlineMath.value = null
-  inlineMathSession.value += 1
-  inlineMath.value = { pos, latex: node.attrs.latex ?? '', block, editPos: pos }
-}
-
-function onMathConfirm(latex: string, block: boolean) {
-  const editPos = mathEditingPos.value
-  const insertPos = mathInsertPos.value
-  mathOpen.value = false
-  mathEditingPos.value = null
-  mathInsertPos.value = null
-  mathInlineAnchor.value = null
-  placeMath(latex, block, editPos, editPos === null ? insertPos : null)
-}
-
-/* ===== 内联公式输入框（「插入公式」与「改已有公式」的默认通路） =====
-   贴光标开一个轻量输入框：敲 LaTeX → 失焦 / 回车即落成正文里的公式节点。
-   浮层本身不落文档（见 FormulaInlineInput 的注释），所以这里只保管「会话 + 开闭」。 */
-const inlineMath = ref<InlineMathAnchor | null>(null)
-/** 作为子组件的 key：每开一次自增，强制重挂以重新定位 */
-const inlineMathSession = ref(0)
-
-/** 插入锚点：编辑器里有光标就用当前选区起点；没有光标（从未聚焦过）就追加到文档末尾 */
-function resolveInsertPos(): number {
-  const instance = editor.value
-  if (!instance) return 1
-  if (!focused.value && !instance.isFocused) return Selection.atEnd(instance.state.doc).from
-  return instance.state.selection.from
-}
-
-/** 锚点用前夹一次：浮层开着时若文档被别处改短（AI 回填等），原位置可能已越界 */
-function clampPos(pos: number): number {
-  const instance = editor.value
-  if (!instance) return pos
-  const max = Math.max(1, instance.state.doc.content.size - 1)
-  return Math.max(1, Math.min(pos, max))
-}
-
-function onInlineInsert(latex: string, block: boolean) {
-  const anchor = inlineMath.value
-  inlineMath.value = null
-  if (!anchor) return
-  /* 编辑已有节点时落点就是节点位置，不能再夹取 —— 一夹就可能贴到隔壁节点上 */
-  placeMath(latex, block, anchor.editPos, anchor.editPos === null ? anchor.pos : null)
-}
-
-/**
- * 下拉里的「公式编辑器」：关掉轻量输入框，交给弹窗接管。
- * 已敲的源码、锚点、以及「是不是在改已有节点」一并带过去 ——
- * 写了一半再开面板，不该从头开始，也不该从「就地改」变成「旁边又插一个」。
- */
-function onInlineOpenEditor(latex: string, block: boolean) {
-  const anchor = inlineMath.value
-  inlineMath.value = null
-  mathEditingPos.value = anchor?.editPos ?? null
-  mathEditingBlock.value = block
-  mathInitialLatex.value = latex
-  mathInsertPos.value = anchor && anchor.editPos === null ? anchor.pos : null
-  /* 记住这一趟是从内联输入框来的：弹窗被取消时好把草稿还回去 */
-  mathInlineAnchor.value = anchor ? { ...anchor, block } : null
-  mathOpen.value = true
-}
-
-/**
- * 关掉公式编辑器弹窗。
- * 若这趟是从内联输入框跳过来的（mathInlineAnchor 有值），把弹窗里的草稿原样装回内联框：
- * 用户在面板里改过源码又反悔，不该连原来敲的一半也一起丢掉。
- */
-function onMathClose(draft?: { latex: string; block: boolean }) {
-  mathOpen.value = false
-  mathEditingPos.value = null
-  mathInsertPos.value = null
-  const anchor = mathInlineAnchor.value
-  mathInlineAnchor.value = null
-  if (!anchor) return
-  inlineMathSession.value += 1
-  inlineMath.value = {
-    ...anchor,
-    latex: draft?.latex ?? mathInitialLatex.value,
-    block: draft?.block ?? anchor.block,
-  }
-}
-
-/* ===== 图片：选库 / 传本地 / 粘贴 / 拖拽四条入口，统一走 uploadImage ===== */
-const imageOpen = ref(false)
-const MAX_IMAGE_MB = 2
-
-function readAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result))
-    reader.onerror = () => reject(new Error('读取图片失败'))
-    reader.readAsDataURL(file)
-  })
-}
-
-async function uploadImage(file: File) {
-  const instance = editor.value
-  if (!instance) return
-  if (!file.type.startsWith('image/')) {
-    showToast('仅支持插入图片文件', 'error')
-    return
-  }
-  if (file.size > MAX_IMAGE_MB * 1024 * 1024) {
-    showToast(`图片需小于 ${MAX_IMAGE_MB}MB，请压缩后重试`, 'error')
-    return
-  }
-  try {
-    const dataUrl = await readAsDataUrl(file)
-    /* 落到 Mock 媒体库：正文里只引用返回的 URL，「多媒体资源」同时多出一条 image 记录 */
-    const media = await uploadMedia({
-      name: file.name || '题目插图.png',
-      kind: 'image',
-      subject: props.subject || '通用',
-      knowledge: [],
-      dataUrl,
-      mime: file.type,
-      sizeMb: Math.round((file.size / 1024 / 1024) * 100) / 100,
-    })
-    if (!media.url) {
-      showToast('图片已上传但未取得地址，请重试', 'error')
-      return
-    }
-    instance.chain().focus().setImage({ src: media.url, alt: media.name, title: media.name }).run()
-    showToast('图片已插入，并存入图片资源', 'success')
-  } catch {
-    showToast('图片上传失败', 'error')
-  }
-}
-
-function pickImage() {
-  imageOpen.value = true
-}
-
-/** 从系统图片库选中一张：地址已由媒体库给出，直接落节点 */
-function onPickMedia(media: OrgMedia) {
-  imageOpen.value = false
-  const instance = editor.value
-  if (!instance || !media.url) return
-  instance.chain().focus().setImage({ src: media.url, alt: media.name, title: media.name }).run()
-  showToast('已插入图片', 'success')
-}
-
-/** 弹窗里选了本地文件：上传仍由这里独家负责，避免第二份大小 / 类型校验 */
-function onPickFile(file: File) {
-  imageOpen.value = false
-  void uploadImage(file)
-}
-
-/* ===== 理科配图：选择类型 → 编辑器；AI 草稿先校验再进画布；双击节点二次编辑 ===== */
-const drawSelectOpen = ref(false)
-const aiDrawOpen = ref<DrawEditorType | null>(null)
-interface DrawHostState {
-  editorType: DrawEditorType
-  mediaId?: number
-  projectJson?: string
-  molfileText?: string
-  /** 非空表示在二次编辑既有节点（值为节点位置），保存后更新节点而不是新插 */
-  editPos?: number
-}
-const drawHost = ref<DrawHostState | null>(null)
-
-function openDrawSelect() {
-  drawSelectOpen.value = true
-}
-
-function onDrawManual(type: DrawEditorType) {
-  drawSelectOpen.value = false
-  drawHost.value = { editorType: type }
-}
-
-function onDrawAi(type: DrawEditorType) {
-  drawSelectOpen.value = false
-  aiDrawOpen.value = type
-}
-
-function onDrawDraft(payload: { editorType: DrawEditorType; projectJson?: string; molfileText?: string }) {
-  aiDrawOpen.value = null
-  drawHost.value = { ...payload }
-}
-
-/** 宿主确认导出后：新图插入光标处；二次编辑则原位更新节点的 SVG */
-function onDrawSaved(media: OrgMedia) {
-  const instance = editor.value
-  const host = drawHost.value
-  drawHost.value = null
-  if (!instance || !media.url) return
-  if (host?.editPos != null) {
-    instance
-      .chain()
-      .setNodeSelection(host.editPos)
-      .updateAttributes('drawSvgImage', { svgUrl: media.url, alt: media.name })
-      .run()
-    showToast('配图已更新', 'success')
-  } else {
-    instance
-      .chain()
-      .focus()
-      .insertContent({
-        type: 'drawSvgImage',
-        attrs: { mediaId: media.id, svgUrl: media.url, alt: media.name },
-      })
-      .run()
-    showToast('理科配图已插入', 'success')
-  }
-}
-
-/** draw-svg-image 节点双击：读 media 记录唤起对应编辑器（工程数据重开，不从 SVG 反解析） */
-async function onDrawNodeEdit(mediaId: number, pos: number) {
-  try {
-    const media = await fetchMediaDetail(mediaId)
-    drawHost.value = {
-      editorType: media.editorType ?? 'fabric-general',
-      mediaId: media.id,
-      editPos: pos,
-    }
-  } catch {
-    showToast('配图工程读取失败，无法二次编辑', 'error')
-  }
-}
-
-/** 从剪贴板 / 拖拽事件里取图片文件 */
-function imageFromDataTransfer(dt: DataTransfer | null): File | null {
-  if (!dt) return null
-  for (const file of Array.from(dt.files)) {
-    if (file.type.startsWith('image/')) return file
-  }
-  return null
-}
-
 /* ===== 工具栏：默认收起，聚焦后展开 ===== */
 const root = ref<HTMLElement | null>(null)
 const focused = ref(false)
@@ -514,6 +97,23 @@ function onFocusOut(event: FocusEvent) {
   }
   focused.value = false
 }
+
+/* ===== 公式 / 图片 / 理科配图：与备课文档编辑器共用一份实现 =====
+   三条通路的全部状态与处理都在 rte/useRichMediaPlumbing.ts（公式的两级输入、图片落库、
+   配图画布），要开的五个弹窗由 rte/RichMediaDialogs.vue 渲染。这里只做两件本编辑器特有的事：
+
+   - `isFocused` 把根容器的聚焦态带过去：点工具栏按钮时 ProseMirror 已经失焦，只看
+     `editor.isFocused` 会把公式插到文档末尾而不是光标处；
+   - 图片兜底名带「题目」二字，多媒体资源列表里一眼能认出是录题时传的。
+
+   本组件在 `useEditor` 之前创建它：扩展的 `Mathematics.configure` 要引用 `openMathEdit`，
+   而扩展的 options 必须先于实例传入 —— 这正是 composable 收 getter 而不是 Ref 的原因。 */
+const media = useRichMediaPlumbing({
+  getEditor: () => editor.value,
+  getSubject: () => props.subject,
+  isFocused: () => focused.value,
+  imageName: '题目插图.png',
+})
 
 /* ===== 编辑器实例 ===== */
 /**
@@ -546,8 +146,8 @@ const editor = useEditor({
     DrawSvgImage,
     Mathematics.configure({
       katexOptions: { throwOnError: false },
-      inlineOptions: { onClick: (node, pos) => openMathEdit(node, pos, false) },
-      blockOptions: { onClick: (node, pos) => openMathEdit(node, pos, true) },
+      inlineOptions: { onClick: (node, pos) => media.openMathEdit(node, pos, false) },
+      blockOptions: { onClick: (node, pos) => media.openMathEdit(node, pos, true) },
     }),
     /* ===== 试卷排版：字体 / 字号 / 颜色 / 下划线样式 / 序号 / 缩进 / 表格 =====
        字体、字号、颜色、波浪线都落在**同一个** textStyle span 上（Tiptap 的 setMark 会合并 attrs），
@@ -575,17 +175,17 @@ const editor = useEditor({
   editorProps: {
     attributes: { class: 'rte-content' },
     handlePaste: (_view, event) => {
-      const file = imageFromDataTransfer(event.clipboardData)
+      const file = media.imageFromDataTransfer(event.clipboardData)
       if (!file) return false
       event.preventDefault()
-      void uploadImage(file)
+      void media.uploadImage(file)
       return true
     },
     handleDrop: (_view, event) => {
-      const file = imageFromDataTransfer((event as DragEvent).dataTransfer)
+      const file = media.imageFromDataTransfer((event as DragEvent).dataTransfer)
       if (!file) return false
       event.preventDefault()
-      void uploadImage(file)
+      void media.uploadImage(file)
       return true
     },
   },
@@ -620,13 +220,7 @@ onBeforeUnmount(() => {
 /* 编辑器就绪后挂上 draw-svg-image 节点的双击回调（节点 NodeView 经 editor.storage 取） */
 watch(
   () => editor.value,
-  (instance) => {
-    if (instance) {
-      ;(instance.storage as unknown as Record<string, unknown>).drawSvgImageOnEdit = (mediaId: number, pos: number) => {
-        void onDrawNodeEdit(mediaId, pos)
-      }
-    }
-  },
+  (instance) => media.attachEditor(instance),
   { immediate: true },
 )
 
@@ -647,14 +241,14 @@ defineExpose({ isEmpty })
     @focusout="onFocusOut"
   >
     <!-- 工具栏自身在 rte/RteToolbar.vue 里（按钮样式、弹层都与它同处一个组件）；
-         公式 / 图片 / 配图三个按钮要开的弹窗宿主在这里，所以由它 emit 回来 -->
+         公式 / 图片 / 配图三个按钮要开的弹窗由 rte/RichMediaDialogs.vue 渲染，所以由它 emit 回来 -->
     <RteToolbar
       v-if="editor"
       :editor="editor"
       :compact="compact"
-      @math="openMathInsert"
-      @image="pickImage"
-      @draw="openDrawSelect"
+      @math="media.openMathInsert"
+      @image="media.pickImage"
+      @draw="media.openDrawSelect"
     />
 
     <div class="rte-body-wrap" :style="{ minHeight: `${minHeight}px` }">
@@ -664,63 +258,9 @@ defineExpose({ isEmpty })
       <span v-if="isEmpty && !focused" class="rte-placeholder">{{ placeholder }}</span>
     </div>
 
-    <!-- 内联公式输入框：贴光标开、失焦即转成正文公式。key 让它每次「插入公式」都重新贴光标定位 -->
-    <FormulaInlineInput
-      v-if="inlineMath && editor"
-      :key="inlineMathSession"
-      :editor="editor"
-      :pos="inlineMath.pos"
-      :initial-latex="inlineMath.latex"
-      :initial-block="inlineMath.block"
-      :subject="subject"
-      @insert="onInlineInsert"
-      @cancel="inlineMath = null"
-      @open-editor="onInlineOpenEditor"
-    />
-
-    <FormulaPickerModal
-      v-if="mathOpen"
-      :subject="subject"
-      :initial-latex="mathInitialLatex"
-      :editing="mathEditingPos !== null"
-      :initial-block="mathEditingBlock"
-      @close="onMathClose"
-      @confirm="onMathConfirm"
-    />
-
-    <MediaPickerModal
-      v-if="imageOpen"
-      :subject="subject"
-      @close="imageOpen = false"
-      @pick="onPickMedia"
-      @pick-file="onPickFile"
-    />
-
-    <MediaDrawSelectDialog
-      v-if="drawSelectOpen"
-      @close="drawSelectOpen = false"
-      @manual="onDrawManual"
-      @ai="onDrawAi"
-    />
-
-    <AiDrawGenerateDialog
-      v-if="aiDrawOpen"
-      :initial-type="aiDrawOpen"
-      @close="aiDrawOpen = null"
-      @draft="onDrawDraft"
-    />
-
-    <DrawEditorHost
-      v-if="drawHost"
-      purpose="insert"
-      :editor-type="drawHost.editorType"
-      :media-id="drawHost.mediaId"
-      :initial-project-json="drawHost.projectJson"
-      :initial-molfile="drawHost.molfileText"
-      :subject="subject"
-      @close="drawHost = null"
-      @saved="onDrawSaved"
-    />
+    <!-- 公式（两级输入）/ 图片 / 理科配图的五个弹窗统一由它渲染 ——
+         与备课文档编辑器用同一个宿主，两处的弹窗行为不会各长一套 -->
+    <RichMediaDialogs v-if="editor" :media="media" :editor="editor" :subject="subject" />
   </div>
 </template>
 
@@ -759,6 +299,9 @@ defineExpose({ isEmpty })
   pointer-events: none;
 }
 
+/* 正文的**观感**（段落间距、列表、链接、图片、引用块、表格、公式节点）统一在
+   styles/richtext-content.css 里 —— 备课文档编辑器与只读渲染端用的是同一份，避免两处各长一套。
+   这里只留录题编辑器特有的「外壳」：内边距、正文字号与行高。 */
 .rte-body :deep(.rte-content) {
   min-height: inherit;
   padding: 11px 13px;
@@ -766,159 +309,7 @@ defineExpose({ isEmpty })
   line-height: 1.8;
   color: var(--ink);
   outline: none;
-  /* 下划线离文字太近，抬开一点。text-underline-offset 是继承属性，写在这里即覆盖正文全部
-     （`<u>` 与 span 上的 text-decoration 都吃这一条）。只读端与导出端各有一份同样的声明。 */
-  text-underline-offset: 0.2em;
 }
-.rte-body :deep(.rte-content p) { margin: 0 0 6px; }
-.rte-body :deep(.rte-content p:last-child) { margin-bottom: 0; }
-.rte-body :deep(.rte-content ul),
-.rte-body :deep(.rte-content ol) { padding-left: 22px; margin: 0 0 6px; }
-.rte-body :deep(.rte-content ul) { list-style: disc; }
-/* 有序列表的序号样式有两条通路：自定义序号（① / (1) / 一、）落内联 style，原生序号（1 / a / A / i / I）
-   落 `type` 属性。所以这一条只写「没设过序号」的兜底，**`ol[type='a']` 那类补丁千万别加** ——
-   HTML 文档里属性选择器对 `type` 是大小写不敏感地匹配的，`[type='a']` 连 `type="A"` 一起命中，
-   后写的 upper-* 会通吃，**i / a 就永远显示成 I / A**（这个 bug 真出现过）。
-   浏览器的 UA 样式表里那套映射带 `s` 大小写标志，是唯一能区分大小写的地方，让路给它即可。 */
-.rte-body :deep(.rte-content ol:not([type])) { list-style: decimal; }
-.rte-body :deep(.rte-content a) { color: var(--brand-deep); text-decoration: underline; }
-/* 尺寸改由四角控制点表达；圆角保留，与只读渲染端 RichTextViewer 的外观保持一致 */
-.rte-body :deep(.rte-content img) { max-width: 100%; height: auto; border-radius: 8px; }
-.rte-body :deep(.rte-content blockquote) {
-  border-left: 3px solid var(--border);
-  padding-left: 10px;
-  color: var(--sub);
-  margin: 0 0 6px;
-}
-
-/* ===== 表格 =====
-   下面这一组是 prosemirror-tables 参考样式（它的拖拽与选区高亮都依赖这些定位）：
-   `table-layout: fixed` + 单元格 `position: relative` 是拖列边界能落点、`.selectedCell` 能铺满的前提。
-   表格自身宽度不在这里定：整表宽度写内联 `style="width: Npx"`（没设过才是这里的 width: 100%），
-   列宽靠 colgroup，行高靠 tr 的 height，单元格底纹靠 td/th 的 background-color —— 都在行内，
-   优先级更高，正好盖住这里的 width: 100% 与表头那条默认灰底（底纹选「无」时表头会回到这条灰底，
-   这是「没显式设过」的正常含义）。 */
-/* position: relative 是整表宽度拖拽手柄（.rte-table-grip）的锚 —— 手柄绝对定位在 wrapper 里、
-   贴着表格右边缘，横向滚动时跟着表格一起滚，不会漂 */
-.rte-body :deep(.rte-content .tableWrapper) { position: relative; overflow-x: auto; margin: 0 0 6px; }
-.rte-body :deep(.rte-content table) {
-  border-collapse: collapse;
-  table-layout: fixed;
-  width: 100%;
-  margin: 0;
-}
-.rte-body :deep(.rte-content td),
-.rte-body :deep(.rte-content th) {
-  position: relative;
-  vertical-align: top;
-  min-width: 25px;
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  /* 单元格里也放段落，保留段落的下边距会导致每格底部都多一截 */
-}
-.rte-body :deep(.rte-content td > p),
-.rte-body :deep(.rte-content th > p) { margin: 0; }
-.rte-body :deep(.rte-content th) { background: #f4f6fa; font-weight: 600; text-align: left; }
-/* 拖列边界时跟在光标下的那条竖线 */
-.rte-body :deep(.rte-content .column-resize-handle) {
-  position: absolute;
-  right: -2px;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  background: var(--brand);
-  pointer-events: none;
-}
-.rte-body :deep(.rte-content.resize-cursor) { cursor: col-resize; }
-/* 整表宽度的拖拽手柄：由 PaperTableView（tiptap-extensions/tableSizing.ts）挂在 tableWrapper 里，
-   位置随表格宽度同步。挂在表格**内侧**（margin-left 负一个自身宽度）而不是跨越边缘 ——
-   wrapper 是 overflow-x: auto 的滚动容器，探出去一截会凭空多出一条横向滚动条。
-   平时隐形、鼠标进表格才显形，免得每张表旁边都杵着一根竖条。 */
-.rte-body :deep(.rte-table-grip) {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 10px;
-  /* 贴着表格右缘往内让 10px，正好压住最后一列的右边缘，而不是探到表格外面 */
-  margin-left: -10px;
-  cursor: col-resize;
-  opacity: 0;
-  /* 隐形时也不能挡鼠标：opacity: 0 的元素照样吃 pointer 事件，不加这一条最后一列右边缘
-     那 10px 就点不出光标了（想在那儿落光标得点两下） */
-  pointer-events: none;
-  transition: opacity 0.15s;
-}
-.rte-body :deep(.tableWrapper:hover .rte-table-grip) { opacity: 1; pointer-events: auto; }
-.rte-body :deep(.rte-table-grip::after) {
-  content: '';
-  position: absolute;
-  top: 50%;
-  right: 0;
-  width: 3px;
-  height: 30px;
-  border-radius: 2px;
-  background: var(--brand);
-  transform: translateY(-50%);
-}
-/* 行高的拖拽手柄：同一套路子（PaperTableView 挂的），只是横过来 —— 一条通栏横带，贴着鼠标所在行的
-   下边界。top 由 JS 按行的位置写；显示/隐藏走 is-on 类（相邻两行共用一条边，鼠标一靠近那条边
-   就亮出来）。同样不能常驻吃 pointer 事件：那一带正是某一行的下半截，常驻会让最后几像素点不进光标。 */
-.rte-body :deep(.rte-row-grip) {
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 8px;
-  /* 让横带的**中线**落在边界上（top 写的是边界位置） */
-  margin-top: -4px;
-  cursor: row-resize;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.15s;
-}
-.rte-body :deep(.rte-row-grip.is-on) { opacity: 1; pointer-events: auto; }
-.rte-body :deep(.rte-row-grip::after) {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 30px;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--brand);
-  transform: translate(-50%, -50%);
-}
-/* 单元格区域选区（拖动跨格选中时的高亮） */
-.rte-body :deep(.rte-content .selectedCell::after) {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  background: var(--brand-soft);
-  pointer-events: none;
-}
-
-/* 公式节点：与正文基线对齐，并给出「可点击编辑」的暗示 */
-.rte-body :deep([data-type='inline-math']) {
-  display: inline-block;
-  vertical-align: baseline;
-  cursor: pointer;
-  padding: 0 2px;
-  border-radius: 4px;
-}
-.rte-body :deep([data-type='block-math']) {
-  display: block;
-  text-align: center;
-  margin: 8px 0;
-  padding: 6px 0;
-  border-radius: 6px;
-  cursor: pointer;
-  background: #f7fafa;
-}
-.rte-body :deep([data-type='inline-math']:hover),
-.rte-body :deep([data-type='block-math']:hover) { background: var(--brand-soft); }
-/* LaTeX 非法时 KaTeX 的 errorColor 已足够显眼，这里只保证源码可见 */
-.rte-body :deep(.inline-math-error),
-.rte-body :deep(.block-math-error) { color: var(--danger); }
 
 /* ===== 图片拖拽改尺寸 =====
    容器 / 包裹层 / 控制点都由 ResizableNodeView 现造，只有元素本身、不带任何样式，

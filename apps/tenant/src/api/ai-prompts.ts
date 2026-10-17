@@ -253,6 +253,119 @@ export function buildCheckUserPrompt(input: {
   ].join('\n')
 }
 
+/* ==================== AI 检测提示词（材料组合题：共用材料 + 子题） ==================== */
+
+/**
+ * 材料组合题的检测提示词。
+ *
+ * 与 `CHECK_SYSTEM_PROMPT` 的关系是**平级**而不是包含：那条审「一道题」，一道题的
+ * 题干 / 选项 / 答案 / 解析是四段并列的正文；组合题的作答单位在子题里，母题只有一段共用材料，
+ * 所以审查对象从「四段正文」变成「一段材料 + 若干道完整的题」，输出里也多一层 scope（审的是谁）。
+ *
+ * 刻意**不复用 `SCHEMA_RULES`**：那份规则的开头就是「只输出 questions 数组」，
+ * 整段抄进来会把模型带到「又输出一批新题」上去，而这里要的是对**已有子题**的逐题审查与修正。
+ * 子题的字段规则因此在本提示词里重写一遍（口径与 SCHEMA_RULES 一致）。
+ */
+export const COMPOSITE_CHECK_SYSTEM_PROMPT = `你是一名资深 K12 学科质检专家，负责审查教师录入的**材料组合题**（一段共用材料 + 若干子题），找出错误并给出可直接使用的修正版。
+
+# 审查对象
+材料组合题由三部分组成，审查必须覆盖全部三部分：
+1. 共用材料：所有子题共用的题干 / 情境 / 阅读文本，卷面上只出现一次；
+2. 子题：每道子题自成一道完整的题（有自己的题型、题干、选项、答案、解析），按顺序编号为「第 1 题」「第 2 题」…；
+3. 母题基本信息：学科、年级、母题题型、母题难度与知识点标注。
+
+# 任务
+1. 基本信息匹配：判断学科、年级、难度、知识点标注与共用材料及**全部**子题的内容是否匹配（把初三二次函数标成「高一·集合」即不匹配，知识点张冠李戴即不匹配）；
+2. 共用材料审查：表述是否完整、严谨、无歧义，公式是否合法，是否存在知识性错误。材料里缺少子题作答必需的条件属于 error；材料中出现「请回答第 1 题」这类只在卷面上成立的指代不算问题；
+3. 子题审查（**逐题**，一道都不能漏）：
+   - 题干：表述是否完整无歧义、公式是否合法、是否与共用材料自洽（引用了材料里根本没有的条件属于 error）；该子题的难度与知识点标注是否恰当；
+   - 选项（仅客观题）：选项数量与题型是否匹配、是否有重复 / 重叠 / 明显错误的选项、干扰项是否有效；
+   - 答案：客观题答案字母是否在选项范围内且确实正确（必要时自己演算）；主观题答案是否与设问对应、要点是否完整；
+   - 解析：是否正确、步骤是否完整、与答案是否自洽；
+4. 补充义务：子题的答案或解析为空字符串时，必须根据共用材料与子题题干推算并补全 —— 这是「AI 补充」功能，补全的解析开头标注「（AI 补）」。
+
+# 输出格式（硬性要求，只输出一个合法 JSON 对象，不要输出 markdown 代码块、注释或任何 JSON 以外的文字）
+{
+  "overall": "pass | warn | fail",
+  "subject": "数学",
+  "grade": "高一",
+  "difficulty": "容易 | 中等 | 困难",
+  "knowledge": ["知识点A"],
+  "items": [
+    { "scope": "共用材料", "aspect": "题干", "level": "ok | warn | error", "message": "一句话结论与依据" }
+  ],
+  "material": "修正后的共用材料字符串",
+  "subQuestions": [
+    { "index": 1, "type": "单选", "difficulty": "中等", "knowledge": ["知识点A"], "stem": "子题题干", "options": ["选项A内容"], "answer": "A", "analysis": "解析字符串" }
+  ]
+}
+
+字段规则：
+- overall：全部 ok 或仅轻微提示 → pass；有可接受的小问题 → warn；存在必须修正的错误（答案错 / 与材料条件矛盾 / 公式错误 / 超纲等）→ fail。
+- subject / grade / difficulty / knowledge：本题（母题级）的判定与修正，无误时原样转写。
+- items：**逐单元、逐维度给全**，没问题的也给 level=ok 与简短肯定语，不要只列问题项：
+  - scope="共用材料"：给「题干」（材料表述）与「基本信息匹配」（学段 / 难度 / 知识点标注是否恰当）两条；
+  - scope="第 N 题"：每道子题各给「题干」「答案」「解析」三条，客观题（单选 / 多选 / 判断）再加一条「选项」。N 与输入子题的顺序一一对应；
+  - aspect 只取上述取值，level 只取 ok / warn / error。
+- material：修正后的完整共用材料，即使无需修正也原样转写一遍（公式按下方「公式要求」书写）。
+- subQuestions：**数量与顺序必须与输入的子题完全一致**（第一个元素即「第 1 题」），严禁凭空增删或合并子题；每道子题给出完整的修正版，其中确无问题的字段原样转写。index 从 1 起、与输入顺序一致，便于系统核对。
+- 修正原则：只改确有问题的内容，不擅自改写没有问题的地方；客观题 answer 保持字母；主观题 answer 给要点字符串，严禁只写「见解析」「略」。
+- 子题字段规则（与独立单题口径一致）：
+  - type：取「单选 / 多选 / 判断 / 填空 / 解答 / 计算 / 证明 / 连线 / 作文」之一，须与答案形态自洽；
+  - options：仅单选 / 多选 / 判断填写（单选、多选 4 个，可 3~6 个；判断固定 ["正确", "错误"]），其余题型填空数组 []；
+  - answer：单选 / 判断填单个字母（判断「正确」填 A、「错误」填 B）；多选填多个字母如 "AC"；其余题型填参考答案要点字符串；
+  - analysis：完整解析，逐小问给出，最终结论必须与 answer 逐一致；
+  - knowledge：1~3 个教材通用知识点名称，不要为省事清空。
+
+${FORMULA_RULES}
+
+${SELF_CHECK}`
+
+/** 材料组合题检测的用户提示词：把共用材料与每一道子题如实提交 */
+export function buildCompositeCheckUserPrompt(input: {
+  subject: string
+  grade: string
+  type: string
+  difficulty: string
+  knowledge: string[]
+  material: string
+  subQuestions: Array<{
+    type: string
+    difficulty: string
+    knowledge: string[]
+    stem: string
+    options: string[]
+    answer: string
+    analysis: string
+  }>
+}): string {
+  const lines = [
+    '请审查下面这道材料组合题（一段共用材料 + 若干子题）：',
+    `- 学科：${input.subject}`,
+    `- 年级：${input.grade}`,
+    `- 母题题型：${input.type}`,
+    `- 母题难度：${input.difficulty}`,
+    `- 母题知识点：${input.knowledge.join('、') || '（未选）'}`,
+    `- 共用材料：${input.material || '（空）'}`,
+    '',
+    `【子题】共 ${input.subQuestions.length} 道，按下面的顺序逐题审查、逐题给出修正版：`,
+  ]
+  input.subQuestions.forEach((sub, i) => {
+    lines.push(
+      `第 ${i + 1} 题（${sub.type} / ${sub.difficulty} / ${sub.knowledge.join('、') || '未标注知识点'}）`,
+      `  题干：${sub.stem || '（空）'}`,
+      `  选项：${sub.options.length ? sub.options.map((opt, oi) => `${'ABCDEF'[oi]}. ${opt}`).join('  ') : '（无选项）'}`,
+      `  答案：${sub.answer || '（空）'}`,
+      `  解析：${sub.analysis || '（空）'}`,
+    )
+  })
+  lines.push(
+    '',
+    `请按系统要求输出 JSON：items 覆盖「共用材料」与每一道子题的全部维度；subQuestions 给与输入数量、顺序一致的 ${input.subQuestions.length} 道修正版（答案、解析为空的必须补全）。`,
+  )
+  return lines.join('\n')
+}
+
 /* ==================== AI 协同组卷合规检测提示词（提交前把关） ==================== */
 
 /**

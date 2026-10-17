@@ -145,6 +145,16 @@ const orgRoutes: MockRoute[] = [
   { method: 'POST', path: '/tenant/teach/docs/delete', handler: ({ body }) => guard(() => { org.deleteTeachDoc(Number(body.id)); return null }) },
   { method: 'POST', path: '/tenant/teach/docs/duplicate', handler: ({ body }) => guard(() => org.duplicateTeachDoc(Number(body.id))) },
   { method: 'POST', path: '/tenant/teach/docs/publish', handler: ({ body }) => guard(() => org.toggleTeachDocPublish(Number(body.id))) },
+  /* 教案 / 学案 / 讲义模板维护：与文档同属备课中心的「模板」维度 */
+  { method: 'GET', path: '/tenant/teach/templates', handler: ({ query }) => guard(() => org.listTeachTemplates(query.kind ? String(query.kind) : undefined)) },
+  { method: 'POST', path: '/tenant/teach/templates/save', handler: ({ body }) => guard(() => org.saveTeachTemplate(body as never)) },
+  { method: 'POST', path: '/tenant/teach/templates/delete', handler: ({ body }) => guard(() => { org.deleteTeachTemplate(Number(body.id)); return null }) },
+  { method: 'POST', path: '/tenant/teach/templates/default', handler: ({ body }) => guard(() => org.setDefaultTeachTemplate(Number(body.id))) },
+  { method: 'POST', path: '/tenant/teach/templates/toggle', handler: ({ body }) => guard(() => org.toggleTeachTemplate(Number(body.id))) },
+  /* AI 生成教案 / 学案 / 讲义草稿：返回文档流 HTML，编辑器直接灌进正文 */
+  { method: 'POST', path: '/tenant/teach/ai-draft', handler: ({ body }) => guard(() => org.generateTeachDocDraft(body as never)) },
+  /* 划词 AI：改一段话（改写 / 扩写 / 缩写 / 润色 / 纠错） */
+  { method: 'POST', path: '/tenant/teach/ai-text', handler: ({ body }) => guard(() => org.polishTeachText(body as never)) },
 
   // 考试与在线阅卷
   { method: 'GET', path: '/tenant/exam/sessions', handler: () => guard(() => org.listExamSessions()) },

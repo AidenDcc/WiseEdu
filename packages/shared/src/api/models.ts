@@ -1602,6 +1602,49 @@ export interface CoursewareSlide {
  * 讲义是 `blocks`（段落流），课件是 `slides`（分页）。合成一个模型而不是两张表，
  * 是因为列表、筛选、权限、回收站这些逻辑对两者完全一致，分成两个模型只会到处写 if。
  */
+/**
+ * 文档来源：个人 / 校本 / 平台。
+ *
+ * 它不是「谁创建的」而是「这份稿子的权威归属于谁」，直接决定编辑权限：
+ * 个人稿自己可改；校本与平台稿是学校 / 平台的定版，**只读**（只能查看与复制一份副本再改）。
+ * 三者都用非空值，不用 `owner === 当前用户` 反推 —— 校本稿的作者也可能就是当前教师，
+ * 但它的归属是学校，仍不可直接编辑。
+ */
+export type TeachDocSource = 'personal' | 'school' | 'platform'
+
+export const TEACH_DOC_SOURCE_TEXT: Record<TeachDocSource, string> = {
+  personal: '个人',
+  school: '校本',
+  platform: '平台',
+}
+
+/**
+ * 划词 AI 的动作。
+ *
+ * 只放**改一段话**的动作，不放「整篇生成」——整篇生成是另一个入口（AI 教案），
+ * 两者的交互与失败代价完全不同：改一段话失败了重选一次就行，整篇生成失败要重写一份稿子。
+ */
+export type TeachAiTextAction = 'rewrite' | 'expand' | 'shorten' | 'polish' | 'proofread' | 'translate'
+
+export const TEACH_AI_TEXT_TEXT: Record<TeachAiTextAction, string> = {
+  rewrite: '改写',
+  expand: '扩写',
+  shorten: '缩写',
+  polish: '润色',
+  proofread: '纠错',
+  translate: '转文言 / 英文',
+}
+
+/** 划词 AI 的动作说明：悬浮提示与结果提示里都要用，写一处 */
+export const TEACH_AI_TEXT_HINT: Record<TeachAiTextAction, string> = {
+  rewrite: '换个说法，保持原意（适合把口语化表述改成书面语）',
+  expand: '把一句话展开成一段，补出理由与例子',
+  shorten: '压缩到要点，去掉修饰与重复',
+  polish: '顺一遍语句与标点，不改变内容',
+  proofread: '只改错别字与标点，其余不动',
+  translate: '译成对应语言的规范表述（英语学科为英文）',
+}
+
 export interface TeachDoc {
   id: number
   kind: TeachDocKind
@@ -1609,16 +1652,127 @@ export interface TeachDoc {
   subject: string
   grade: string
   textbook?: string
+  /**
+   * 章节（教材目录里的那一节，如「3.2 函数的单调性」）。
+   *
+   * 与 `knowledge` 分开存：章节是**位置**（这份稿子教到哪儿），知识点是**范围**（这一节
+   * 到底讲哪些东西）。AI 生成与学情分析都要用到「先章节、再知识点」这层关系 ——
+   * 合成一个字段的话，选完章节就再也说不清「我改过知识点」这件事了。
+   */
+  chapter?: string
   knowledge: string[]
   status: 'draft' | 'published'
   blocks: LectureBlock[]
   slides: CoursewareSlide[]
+  /**
+   * 正文（Word 式文档流的富文本 HTML）。
+   *
+   * 教案 / 学案 / 讲义在「文档编辑器」里编辑的就是它 —— 标题层级落在 h1~h4 上，
+   * 左侧目录即由这些标题推导（见 components/doc/DocOutline.vue）。
+   *
+   * 与 `blocks` / `plan` 的关系：那两个是**旧的结构化正文**，仍在类型里保留 ——
+   * 一批种子数据与「转为课件」等功能还在读它们，且打开旧文档时要靠它们还原出文档流
+   * （见 views/teach/doc-content.ts 的 legacyToHtml）。新写入一律走 `content`。
+   */
+  content?: string
+  /**
+   * 页面设置（文档编辑器「全局设置 → 页面设置」里的样式坐标）。
+   *
+   * 存的是**档位 key**（如 `a4` / `normal` / `song`）而不是展开后的 CSS 值：档位表在前端
+   * （`components/doc/doc-options.ts`），存 key 才能在后期调整档位定义时一次性生效，
+   * 也免得同一份「常规页边距」在两处各写一个 25.4。为空表示全用默认值。
+   */
+  page?: TeachDocPage
   /** 教案专属结构（kind === 'plan' 时存在） */
   plan?: PlanDetail
+  /**
+   * 来源（个人 / 校本 / 平台）。缺省按「个人」处理 —— 老数据里没有这个字段，
+   * 它们全是教师自己建的稿子。权限判定读这个值，见 `TEACH_DOC_SOURCE_TEXT`。
+   */
+  source?: TeachDocSource
   owner: string
   updatedAt: string
   views: number
   sharedSquare: boolean
+}
+
+/* ================ 教案 / 学案 / 讲义模板 ================ */
+
+/**
+ * 文档的页面设置。
+ *
+ * 每个字段都是**档位 key**，与 `apps/tenant/src/components/doc/doc-options.ts` 里的
+ * `DOC_PAPERS` / `DOC_MARGINS` / `DOC_FONT_FAMILIES` / `DOC_FONT_SIZES` / `DOC_LINE_HEIGHTS`
+ * 一一对应。放在 shared 的模型里而不是前端自己存，是因为它要跟着文档一起保存、一起被多端读取。
+ */
+export interface TeachDocPage {
+  /** 纸张：A4 / B5 */
+  paper?: string
+  /** 页边距档位：narrow / normal / wide / none */
+  margin?: string
+  /** 正文默认字体档位 */
+  font?: string
+  /** 正文默认字号档位 */
+  size?: string
+  /** 正文默认行距档位 */
+  lineHeight?: string
+  /**
+   * 页眉文字。空 / 未设表示不显示页眉。
+   *
+   * 存纯文本而不是富文本：页眉是**纸张级的重复记号**（文档名、学科年级），
+   * 每页都印同一行；允许富文本只会让「每页都要编辑一次」这件事变得没有意义。
+   */
+  header?: string
+  /** 页脚文字（占页脚的另一侧，与页码错开） */
+  footer?: string
+  /** 页眉位置档位 key（见 doc-options.ts 的 DOC_HEADER_POS）：left / center / right */
+  headerPos?: string
+  /** 是否显示页码（页脚右侧的「第 n 页 / 共 m 页」） */
+  pageNo?: boolean
+  /** 页码格式档位 key（见 doc-options.ts 的 DOC_PAGE_NO_FORMATS）：zh / zh-simple / num / num-total / dash */
+  pageNoFormat?: string
+  /** 页码位置档位 key（见 doc-options.ts 的 DOC_PAGE_NO_POS）：left / center / right */
+  pageNoPos?: string
+  /** 页眉下方是否显示一条分隔线（Word 默认有） */
+  headerRule?: boolean
+}
+
+/** 模板维护支持的类型：与「备课中心」的三种文档一一对应（课件另有版式模板，不走这里） */
+export type TeachTemplateKind = 'plan' | 'guide' | 'lecture'
+
+export const TEACH_TEMPLATE_KIND_TEXT: Record<TeachTemplateKind, string> = {
+  plan: '教案',
+  guide: '学案',
+  lecture: '讲义',
+}
+
+/**
+ * 教案 / 学案 / 讲义模板。
+ *
+ * 模板的正文骨架就是**一份文档流的 HTML**（`content`）：标题层级决定新建出来的文档有几节、
+ * 每节叫什么，占位段落给出该写什么。这样「引用模板」与「编辑正文」用的是同一套模型 ——
+ * 模板不必为三种文档各写一份结构定义，编辑器的「全局设置 → 引用模板」也只是把这段 HTML 换进去。
+ */
+export interface TeachTemplate {
+  id: number
+  kind: TeachTemplateKind
+  name: string
+  desc: string
+  /** 机构模板（全员可用）/ 我的模板（仅创建者可见） */
+  scope: 'org' | 'personal'
+  /** 系统内置：可改可停用，但不允许删除（删了就没有兜底骨架） */
+  builtin: boolean
+  enabled: boolean
+  /** 该类型的默认模板：新建文档时预选它 */
+  isDefault: boolean
+  /** 预填的基本信息 */
+  subject?: string
+  grade?: string
+  periods?: number
+  /** 文档骨架（富文本 HTML，标题用 h1~h4） */
+  content: string
+  owner: string
+  updatedAt: string
 }
 
 /* ================ 考试与阅卷 ================ */

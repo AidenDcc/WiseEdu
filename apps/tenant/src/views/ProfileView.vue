@@ -10,7 +10,7 @@ import { fetchOrgLoginLogs } from '@/api/org'
 
 const router = useRouter()
 const auth = useAuthStore()
-const { identity } = useDemoRole()
+const { identity, canSwitch } = useDemoRole()
 
 type TabKey = 'profile' | 'security' | 'notify' | 'logs'
 const TABS: TabDef[] = [
@@ -27,13 +27,15 @@ function switchTab(value: string) {
 }
 
 /* ===== 个人资料（FR-GN-021） =====
-   联系方式与简介跟着演示身份走：右上角切成王静，这里还写着「陈明远 · 139****0001」是自相矛盾的。
-   姓名取会话用户（同一个身份的两处投影），其余三项取身份表 —— 表在 useDemoRole 里，只此一份。 */
+   姓名取会话用户（同一个身份的两处投影）；联系方式优先取会话用户资料 —— `admin` 这类
+   不参与演示身份的账号，资料只在账号表里（mockUsers），身份表里没有它的条目。
+   会话里没有（`orgadmin` 三个身份共用一个账号，mockUsers 这一条刻意不带联系方式）
+   才回落到身份表，这样右上角切成王静，这里也跟着变成王静的号码。 */
 const profile = reactive({
   name: auth.user?.name ?? '',
-  phone: identity.value.phone,
-  email: identity.value.email,
-  intro: identity.value.intro,
+  phone: auth.user?.phone ?? identity.value.phone,
+  email: auth.user?.email ?? identity.value.email,
+  intro: auth.user?.intro ?? identity.value.intro,
 })
 const editingProfile = ref(false)
 
@@ -41,9 +43,9 @@ const editingProfile = ref(false)
 watch(identity, (next) => {
   profile.name = auth.user?.name ?? next.name
   if (editingProfile.value) return
-  profile.phone = next.phone
-  profile.email = next.email
-  profile.intro = next.intro
+  profile.phone = auth.user?.phone ?? next.phone
+  profile.email = auth.user?.email ?? next.email
+  profile.intro = auth.user?.intro ?? next.intro
 })
 
 function saveProfile() {
@@ -200,7 +202,7 @@ async function onLogout() {
           <label class="f-label">个人简介</label>
           <textarea v-model="profile.intro" class="f-textarea" rows="3" :disabled="!editingProfile" />
         </div>
-        <p class="f-hint avatar-tip">
+        <p v-if="canSwitch" class="f-hint avatar-tip">
           <AppIcon name="info" :size="13" /> 头像按演示身份分开保存，切换到其他身份会显示各自设置的头像
         </p>
         <button v-if="!editingProfile" class="btn btn-primary btn-sm" @click="editingProfile = true">编辑资料</button>

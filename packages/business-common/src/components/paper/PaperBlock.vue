@@ -5,11 +5,26 @@
  *
  * 两类块：试卷（卷头 / 大题标题 / 一道题）与答题卡（考生信息区 / 分区标题 / 填涂区 / 作答框）。
  * 刻意不引入任何交互与业务标签（来源、审核状态等）：这里模拟的是打印出来的卷子。
+ *
+ * **材料组合题整题画在一个块里**：题号 + 共用材料 + 按（1）（2）铺开的子题（各带选项、
+ * 逐题答案 / 解析、主观子题的作答空白）。之所以不做成「一子题一块」：
+ * 1. 块是分版的原子，拆开后子题会被分到不同版面 / 页，还会各自拿到题号 ——
+ *    而组合题在卷面上是**一道题**（一个题号、一个分值）；
+ * 2. 编辑页的选中、拖拽、评论、操作条都以块为单位，拆块会让「整题拖动」失去落点。
+ * 代价是超长的组合题可能高过整版而被裁切 —— 这一点由编辑页的「内容高于整版」提示兜住。
  */
 import { computed } from 'vue'
 import { RichTextViewer } from '@aiteach/shared'
-import type { OrgPaper, OrgQuestion } from '@aiteach/shared'
-import { isJudgeNoOptions, judgeAnswerText, optionColumnsOf } from '../../utils/question-card'
+import type { OrgPaper, OrgQuestion, OrgSubQuestion } from '@aiteach/shared'
+import {
+  isCompositeQuestion,
+  isJudgeNoOptions,
+  judgeAnswerText,
+  optionColumnsOf,
+  subAnswerIsPlain,
+  subAnswerText,
+  subQuestionsOf,
+} from '../../utils/question-card'
 import { DEFAULT_PAPER_NOTICES } from './paper-layouts'
 import type { PaperBlock, PaperLayoutPreset } from './paper-layouts'
 
@@ -79,9 +94,45 @@ const sectionMeta = computed(() => {
 
 /* ===== 题目渲染 ===== */
 
+/**
+ * 材料组合题：`stem` 是共用题干 / 材料，作答单位在子题里。
+ * 两者都从题目数据现算（一次渲染里被模板与测量层各用一次，故用 computed 缓存）。
+ */
+const composite = computed(() => !!item.value && isCompositeQuestion(item.value))
+const subs = computed<OrgSubQuestion[]>(() => (item.value ? subQuestionsOf(item.value) : []))
+
 /** 判断题选项按试卷习惯渲染 √ / ×，其余题型渲染 A/B/C…（选项字母由序号推出） */
+function marksOfType(row: { type: string; options: readonly unknown[] }): string[] {
+  return row.options.map((_, i) => (row.type === '判断' ? (i === 0 ? '√' : '×') : 'ABCDEF'[i]))
+}
+
 function optionMarks(row: OrgQuestion | undefined): string[] {
-  return row ? row.options.map((_, i) => (row.type === '判断' ? (i === 0 ? '√' : '×') : 'ABCDEF'[i])) : []
+  return row ? marksOfType(row) : []
+}
+
+/** 子题的选项字母：与母题同一口径（判断题 √/×，其余 A/B/C…） */
+function subMarks(sub: OrgSubQuestion): string[] {
+  return marksOfType(sub)
+}
+
+/** 子题的选项列数：子题自身配置优先，缺省回落纸张预设（与母题同口径） */
+function subOptionColumns(sub: OrgSubQuestion): 1 | 2 | 4 {
+  return optionColumnsOf(sub, props.preset.optionColumns)
+}
+
+/** 子题是否留作答空白：有选项、以及无选项判断题（在题干括号里写对错）都不留 */
+function subSubjective(sub: OrgSubQuestion): boolean {
+  return sub.options.length === 0 && !isJudgeNoOptions(sub)
+}
+
+/**
+ * 子题的作答行数：客观题 / 无选项判断题留 1 行写答案（答题卡上要落笔），
+ * 填空 2 行，解答类 3 行。子题没有独立分值，所以不像母题那样按分值推 ——
+ * 给一个够写一行算式、又不会让整道组合题撑过版的量。
+ */
+function subWriteLines(sub: OrgSubQuestion): number {
+  if (sub.options.length > 0 || isJudgeNoOptions(sub)) return 1
+  return sub.type.includes('填空') ? 2 : 3
 }
 
 /**
@@ -116,10 +167,14 @@ function isCorrect(questionId: number, index: number): boolean {
 
 /**
  * 有选项即为客观题；无选项（解答题、问答题、作文…）才留答题空白。
- * 例外是「无选项判断题」—— 它没有选项但也不是主观题：学生在题干前的（　　）里写对错，
- * 不能在卷面上留一大片解答题才有的作答空白。
+ * 两个例外：
+ * 1. 「无选项判断题」—— 它没有选项但也不是主观题：学生在题干前的（　　）里写对错，
+ *    不能在卷面上留一大片解答题才有的作答空白；
+ * 2. 材料组合题 —— 母题自己没有作答结构，作答空白按子题逐题给（见模板里的子题分支）。
  */
-const subjective = computed(() => !!item.value && item.value.options.length === 0 && !isJudgeNoOptions(item.value))
+const subjective = computed(
+  () => !!item.value && !composite.value && item.value.options.length === 0 && !isJudgeNoOptions(item.value),
+)
 
 /** 答题空白行数：按分值给（12 分 → 4 行），并夹在 2~8 行之间 */
 const blankLines = computed(() => {
@@ -215,7 +270,7 @@ const optionColumns = computed(() => (item.value ? optionColumnsOf(item.value, p
     <p v-for="(para, pi) in materialParas" :key="pi" class="pb-mat-p">{{ para }}</p>
   </div>
 
-  <!-- 一道题 -->
+  <!-- 一道题（材料组合题：题号 + 共用材料 + 按（1）（2）铺开的子题，整题一个题号、一个分值） -->
   <div v-else-if="block.kind === 'question'" class="pb-q">
     <p class="pb-stem">
       <span class="pb-no">{{ block.no }}．</span>
@@ -225,37 +280,79 @@ const optionColumns = computed(() => (item.value ? optionColumnsOf(item.value, p
       <span v-if="preset.scoreStyle === 'trail'" class="pb-score">（{{ scoreText(block.score) }} 分）</span>
     </p>
 
-    <ul
-      v-if="item?.options.length"
-      class="pb-opts"
-      :class="{ 'is-two': optionColumns === 2, 'is-four': optionColumns === 4 }"
-    >
-      <li v-for="(opt, oi) in item.options" :key="oi">
-        <span class="pb-opt-key">{{ optionMarks(item)[oi] }}．</span>
-        <RichTextViewer :content="opt" tag="span" />
-      </li>
-    </ul>
+    <!-- 材料组合题：母题没有选项 / 答案 / 解析，正文全在子题里 —— 逐题铺开 -->
+    <div v-if="composite" class="pb-subs">
+      <div v-for="(sub, si) in subs" :key="sub.id" class="pb-sub">
+        <p class="pb-sub-stem">
+          <span class="pb-sub-no">（{{ si + 1 }}）</span>
+          <RichTextViewer :content="sub.stem" tag="span" />
+        </p>
 
-    <!-- 解答题答题空白（按分值给行数，教师版下让位给答案解析） -->
-    <div v-if="preset.answerSpace && subjective && !teacher" class="pb-blank">
-      <i v-for="n in blankLines" :key="n" class="pb-blank-line" />
+        <ul
+          v-if="sub.options.length"
+          class="pb-opts pb-sub-opts"
+          :class="{ 'is-two': subOptionColumns(sub) === 2, 'is-four': subOptionColumns(sub) === 4 }"
+        >
+          <li v-for="(opt, oi) in sub.options" :key="oi">
+            <span class="pb-opt-key">{{ subMarks(sub)[oi] }}．</span>
+            <RichTextViewer :content="opt" tag="span" />
+          </li>
+        </ul>
+
+        <!-- 主观子题的作答空白（客观题在题干括号里作答，留白反而占版面） -->
+        <div v-if="preset.answerSpace && subSubjective(sub) && !teacher" class="pb-blank pb-sub-blank">
+          <i v-for="n in subWriteLines(sub)" :key="n" class="pb-blank-line" />
+        </div>
+
+        <!-- 教师版：逐题给答案与解析（答案都在子题里，母题那一层是空的） -->
+        <div v-if="teacher" class="pb-answer pb-sub-answer">
+          <p class="pb-answer-row">
+            <b>答案：</b>
+            <span v-if="subAnswerIsPlain(sub)">{{ subAnswerText(sub) || '（未填写）' }}</span>
+            <RichTextViewer v-else :content="sub.answer" tag="span" :empty="'（未填写）'" />
+          </p>
+          <p class="pb-answer-row">
+            <b>解析：</b>
+            <RichTextViewer :content="sub.analysis" tag="span" :empty="'（未填写）'" />
+          </p>
+        </div>
+      </div>
+      <p v-if="!subs.length" class="pb-sub-empty">（本题尚未录入子题）</p>
     </div>
 
-    <div v-if="teacher && item" class="pb-answer">
-      <p class="pb-answer-row">
-        <b>答案：</b>
-        <span v-if="answerIsPlain">{{ answerText || '（未填写）' }}</span>
-        <RichTextViewer v-else :content="item.answer" tag="span" :empty="'（未填写）'" />
-      </p>
-      <p class="pb-answer-row">
-        <b>解析：</b>
-        <RichTextViewer :content="item.analysis" tag="span" :empty="'（未填写）'" />
-      </p>
-      <p class="pb-answer-meta">
-        {{ item.type }} · {{ item.difficulty }}
-        <template v-if="item.knowledge.length"> · {{ item.knowledge.join('、') }}</template>
-      </p>
-    </div>
+    <template v-else>
+      <ul
+        v-if="item?.options.length"
+        class="pb-opts"
+        :class="{ 'is-two': optionColumns === 2, 'is-four': optionColumns === 4 }"
+      >
+        <li v-for="(opt, oi) in item.options" :key="oi">
+          <span class="pb-opt-key">{{ optionMarks(item)[oi] }}．</span>
+          <RichTextViewer :content="opt" tag="span" />
+        </li>
+      </ul>
+
+      <!-- 解答题答题空白（按分值给行数，教师版下让位给答案解析） -->
+      <div v-if="preset.answerSpace && subjective && !teacher" class="pb-blank">
+        <i v-for="n in blankLines" :key="n" class="pb-blank-line" />
+      </div>
+
+      <div v-if="teacher && item" class="pb-answer">
+        <p class="pb-answer-row">
+          <b>答案：</b>
+          <span v-if="answerIsPlain">{{ answerText || '（未填写）' }}</span>
+          <RichTextViewer v-else :content="item.answer" tag="span" :empty="'（未填写）'" />
+        </p>
+        <p class="pb-answer-row">
+          <b>解析：</b>
+          <RichTextViewer :content="item.analysis" tag="span" :empty="'（未填写）'" />
+        </p>
+        <p class="pb-answer-meta">
+          {{ item.type }} · {{ item.difficulty }}
+          <template v-if="item.knowledge.length"> · {{ item.knowledge.join('、') }}</template>
+        </p>
+      </div>
+    </template>
   </div>
 
   <!-- ===== 答题卡 ===== -->
@@ -331,23 +428,51 @@ const optionColumns = computed(() => (item.value ? optionColumnsOf(item.value, p
       <span class="pc-ans-mark">得分</span>
     </div>
 
-    <!-- 填空题：作答横线；解答题：作答框 -->
-    <div v-if="block.lines" class="pc-ans-lines">
-      <i v-for="n in block.lines" :key="n" class="pc-ans-line" />
-    </div>
-    <div v-else class="pc-ans-box" :style="{ minHeight: `${block.boxH}px` }" />
+    <!-- 材料组合题：整题占一个题号，作答位**按子题逐题给** —— 阅卷本来就要逐小题给分，
+         一整块大作答框既看不出在哪一小问作答、也没法分项打分 -->
+    <template v-if="composite">
+      <div v-for="(sub, si) in subs" :key="sub.id" class="pc-sub">
+        <div class="pc-sub-head">
+          <span class="pc-sub-no">（{{ si + 1 }}）</span>
+          <span class="pc-sub-type">{{ sub.type }}</span>
+          <span class="pc-sub-mark">得分</span>
+        </div>
+        <div class="pc-ans-lines">
+          <i v-for="n in subWriteLines(sub)" :key="n" class="pc-ans-line" />
+        </div>
+      </div>
+      <p v-if="!subs.length" class="pb-sub-empty">（本题尚未录入子题）</p>
+    </template>
 
-    <div v-if="teacher && item" class="pb-answer">
-      <p class="pb-answer-row">
-        <b>答案：</b>
-        <span v-if="answerIsPlain">{{ answerText || '（未填写）' }}</span>
-        <RichTextViewer v-else :content="item.answer" tag="span" :empty="'（未填写）'" />
-      </p>
-      <p class="pb-answer-row">
-        <b>解析：</b>
-        <RichTextViewer :content="item.analysis" tag="span" :empty="'（未填写）'" />
-      </p>
-    </div>
+    <template v-else>
+      <!-- 填空题：作答横线；解答题：作答框 -->
+      <div v-if="block.lines" class="pc-ans-lines">
+        <i v-for="n in block.lines" :key="n" class="pc-ans-line" />
+      </div>
+      <div v-else class="pc-ans-box" :style="{ minHeight: `${block.boxH}px` }" />
+    </template>
+
+    <template v-if="teacher && item">
+      <!-- 组合题：逐题给答案（母题那层没有答案） -->
+      <div v-if="composite" class="pb-answer">
+        <p v-for="(sub, si) in subs" :key="sub.id" class="pb-answer-row">
+          <b>（{{ si + 1 }}）答案：</b>
+          <span v-if="subAnswerIsPlain(sub)">{{ subAnswerText(sub) || '（未填写）' }}</span>
+          <RichTextViewer v-else :content="sub.answer" tag="span" :empty="'（未填写）'" />
+        </p>
+      </div>
+      <div v-else class="pb-answer">
+        <p class="pb-answer-row">
+          <b>答案：</b>
+          <span v-if="answerIsPlain">{{ answerText || '（未填写）' }}</span>
+          <RichTextViewer v-else :content="item.answer" tag="span" :empty="'（未填写）'" />
+        </p>
+        <p class="pb-answer-row">
+          <b>解析：</b>
+          <RichTextViewer :content="item.analysis" tag="span" :empty="'（未填写）'" />
+        </p>
+      </div>
+    </template>
   </div>
 </template>
 
@@ -463,6 +588,20 @@ const optionColumns = computed(() => (item.value ? optionColumnsOf(item.value, p
 .pb-opts.is-four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px 12px; }
 .pb-opts li { display: flex; align-items: baseline; gap: 6px; font-size: var(--pp-size); line-height: var(--pp-line); }
 .pb-opt-key { flex-shrink: 0; }
+
+/* ===== 材料组合题：子题 =====
+   子题整体向左缩进一个字宽 —— 卷面上「（1）（2）」与母题的题号「23．」形成层级，
+   一眼能看出这些小题属于同一道大题。缩进量随版式字号缩放（走 --pp-size）。 */
+.pb-subs { margin-top: 2px; padding-left: calc(var(--pp-size) * 1.1); }
+.pb-sub + .pb-sub { margin-top: calc(var(--pp-size) * 0.35); }
+.pb-sub-stem { font-size: var(--pp-size); line-height: var(--pp-line); }
+.pb-sub-no { font-weight: 700; margin-right: 2px; }
+/* 子题的选项再缩进一档，与「（1）」下的题干对齐关系更清楚 */
+.pb-sub-opts { margin-left: calc(var(--pp-size) * 1.1); }
+/* 子题的作答留白比母题紧一档：一道组合题常有四五道小题，逐题都铺开大留白会把整题撑过版 */
+.pb-sub-blank { margin-top: calc(var(--pp-size) * 0.35); margin-left: calc(var(--pp-size) * 1.1); }
+.pb-sub-answer { margin-top: calc(var(--pp-size) * 0.4); }
+.pb-sub-empty { margin: calc(var(--pp-size) * 0.3) 0 0; color: #6b7280; font-size: calc(var(--pp-size) * 0.9); }
 
 .pb-blank { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
 /* 答题留白行高随版式字号缩放，行数由分值决定（见 blankLines） */
@@ -583,5 +722,21 @@ const optionColumns = computed(() => (item.value ? optionColumnsOf(item.value, p
 }
 .pc-ans-box { border: 1px solid #b9c0cf; }
 .pc-ans-lines { display: flex; flex-direction: column; gap: calc(var(--pp-size) * 0.5); padding-top: 4px; }
+
+/* 材料组合题在答题卡上的逐小题作答位：每个子题一小节，题号取「（n）」，
+   与卷面上的子题号一一对应；小节之间用细虚线分隔，阅卷时不会看串行。 */
+.pc-sub { border-top: 1px dashed #c9cfdb; padding-top: calc(var(--pp-size) * 0.4); }
+.pc-sub:first-child { border-top: none; padding-top: 0; }
+.pc-sub + .pc-sub { margin-top: calc(var(--pp-size) * 0.5); }
+.pc-sub-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--pp-head-font);
+  font-size: calc(var(--pp-size) * 0.95);
+}
+.pc-sub-no { font-weight: 700; }
+.pc-sub-type { font-size: calc(var(--pp-size) * 0.82); color: #6b7280; }
+.pc-sub-mark { margin-left: auto; border: 1px solid var(--pp-accent); padding: 0 8px; font-size: calc(var(--pp-size) * 0.82); }
 .pc-ans-line { display: block; height: calc(var(--pp-size) * var(--pp-line) * 1.6); border-bottom: 1px solid #b9c0cf; }
 </style>

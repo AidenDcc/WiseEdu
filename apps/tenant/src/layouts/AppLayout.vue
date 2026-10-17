@@ -149,9 +149,9 @@ async function onLogout() {
 }
 
 /* ===== 演示身份（右上角用户下拉里切换） =====
-   机构端只有一个登录账号，而机构管理员 / 年级学科组长 / 参与组卷老师的菜单与权限完全不同。
-   见 composables/useDemoRole.ts 的说明：不重登、不动 token。 */
-const { identity, identities, apply } = useDemoRole()
+   机构端主账号 orgadmin 用它就地演示「管理员 / 组长 / 老师」的菜单与权限差异；
+   admin 是另一个真实账号（全功能版），下拉里不出现这一组，见 composables/useDemoRole.ts。 */
+const { identity, identities, canSwitch, apply } = useDemoRole()
 
 function switchIdentity(role: DemoRole) {
   if (role === identity.value.role) return
@@ -354,24 +354,26 @@ onMounted(() => restoreDemoIdentity())
                 </div>
 
                 <!-- 演示身份：用于演示不同角色的菜单与权限差异（真实场景由组织架构决定，
-                     登录账号始终是 orgadmin，这里只是就地换视角，见 useDemoRole.ts） -->
-                <div class="user-menu-group">
-                  <span class="user-menu-label">演示身份</span>
-                  <span class="user-menu-tip">切换后菜单与权限一起变，无需重新登录</span>
-                </div>
-                <button
-                  v-for="row in identities"
-                  :key="row.role"
-                  class="user-menu-item identity-item"
-                  :class="{ on: row.role === identity.role }"
-                  @click="switchIdentity(row.role)"
-                >
-                  <AppIcon :name="row.role === identity.role ? 'check' : 'users'" :size="15" />
-                  <span class="identity-text">
-                    <b>{{ row.name }} · {{ row.roleName }}</b>
-                    <em>{{ row.desc }}</em>
-                  </span>
-                </button>
+                     只有演示账号 orgadmin 显示这一组，见 useDemoRole.ts） -->
+                <template v-if="canSwitch">
+                  <div class="user-menu-group">
+                    <span class="user-menu-label">演示身份</span>
+                    <span class="user-menu-tip">切换后菜单与权限一起变，无需重新登录</span>
+                  </div>
+                  <button
+                    v-for="row in identities"
+                    :key="row.role"
+                    class="user-menu-item identity-item"
+                    :class="{ on: row.role === identity.role }"
+                    @click="switchIdentity(row.role)"
+                  >
+                    <AppIcon :name="row.role === identity.role ? 'check' : 'users'" :size="15" />
+                    <span class="identity-text">
+                      <b>{{ row.name }} · {{ row.roleName }}</b>
+                      <em>{{ row.desc }}</em>
+                    </span>
+                  </button>
+                </template>
 
                 <div class="user-menu-divider" />
                 <button class="user-menu-item" @click="router.push('/profile')">

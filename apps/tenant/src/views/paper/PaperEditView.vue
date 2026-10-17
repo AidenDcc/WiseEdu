@@ -83,7 +83,7 @@ import {
   saveQuestion,
   swapPaperQuestion,
 } from '@/api/org'
-import { checkQuestionByAi, type AiCheckReport } from '@/api/ai-check'
+import { checkInputOfQuestion, checkQuestionByAi, type AiCheckReport } from '@/api/ai-check'
 import {
   checkCollabPaperByAi,
   checkCollabRequirement,
@@ -2454,21 +2454,16 @@ function barAnchorOf(block: PaperBlockModel): number | null {
 
 const CHECK_OVERALL_TEXT = { pass: '检测通过', warn: '建议关注', fail: '需修正' } as const
 
-/** 喂给 AI 检测的单题上下文：直接用卷面里那一题的原始字段（与录题页的检测入口同一套入参） */
+/**
+ * 喂给 AI 检测的单题上下文：直接用卷面里那一题的原始字段。
+ *
+ * 换算交给 `checkInputOfQuestion`（录题中心 / 审核中心共用同一份）—— 材料组合题会带上
+ * 共用材料与全部子题，不会被当成「有题干、没答案没解析」的题目误判。
+ */
 function checkInputOf(si: number, qi: number) {
   const item = itemOf(sections.value[si]?.questions[qi]?.questionId ?? 0)
   if (!item) return null
-  return {
-    subject: item.subject,
-    grade: item.grade,
-    type: item.type,
-    difficulty: item.difficulty,
-    knowledge: [...item.knowledge],
-    stem: item.stem,
-    options: item.options,
-    answer: item.answer,
-    analysis: item.analysis,
-  }
+  return checkInputOfQuestion(item)
 }
 
 /**
@@ -2501,7 +2496,10 @@ function buildCheckDraft(target: CommentTarget, ok: Array<{ qi: number; report: 
   ok.forEach(({ qi, report }) => {
     /* 覆盖多题时每题得有个小节标题；单题时标题里已经点明是哪一道，不必再来一层 */
     if (ok.length > 1) lines.push('', `【第 ${qi + 1} 题 · ${CHECK_OVERALL_TEXT[report.overall]}】`)
-    for (const row of report.items) lines.push(`【${row.aspect}】${toPlainText(row.message)}`)
+    /* 材料组合题的检测项带 scope（共用材料 / 第 N 题），并在维度前 —— 卷面评论要能指名道姓 */
+    for (const row of report.items) {
+      lines.push(`【${row.scope ? `${row.scope} · ` : ''}${row.aspect}】${toPlainText(row.message)}`)
+    }
   })
   return lines.join('\n')
 }

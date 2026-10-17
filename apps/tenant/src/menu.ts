@@ -71,6 +71,15 @@ export const menus: MenuItem[] = [
       { path: '/teach/guide', title: '学案', module: 'teach' },
       { path: '/teach/lecture', title: '讲义', module: 'teach' },
       { path: '/teach/courseware', title: '课件', module: 'teach' },
+      /* 模板维护：教案 / 学案 / 讲义三种模板的增删改、设为默认与启停。
+         与上面三页同属备课中心的 `teach` 模块 —— 模板只服务于备课，不该另起一个权限模块。 */
+      { path: '/teach/templates', title: '模板维护', module: 'teach' },
+      /* 集体备课由一级菜单并入「备课中心」：它与教案 / 学案 / 讲义同属备课动作，
+         单独挂一级菜单等于把「备课」这件事劈成两处入口。
+         路径仍保留 `/prep`（不改写成 `/teach/prep`）—— 路由是平铺的、层级只由这份菜单树表达，
+         改路径只会连带打断书签、演示脚本与 PrepView 内部跳转。
+         权限仍走独立的 `prep` 模块（发起 / 参与），不被备课中心的 `teach` 权限吞掉。 */
+      { path: '/prep', title: '集体备课', module: 'prep' },
     ],
   },
   {
@@ -103,9 +112,12 @@ export const menus: MenuItem[] = [
     children: [
       { path: '/ai-center/workbench', title: 'AI 工作台', module: 'ai-center' },
       { path: '/ai-center/review', title: 'AI 内容复核', module: 'ai-center' },
+      /* 提示词模板并入「AI 能力中心」：它本就是喂给 AI 工作台与各业务页的提示词资产，
+         独立挂一级菜单会与 AI 工作台割裂。路径保留 `/prompt`（理由同上：层级只在菜单树表达）。
+         权限模块仍是 `prompt`（查看 / 测试），与 `ai-center`（查看 / 复核）互不覆盖。 */
+      { path: '/prompt', title: '提示词模板', module: 'prompt' },
     ],
   },
-  { path: '/prep', title: '集体备课', icon: 'teamwork', module: 'prep' },
   { path: '/homework', title: '作业系统', icon: 'pen', module: 'homework' },
   {
     path: '/resource',
@@ -141,7 +153,6 @@ export const menus: MenuItem[] = [
       { path: '/formula/shared', title: '机构共享公式', module: 'formula' },
     ],
   },
-  { path: '/prompt', title: '提示词模板', icon: 'sparkles', module: 'prompt' },
   { path: '/square', title: '知识广场', icon: 'star', module: 'square' },
   {
     path: '/org',

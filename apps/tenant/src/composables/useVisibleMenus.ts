@@ -1,13 +1,15 @@
 /**
- * 侧边栏「实际渲染哪些菜单」的唯一实现 —— 机构菜单开关 × 角色权限 两个维度的交集。
+ * 侧边栏「实际渲染哪些菜单」的唯一实现 —— 机构菜单开关 × 角色权限 × 账号版本 三个维度的交集。
  *
  * 为什么必须抽出来：菜单在机构端有**三处独立的消费点**（AppLayout 的侧边栏 / 折叠浮层 /
  * 底部固定入口、DashboardView 的快捷入口与「更多」），只改其中一处，另外几处会继续显示
  * 无权访问的入口，用户点进去被路由守卫弹回来，比不做裁剪更让人困惑。
  *
- * **两个维度的分工**：
+ * **三个维度的分工**：
  * - `/org/roles` 的角色权限：这个**角色**能不能碰这个模块（`MenuItem.module`）；
- * - `/org/menus` 的机构菜单开关：这个**机构**整体开不开这个菜单（按路径 key 查）。
+ * - `/org/menus` 的机构菜单开关：这个**机构**整体开不开这个菜单（按路径 key 查）；
+ * - 账号版本（`menu-edition.ts`）：这个**账号**所在的版本含不含这个菜单。版本与角色无关，
+ *   标准版账号换个演示身份也不会把没开通的菜单翻出来。
  * 任一为否即隐藏。
  *
  * **面包屑不在这里**：`buildBreadcrumb` 用菜单树做前缀匹配，靠全量菜单才能把
@@ -17,8 +19,10 @@
 import { computed, ref } from 'vue'
 import type { MenuItem } from '@/menu'
 import { footerMenus, menus } from '@/menu'
+import { hiddenByEdition } from '@/menu-edition'
 import type { OrgMenuNodeApi } from '@/api/org'
 import { fetchOrgMenus } from '@/api/org'
+import { useAuthStore } from '@/stores/auth'
 import { usePermission } from '@/composables/usePermission'
 
 /** 机构菜单开关：路径（去前导斜杠）→ 是否开放。树里没有的 key 视为开放 */
@@ -59,9 +63,16 @@ function loadMenuTree(): Promise<void> {
   return loading
 }
 
-/** 叶子是否可见：机构开了这个菜单 + 当前角色有该模块的权限（`op` 为叶子额外要求，默认「查看」） */
+/** 当前登录账号。版本裁剪按**账号**算 —— 与演示身份无关，理由见 menu-edition.ts */
+function currentAccount(): string {
+  return useAuthStore().user?.account ?? ''
+}
+
+/** 叶子是否可见：机构开了这个菜单 + 当前角色有该模块的权限（`op` 为叶子额外要求，默认「查看」）
+ *  + 当前账号的版本含这个菜单 */
 function leafVisible(can: (module: string, op?: string) => boolean, item: MenuItem): boolean {
   if (!can(item.module, item.op)) return false
+  if (hiddenByEdition(item.path, currentAccount())) return false
   return enabledKeys.value.get(keyOf(item.path)) ?? true
 }
 
@@ -129,6 +140,19 @@ export function useVisibleMenus() {
   }
 
   return { visibleMenus, visibleFooterMenus, allowedPaths, firstAllowedPath, refresh }
+}
+
+/**
+ * 页内入口用：这个地址当前是否可进（口径与侧边栏、路由守卫完全一致）。
+ *
+ * 有几个页面带着「换个类型接着写」的跳转按钮（教案 →「切换学案」、讲义 →「切换课件」、
+ * 错题本 →「布置作业」）。菜单藏了而按钮还在，点下去只会被守卫弹回工作台、再弹一句无权访问，
+ * 比不做裁剪更像坏了。这类按钮统一用它判可见性，不要再各自写一套判断。
+ */
+export function useMenuAccess() {
+  const { can, ensureLoaded } = usePermission()
+  void ensureLoaded()
+  return { canSee: (path: string) => pathVisible(can, path) }
 }
 
 /**

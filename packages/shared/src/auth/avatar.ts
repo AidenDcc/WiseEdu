@@ -9,6 +9,7 @@
  * - 管理端：账号名（`account`）—— 一个账号一个人；
  * - 机构端：演示身份的角色值（`orgAdmin` / `leader` / `teacher`）—— 三个身份共用
  *   `orgadmin` 这一个登录账号，按账号存会让「切到王静还顶着陈明远的照片」。
+ *   不换身份的账号（`admin`）则由 useDemoRole 用 `account:<账号>` 作键，避免与上面的槽位串味。
  *
  * 接真实后端后本模块整体废弃：头像存 `sys_user.avatar`（JeecgBoot 自带字段），
  * 上传走文件服务，不再需要前端本地兜底。

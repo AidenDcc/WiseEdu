@@ -299,6 +299,49 @@ export function pickCategoryType(options: string[], current: string, category: Q
 }
 
 /**
+ * 把 AI 检测给出的「子题修正版」合并进一道子题草稿（组合题 AI 修正回写的唯一入口）。
+ *
+ * 补丁语义：**字段缺省 = 该项没问题、保持原值**（见 ai-normalize 的 SubQuestionCorrection）。
+ * 调用方应当先按差异过滤出真正要改的字段再传进来 —— 补丁里带上与原值相同的字段虽然不会改错内容，
+ * 却会触发下面的作答结构重建（例：填空题的答案会被按「｜」重新拆空，等价答案丢掉）。
+ *
+ * 题型 / 选项 / 答案三者一体：任一被修正就按修正后的题型重建整套作答结构，否则会出现
+ * 「答案字母指向不存在的选项」这种半截状态。只有题型被单独改动时，按编辑器切换题型的同一套规则重建。
+ */
+export function applySubQuestionCorrection(
+  draft: SubQuestionDraft,
+  patch: {
+    type?: string
+    difficulty?: string
+    knowledge?: string[]
+    stem?: string
+    options?: string[]
+    answer?: string
+    analysis?: string
+  },
+): void {
+  if (patch.difficulty) draft.difficulty = patch.difficulty
+  if (patch.knowledge?.length) draft.knowledge = [...new Set(patch.knowledge)].slice(0, MAX_KNOWLEDGE)
+  if (patch.stem != null) draft.stem = patch.stem
+  if (patch.analysis != null) draft.analysis = patch.analysis
+
+  if (patch.options == null && patch.answer == null && patch.type == null) return
+  const nextType = patch.type ?? draft.type
+  if (patch.options == null && patch.answer == null) {
+    resetBodyStructure(draft, nextType)
+    return
+  }
+  /* 填空题的答案在存储上是纯文本（各空以「｜」分隔），富文本答案先折回纯文本再拆空 */
+  const answer = patch.answer ?? answerTextOf(draft)
+  applyAnswerToDraft(
+    draft,
+    nextType === '填空' ? [] : (patch.options ?? draft.options),
+    nextType === '填空' ? toPlainText(answer) : answer,
+    nextType,
+  )
+}
+
+/**
  * 年级变更的**唯一入口**：年级变了就按新年级收窄学科，当前学科在新年级不存在则**清空**
  * （不落到该年级第一个学科 —— 那等于替用户做了「换成物理」这种决定）。
  *

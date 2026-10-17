@@ -9,6 +9,12 @@ import router from './router'
 import * as orgApi from './api/org'
 import { clearDemoIdentity } from './composables/useDemoRole'
 import './styles/main.css'
+/* 富文本正文（.rte-content）的共用观感：录题编辑器、备课文档编辑器、只读渲染三处同源，
+   写成全局而不是挂在某一个组件里（见该文件的说明） */
+import './styles/richtext-content.css'
+/* 两个编辑器（录题 / 备课文档）工具栏弹层里的共用原子件 —— 弹层 Teleport 到 body，
+   写在组件里会各复制一份且互相看不见，故提到全局（见该文件的说明） */
+import './styles/rte-popover.css'
 
 // 注入端标识：机构端使用独立的 token 存储与 Mock 账号库
 setupApp({ appName: 'tenant', apiBaseUrl: import.meta.env.VITE_API_BASE_URL ?? '/api' })

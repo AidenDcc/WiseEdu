@@ -10,8 +10,9 @@
     "preview": "vite preview"
   },
   "//business-common": "题库 / 试卷 / 组卷三块业务的共用层：两端不变的 UI 骨架、TS 类型、基础接口契约（见 packages/business-common）",
+  "//word-io": "docx / mammoth 是导入导出 Word 的按需依赖（utils/doc-io.ts）。不装也不影响其它功能，只是「导入 Word / 导出 .docx」会退回 .doc 或提示未装。注意：注释只能放顶层，放进 dependencies 会被 pnpm 判为非法包名（ERR_PNPM_INVALID_DEPENDENCY_NAME）",
   "dependencies": {
-      "@aiteach/business-common": "workspace:*",
+    "@aiteach/business-common": "workspace:*",
     "@aiteach/shared": "workspace:*",
     "@element-plus/icons-vue": "^2.3.2",
     "@tiptap/core": "3.31.3",
@@ -24,6 +25,8 @@
     "@tiptap/pm": "3.31.3",
     "@tiptap/starter-kit": "3.31.3",
     "@tiptap/vue-3": "3.31.3",
+    "docx": "^9.0.2",
+    "mammoth": "^1.8.0",
     "events": "^3.3.0",
     "fabric": "^5.5.2",
     "jsxgraph": "^1.13.3",

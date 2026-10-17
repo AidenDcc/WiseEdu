@@ -38,6 +38,9 @@ export const AUTH_ACCOUNTS: Record<AppName, AuthAccount[]> = {
     { account: 'admin', salt: 'b235cf0c6f2acf8a7c7e25d6e19f44f7', passwordHash: '9959015c977c7983e48bd94a30f3348e5eb5d52b4e9a52664761de1b5257c06c' },
   ],
   tenant: [
+    /* 全功能账号：菜单不按「标准版」裁剪（见 apps/tenant/src/menu-edition.ts），演示全量功能用它 */
+    { account: 'admin', salt: '63fcda1252ab5b23d48ee36e3fea8d18', passwordHash: '6dd031a1c51c64bad9178a532e9bbe8285fe0ce792ac29d1784c2beb3ee0fa4e' },
+    /* 演示主账号：标准版，学案 / 课件 / 集体备课 / 作业系统 / 小程序动画 / 微课切片 / 知识广场 不开放 */
     { account: 'orgadmin', salt: '63a67271fa9351137f92b946dc3bab22', passwordHash: 'b8da3480c0678fb8771a05bb38cd494efc87eb6937c8015d210a051438355d9d' },
     { account: 'auditor', salt: '025c8560bc9cb05d627999a2e0edd258', passwordHash: '948f9867ea27d384c3f428c7757c32f1e352a07448f59d704454a8172c532dcb' },
     { account: 'teacher', salt: '998c15587352e5600b5a52d519d6b34f', passwordHash: '06f656d9a4c43afd7ab196db3142d6eb4c43c37f5a639a80d06eaf0c2d5dd967' },

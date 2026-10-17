@@ -9,7 +9,8 @@ import { QuestionPreviewDrawer } from '@aiteach/business-common'
 import QuestionResultList from '@/components/question/QuestionResultList.vue'
 import { adoptGenerated, fetchCategories, fetchQuestions, fetchQuota, saveQuestion, variantOf } from '@/api/org'
 import { checkQuestionByAi } from '@/api/ai-check'
-import type { AiCheckReport } from '@/api/ai-check'
+import { richField } from '@/api/ai-normalize'
+import type { AiCheckCorrection, AiCheckItem, AiCheckReport, AiCheckSubCorrection, CheckLevel, CheckQuestionInput } from '@/api/ai-check'
 import { alignKnowledgeToPool } from '@/api/ai-photo'
 import { aiEngine, generateByAi } from '@/api/ai-generate'
 import { getCheckRounds, setCheckRounds, verifyQuestionsByAi, type AiVerifyReport, type VerifyIssue } from '@/api/ai-verify'
@@ -17,7 +18,10 @@ import { useBaseData } from '@aiteach/business-common'
 import { useKnowledgePool } from '@aiteach/business-common'
 import { useScope } from '@aiteach/business-common'
 import {
+  MAX_KNOWLEDGE,
+  answerIndicesOf,
   answerTextOf,
+  applySubQuestionCorrection,
   draftFromGenerated,
   draftFromQuestion,
   emptyQuestionDraft,
@@ -27,7 +31,7 @@ import {
   questionPayloadOf,
   setDraftGrade,
 } from '@/utils/question-draft'
-import type { QuestionDraft } from '@/utils/question-draft'
+import type { QuestionDraft, SubQuestionDraft } from '@/utils/question-draft'
 
 const route = useRoute()
 const router = useRouter()
@@ -196,7 +200,10 @@ async function save(submit: boolean) {
   }
 }
 
-/* ===== AI 检测（质检 + 缺失答案/解析补充，结论可回写表单） ===== */
+/* ===== AI 检测（质检 + 缺失答案/解析补充，结论可回写表单） =====
+   独立单题与材料组合题共用这一套交互，差别只在两处：报告项有没有 `scope`，修正建议按什么粒度给。
+   组合题的作答单位在子题里，所以入参要带 subQuestions、建议也要按「共用材料 / 第 N 题」两级给 ——
+   逐字段铺开会把四五道子题的建议糊成一片，看不出是哪一题的问题。 */
 const checkOpen = ref(false)
 const checkPhase = ref<'running' | 'done' | 'failed'>('running')
 const checkProgress = ref(0)
@@ -207,19 +214,98 @@ let checkTimer = 0
 const OVERALL_TEXT = { pass: '检测通过', warn: '建议关注', fail: '需修正' } as const
 const LEVEL_TEXT = { ok: '正常', warn: '提示', error: '错误' } as const
 
-function checkInput() {
-  return {
+/* ===== 检测结论的单元分组（组合题分页签显示） =====
+   组合题一道动辄四五道子题、每道四个维度，平铺下来近二十条 —— 找「第 3 题的解析」得一路往下滚。
+   按被审单元（`共用材料` / `第 N 题`）分组后一次只看一个单元，页签上的状态点仍能一眼看出
+   哪一道有问题。独立单题没有 scope（审的就是这一道题），不分页签，结论原样平铺。 */
+
+const LEVEL_RANK = { ok: 0, warn: 1, error: 2 } as const
+
+interface CheckGroup {
+  /** 被审单元名：`共用材料` 或 `第 N 题` */
+  scope: string
+  items: AiCheckItem[]
+  /** 该单元最差的一档，用于页签上的状态点 */
+  level: CheckLevel
+}
+
+/** 单元排序：共用材料恒在最前，其余按「第 N 题」的序号升序；认不出的写法垫底（页签顺序即出现顺序） */
+function scopeOrder(scope: string): number {
+  if (scope === '共用材料') return -1
+  const matched = /^第\s*(\d+)\s*题$/.exec(scope)
+  return matched ? Number(matched[1]) : Number.MAX_SAFE_INTEGER
+}
+
+function groupCheckItems(items: AiCheckItem[]): CheckGroup[] {
+  const map = new Map<string, AiCheckItem[]>()
+  items.forEach((item) => {
+    /* 组合题的项一律带 scope；模型漏给或写成认不出的名字时归到共用材料那一档 ——
+       宁可混进材料里，也不要凭空多出一个无名的页签 */
+    const scope = item.scope || '共用材料'
+    const list = map.get(scope)
+    if (list) list.push(item)
+    else map.set(scope, [item])
+  })
+  return [...map.entries()]
+    .map(([scope, groupItems]) => ({
+      scope,
+      items: groupItems,
+      level: groupItems.reduce<CheckLevel>(
+        (worst, item) => (LEVEL_RANK[item.level] > LEVEL_RANK[worst] ? item.level : worst),
+        'ok',
+      ),
+    }))
+    .sort((a, b) => scopeOrder(a.scope) - scopeOrder(b.scope))
+}
+
+const checkGroups = computed(() => (checkReport.value ? groupCheckItems(checkReport.value.items) : []))
+const activeCheckScope = ref('')
+/** 组合题且不止一个被审单元时才铺页签；只有「共用材料」一项时平铺，序号名由条目自己带 */
+const checkTabbed = computed(() => composite.value && checkGroups.value.length > 1)
+
+/** 当前页签（重跑检测后原来选中的单元可能已不存在，落回第一个） */
+const currentCheckGroup = computed(() => {
+  const groups = checkGroups.value
+  if (!groups.length) return null
+  return groups.find((group) => group.scope === activeCheckScope.value) ?? groups[0]
+})
+
+/** 结论区实际渲染的项：组合题只显示当前页签那一个单元，独立单题原样平铺 */
+const visibleCheckItems = computed(() => {
+  if (!composite.value) return checkReport.value?.items ?? []
+  return currentCheckGroup.value?.items ?? []
+})
+
+function checkInput(): CheckQuestionInput {
+  const base: CheckQuestionInput = {
     subject: form.subject,
     grade: form.grade,
     type: form.type,
     difficulty: form.difficulty,
     knowledge: [...form.knowledge],
-    /* 组合题的正文是「共用材料 + 子题」，母题自身没有题干 / 选项 / 答案；
-       交给 AI 检测的是共用材料 —— 子题逐题检测等有接口了再说。 */
+    /* 组合题的正文是「共用材料 + 子题」，母题自身没有题干，故 stem 位交给共用材料 */
     stem: composite.value ? form.material : form.stem,
     options: isChoice.value ? form.options.filter((opt) => hasContent(opt)) : [],
     answer: answerText.value,
     analysis: form.analysis,
+  }
+  if (!composite.value) return base
+  /* 组合题：母题的选项 / 答案 / 解析恒为空（作答单位在子题里），逐题带上子题正文 ——
+     否则 AI 只会对着一段材料得出「缺答案、缺解析」，子题里的错一处也审不出来。
+     带上 subQuestions 即按组合题检测（空数组同样算，那表示「这道组合题还没有子题」）。 */
+  return { ...base, options: [], answer: '', analysis: '', subQuestions: form.subQuestions.map(subQuestionInputOf) }
+}
+
+/** 子题草稿 → 检测入参（答案按题型折算成存库口径的那一条字符串，与保存时同一份推导） */
+function subQuestionInputOf(sub: SubQuestionDraft) {
+  return {
+    type: sub.type,
+    difficulty: sub.difficulty,
+    knowledge: [...sub.knowledge],
+    stem: sub.stem,
+    options: isChoiceDraft(sub) ? sub.options.filter((opt) => hasContent(opt)) : [],
+    answer: answerTextOf(sub),
+    analysis: sub.analysis,
   }
 }
 
@@ -229,6 +315,7 @@ async function runCheck() {
   checkProgress.value = 0
   checkReport.value = null
   checkFailReason.value = ''
+  activeCheckScope.value = ''
   /* 与 AI 出题同一套假进度：接口未返回前先走到 97%，完成后补满 */
   window.clearInterval(checkTimer)
   checkTimer = window.setInterval(() => {
@@ -237,6 +324,10 @@ async function runCheck() {
   try {
     checkReport.value = await checkQuestionByAi(checkInput())
     checkPhase.value = 'done'
+    /* 默认停在第一个有问题的单元（全 ok 时停在共用材料）：页签化的目的是少滚屏，
+       若停在一切正常的材料页上，用户会以为「整题没问题」而错过第 3 题的提示 */
+    const groups = groupCheckItems(checkReport.value.items)
+    activeCheckScope.value = (groups.find((group) => group.level !== 'ok') ?? groups[0])?.scope ?? ''
   } catch (error) {
     checkFailReason.value = error instanceof Error ? error.message : '检测失败'
     checkPhase.value = 'failed'
@@ -256,6 +347,7 @@ function fieldDiffers(current: string, next: string): boolean {
   return toPlainText(current).trim() !== toPlainText(next).trim()
 }
 
+/** 修正版：独立单题读 stem / options / answer / analysis，组合题读 material / subQuestions（同一份结构） */
 const corrected = computed(() => checkReport.value?.corrected)
 
 /** 母题的「题干」入口：组合题读写的其实是共用题干 / 材料（母题自身没有题干） */
@@ -266,26 +358,130 @@ function setCurrentStem(value: string) {
   else form.stem = value
 }
 
-/** 逐字段修正建议（与当前值有差异才列出）；answer 仅当非选项结构差异时单列。
-    组合题只保留「共用材料」这一条：选项 / 答案 / 解析都在子题里，回写母题没有去处。 */
-const corrections = computed(() => {
+/** 建议行里的一行「字段名 + 富文本值」（组合题的一道子题按字段拆成若干行） */
+interface CorrectionLine {
+  label: string
+  value: string
+}
+
+/** 一条修正建议。`field` 决定回写去哪；`subPatch` 只在组合题里带，是**过滤出真实差异**的补丁 */
+interface CorrectionRow {
+  field: string
+  label: string
+  /** 单段建议的富文本（独立单题的题干 / 选项 / 答案 / 解析，组合题的共用材料） */
+  value?: string
+  /** 多字段建议的逐行内容（组合题的一道子题：题干 / 选项 / 答案 / 解析 / 题型 / 难度 / 知识点） */
+  lines?: CorrectionLine[]
+  subPatch?: AiCheckSubCorrection
+}
+
+/** 两组选项是否实质不同（按纯文本比，忽略 HTML 标签差异）—— 与 fieldDiffers 同一口径 */
+function optionsDiffer(current: string[], next: string[]): boolean {
+  const plain = (list: string[]) => list.map((item) => toPlainText(item).trim()).join('｜')
+  return plain(current) !== plain(next)
+}
+
+/**
+ * 逐条修正建议（与当前值有差异才列出）。
+ *
+ * 组合题按「共用材料 + 每道有差异的子题」各给一条：子题的题干 / 选项 / 答案 / 解析互相牵连
+ * （换了选项，答案字母的口径也跟着变），逐字段单独采纳会留下半截状态，所以整题一次性回写；
+ * 差异仍逐项列在预览里，教师看得清改了哪几处。
+ */
+const corrections = computed<CorrectionRow[]>(() => {
   const c = corrected.value
-  if (!c) return [] as Array<{ field: string; label: string; value: string }>
-  const rows: Array<{ field: string; label: string; value: string }> = []
-  if (fieldDiffers(currentStem.value, c.stem)) {
-    rows.push({ field: 'stem', label: composite.value ? '共用题干 / 材料' : '题干', value: c.stem })
+  if (!c) return []
+  return composite.value ? compositeCorrections(c) : singleCorrections(c)
+})
+
+/** 独立单题：题干 / 选项 / 答案 / 解析逐字段给（字段之间没有联动，可以各采纳各的） */
+function singleCorrections(c: AiCheckCorrection): CorrectionRow[] {
+  const rows: CorrectionRow[] = []
+  if (c.stem != null && fieldDiffers(currentStem.value, c.stem)) {
+    rows.push({ field: 'stem', label: '题干', value: c.stem })
   }
-  if (!composite.value) {
-    if (isChoice.value && c.options.length) {
-      const cur = form.options.map((opt) => toPlainText(opt).trim()).join('｜')
-      const next = c.options.map((opt) => toPlainText(opt).trim()).join('｜')
-      if (cur !== next) rows.push({ field: 'options', label: '选项与正确项', value: c.options.join('<br>') })
+  if (isChoice.value && c.options?.length) {
+    if (optionsDiffer(form.options, c.options)) {
+      rows.push({ field: 'options', label: '选项与正确项', value: c.options.join('<br>') })
     }
-    if (fieldDiffers(answerText.value, c.answer)) rows.push({ field: 'answer', label: '答案', value: c.answer })
-    if (fieldDiffers(form.analysis, c.analysis)) rows.push({ field: 'analysis', label: '解析', value: c.analysis })
+  }
+  if (c.answer != null && fieldDiffers(answerText.value, c.answer)) {
+    rows.push({ field: 'answer', label: '答案', value: c.answer })
+  }
+  if (c.analysis != null && fieldDiffers(form.analysis, c.analysis)) {
+    rows.push({ field: 'analysis', label: '解析', value: c.analysis })
   }
   return rows
-})
+}
+
+/** 组合题：共用材料一条 + 每道有差异的子题一条（下标越界的补丁直接丢弃，不动表单） */
+function compositeCorrections(c: AiCheckCorrection): CorrectionRow[] {
+  const rows: CorrectionRow[] = []
+  if (c.material != null && fieldDiffers(form.material, c.material)) {
+    rows.push({ field: 'material', label: '共用题干 / 材料', value: c.material })
+  }
+  const patches = [...(c.subQuestions ?? [])].sort((a, b) => a.index - b.index)
+  for (const patch of patches) {
+    const sub = form.subQuestions[patch.index]
+    if (!sub) continue
+    const diff = subCorrectionDiff(sub, patch)
+    if (!diff) continue
+    rows.push({ field: `sub:${sub.id}`, label: `第 ${patch.index + 1} 题`, lines: diff.lines, subPatch: diff.patch })
+  }
+  return rows
+}
+
+/**
+ * 与当前子题逐字段比对，交回「逐行差异说明 + 只含差异字段的补丁」；无差异返回 null。
+ *
+ * 逐字段分行（而不是拼成一段 HTML）：字段值是**富文本**（模型原样转写回来的 `<p>` / 公式节点），
+ * 拼进 `<p><b>题干</b>：${值}</p>` 会形成 `<p>` 套 `<p>` 的非法结构，浏览器提前闭合后段落错乱。
+ * 交给模板按行渲染，每行的值以行内模式铺开，标签与内容始终同一行。
+ *
+ * 必须是「只含差异字段」的补丁：`applySubQuestionCorrection` 见到选项 / 答案就会重建整套作答结构，
+ * 把没问题的字段一并带上，填空题的等价答案会被按「｜」重新拆空。
+ */
+function subCorrectionDiff(sub: SubQuestionDraft, patch: AiCheckSubCorrection) {
+  const lines: CorrectionLine[] = []
+  const effective: AiCheckSubCorrection = { index: patch.index }
+
+  if (patch.stem != null && fieldDiffers(sub.stem, patch.stem)) {
+    effective.stem = patch.stem
+    lines.push({ label: '题干', value: patch.stem })
+  }
+  if (patch.options?.length && optionsDiffer(sub.options, patch.options)) {
+    effective.options = patch.options
+    /* 逐项一行：改了哪一项一眼可见（整套选项一起换掉时，「选项」一行会挤成一段糊） */
+    patch.options.forEach((opt, i) => lines.push({ label: `选项 ${'ABCDEF'[i]}`, value: opt }))
+  }
+  if (patch.answer != null && fieldDiffers(answerTextOf(sub), patch.answer)) {
+    effective.answer = patch.answer
+    lines.push({ label: '答案', value: patch.answer })
+  }
+  if (patch.analysis != null && fieldDiffers(sub.analysis, patch.analysis)) {
+    effective.analysis = patch.analysis
+    lines.push({ label: '解析', value: patch.analysis })
+  }
+  if (patch.type != null && patch.type !== sub.type) {
+    effective.type = patch.type
+    lines.push({ label: '题型', value: `${sub.type} → ${patch.type}` })
+  }
+  if (patch.difficulty != null && patch.difficulty !== sub.difficulty) {
+    effective.difficulty = patch.difficulty
+    lines.push({ label: '难度', value: `${sub.difficulty} → ${patch.difficulty}` })
+  }
+  /* 知识点先归一到当前知识点池，再与原有标注合并：模型给的名字与池里的写法常差一点，
+     直接采纳会写进一个筛选体系里不存在的知识点；补丁里给合并后的完整列表，回写即覆盖 */
+  const aligned = (patch.knowledge ?? [])
+    .map((name) => alignKnowledgeToPool(name, knowledgePool.value))
+    .filter((name) => name && !sub.knowledge.includes(name))
+  if (aligned.length) {
+    effective.knowledge = [...sub.knowledge, ...aligned].slice(0, MAX_KNOWLEDGE)
+    lines.push({ label: '知识点', value: `建议补充 ${aligned.join('、')}` })
+  }
+
+  return lines.length ? { lines, patch: effective } : null
+}
 
 /** 基本信息修正建议（学科/年级/难度/知识点与表单不一致时） */
 const metaCorrection = computed(() => {
@@ -304,34 +500,41 @@ const metaCorrection = computed(() => {
   return parts.length ? { text: parts.join('；'), knowledge: aligned } : null
 })
 
-function applyCorrection(field: string) {
+/** 按题型把一条答案字符串写回母题的作答结构（组合题的同类动作在 applySubQuestionCorrection 里） */
+function applyAnswerText(answer: string): void {
+  if (isChoice.value) {
+    form.answers = answerIndicesOf(answer)
+  } else if (form.type === '填空') {
+    /* AI 回写的是富文本（各空以 ｜ 分隔），先折回纯文本再按空拆；等价答案需人工补 */
+    form.fillAnswers = toPlainText(answer).split('｜').map((value) => ({ value: value.trim(), equivalents: '' }))
+  } else {
+    form.essayAnswer = answer
+  }
+}
+
+function applyCorrection(row: CorrectionRow) {
   const c = corrected.value
   if (!c) return
-  if (field === 'stem') setCurrentStem(c.stem)
-  else if (field === 'options') {
-    form.options = [...c.options]
-    form.answers = c.answer
-      .toUpperCase()
-      .replace(/[^A-F]/g, '')
-      .split('')
-      .map((ch) => 'ABCDEF'.indexOf(ch))
-      .filter((i) => i >= 0)
-  } else if (field === 'answer') {
-    if (isChoice.value) {
-      form.answers = c.answer
-        .toUpperCase()
-        .replace(/[^A-F]/g, '')
-        .split('')
-        .map((ch) => 'ABCDEF'.indexOf(ch))
-        .filter((i) => i >= 0)
-    } else if (form.type === '填空') {
-      /* AI 回写的是纯文本（各空以 ｜ 分隔），按空拆进富文本编辑器；等价答案需人工补 */
-      form.fillAnswers = c.answer.split('｜').map((value) => ({ value: value.trim(), equivalents: '' }))
-    } else {
-      form.essayAnswer = c.answer
-    }
-  } else if (field === 'analysis') {
-    form.analysis = c.analysis
+  if (row.field === 'stem') {
+    setCurrentStem(c.stem ?? '')
+  } else if (row.field === 'material') {
+    form.material = c.material ?? ''
+  } else if (row.field === 'options') {
+    /* 选项与正确项同一条建议：选项换了下标含义就变了，答案必须跟着重算 */
+    form.options = [...(c.options ?? [])]
+    form.answers = answerIndicesOf(c.answer ?? '')
+  } else if (row.field === 'answer') {
+    applyAnswerText(c.answer ?? '')
+  } else if (row.field === 'analysis') {
+    form.analysis = c.analysis ?? ''
+  } else if (row.subPatch) {
+    /* 组合题：一条建议 = 一道子题的全部差异，整题一次性回写 */
+    const id = Number(row.field.slice('sub:'.length))
+    const sub = form.subQuestions.find((item) => item.id === id)
+    if (!sub) return
+    applySubQuestionCorrection(sub, row.subPatch)
+  } else {
+    return
   }
   dirty.value = true
   showToast('已回写到表单', 'success')
@@ -357,7 +560,7 @@ function applyMetaCorrection() {
 }
 
 function applyAllCorrections() {
-  corrections.value.forEach((row) => applyCorrection(row.field))
+  corrections.value.forEach((row) => applyCorrection(row))
   applyMetaCorrection()
 }
 
@@ -926,11 +1129,13 @@ onMounted(load)
       <!-- 进度 -->
       <div v-if="checkPhase === 'running'" class="check-running">
         <div class="run-ring"><AppIcon name="sparkles" :size="30" /></div>
-        <p class="run-title">AI 正在检测这道题…</p>
+        <p class="run-title">
+          {{ composite ? `AI 正在检测这道组合题（共用材料 + ${form.subQuestions.length} 道子题）…` : 'AI 正在检测这道题…' }}
+        </p>
         <div class="run-steps">
           <span>匹配基本信息</span>
-          <span>审查题干与选项</span>
-          <span>验算答案与解析</span>
+          <span>{{ composite ? '审查共用材料' : '审查题干与选项' }}</span>
+          <span>{{ composite ? '逐题验算子题' : '验算答案与解析' }}</span>
         </div>
         <div class="check-track"><div class="check-fill" :style="{ width: `${checkProgress}%` }" /></div>
         <p class="f-hint">{{ checkProgress < 100 ? '正在调用大模型…' : '整理检测结论…' }}</p>
@@ -954,18 +1159,37 @@ onMounted(load)
           </span>
           <span v-if="checkReport.tokens" class="f-hint" style="margin-left: auto">{{ checkReport.tokens }} tokens</span>
         </div>
+        <!-- 组合题：按被审单元分页签，一次只看一个单元（共用材料 / 第 N 题） -->
+        <div v-if="checkTabbed" class="check-tabs">
+          <button
+            v-for="group in checkGroups"
+            :key="group.scope"
+            type="button"
+            class="check-tab"
+            :class="[`lv-${group.level}`, { on: group.scope === currentCheckGroup?.scope }]"
+            @click="activeCheckScope = group.scope"
+          >
+            {{ group.scope }}
+            <span class="tab-dot" />
+          </button>
+        </div>
         <ul class="check-items">
-          <li v-for="(item, i) in checkReport.items" :key="i" :class="`lv-${item.level}`">
+          <li v-for="(item, i) in visibleCheckItems" :key="i" :class="`lv-${item.level}`">
             <div class="ci-bar">
+              <!-- 组合题的检测项带 scope（审的是共用材料还是哪一道子题）；已分页签时由页签承担，不再重复 -->
+              <span v-if="item.scope && !checkTabbed" class="ci-scope">{{ item.scope }}</span>
               <b>{{ item.aspect }}</b>
               <span class="lv-tag">{{ LEVEL_TEXT[item.level] }}</span>
             </div>
-            <p>{{ item.message }}</p>
+            <!-- 结论正文按富文本渲染：模型爱把公式写成 `$latex$`，走 RichTextViewer 才能落成公式 -->
+            <RichTextViewer :content="richField(item.message)" tag="span" />
           </li>
         </ul>
 
         <template v-if="corrections.length || metaCorrection">
-          <div class="corr-title">AI 修正建议（点击「采纳」回写到表单）</div>
+          <div class="corr-title">
+            AI 修正建议（点击「采纳」回写到表单）<template v-if="composite"> — 组合题按整道子题回写</template>
+          </div>
           <div v-if="metaCorrection" class="corr-row">
             <div class="corr-label">基本信息</div>
             <div class="corr-value">{{ metaCorrection.text }}</div>
@@ -973,8 +1197,17 @@ onMounted(load)
           </div>
           <div v-for="row in corrections" :key="row.field" class="corr-row">
             <div class="corr-label">{{ row.label }}</div>
-            <div class="corr-value"><RichTextViewer :content="row.value" tag="span" /></div>
-            <button class="mini-btn" type="button" @click="applyCorrection(row.field)">采纳</button>
+            <div class="corr-value">
+              <!-- 组合题的子题建议按字段分行：字段值本身是富文本，不能拼进外层 <p>（会形成嵌套 p） -->
+              <template v-if="row.lines">
+                <div v-for="(line, i) in row.lines" :key="i" class="corr-line">
+                  <span class="corr-key">{{ line.label }}</span>
+                  <RichTextViewer :content="line.value" tag="span" />
+                </div>
+              </template>
+              <RichTextViewer v-else :content="row.value ?? ''" tag="span" />
+            </div>
+            <button class="mini-btn" type="button" @click="applyCorrection(row)">采纳</button>
           </div>
           <button class="btn btn-primary btn-sm" style="margin-top: 12px" @click="applyAllCorrections">
             全部采纳并回写
@@ -1136,11 +1369,32 @@ onMounted(load)
 .check-items li.lv-error { border-left-color: var(--danger, #dc2626); }
 .ci-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
 .ci-bar b { font-size: 13px; color: var(--ink); }
+/* 组合题的检测单元（共用材料 / 第 N 题）：与维度名同级但视觉更轻，扫一眼先看到「审的是谁」 */
+.ci-scope {
+  font-size: 11.5px; font-weight: 600; color: var(--brand-deep);
+  background: var(--brand-soft); border-radius: 6px; padding: 1px 7px; flex-shrink: 0;
+}
 .lv-tag { font-size: 11px; border-radius: 999px; padding: 1px 8px; background: #f5f8f8; color: var(--sub); }
 .lv-ok .lv-tag { color: var(--success); }
 .lv-warn .lv-tag { color: #d97706; }
 .lv-error .lv-tag { color: #dc2626; }
-.check-items p { margin: 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.6; }
+/* 结论正文的排版：与原先的 <p> 同口径（RichTextViewer 渲染后根元素是 .rich-text） */
+.check-items :deep(.rich-text) { font-size: 12.5px; color: var(--ink-2); line-height: 1.6; }
+
+/* 组合题的结论页签：一个页签 = 一个被审单元（共用材料 / 第 N 题） */
+.check-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.check-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border: 1px solid var(--border); border-radius: 999px;
+  background: #fff; color: var(--sub); font-size: 12.5px; line-height: 1.6; cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.check-tab:hover { border-color: var(--brand); color: var(--brand-deep); }
+.check-tab.on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-deep); font-weight: 600; }
+/* 状态点：该单元最差的一档 —— 没点开也知道哪一道要处理 */
+.tab-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); flex-shrink: 0; }
+.check-tab.lv-warn .tab-dot { background: #d97706; }
+.check-tab.lv-error .tab-dot { background: #dc2626; }
 
 .corr-title { font-size: 13px; font-weight: 700; color: var(--ink); margin: 14px 0 8px; }
 .corr-row {
@@ -1148,6 +1402,12 @@ onMounted(load)
   border: 1px dashed var(--border); border-radius: 8px;
   padding: 8px 10px; margin-bottom: 8px; background: #fff;
 }
-.corr-label { font-size: 12px; font-weight: 600; color: var(--brand-deep); width: 64px; flex-shrink: 0; padding-top: 2px; }
+/* 标签宽度容得下「第 12 题」与「共用题干 / 材料」，两行以内不挤坏右侧预览 */
+.corr-label { font-size: 12px; font-weight: 600; color: var(--brand-deep); width: 72px; flex-shrink: 0; padding-top: 2px; line-height: 1.4; }
 .corr-value { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.6; max-height: 110px; overflow-y: auto; }
+/* 组合题子题建议的逐行内容：字段名与富文本值同一行，值撑满剩余宽度（行内模式吃掉内层段落） */
+.corr-line { display: flex; align-items: flex-start; gap: 6px; }
+.corr-line + .corr-line { margin-top: 3px; }
+.corr-key { flex-shrink: 0; min-width: 44px; font-weight: 600; color: var(--ink); }
+.corr-line :deep(.rich-text) { flex: 1; min-width: 0; }
 </style>

@@ -17,7 +17,10 @@ import type { OrgQuestion } from '@aiteach/shared'
 import { useComposeData } from '@aiteach/business-common'
 import { useComposeBasket } from '@aiteach/business-common'
 import { useBaseData } from '@aiteach/business-common'
+import { CompositeSubList } from '@aiteach/business-common'
+import { CompositeTag } from '@aiteach/business-common'
 import { defaultScore } from '@aiteach/business-common'
+import { isCompositeQuestion, subQuestionCount, subQuestionsOf } from '@aiteach/business-common'
 import {
   availableKnowledges,
   blueprintEntries,
@@ -43,6 +46,21 @@ const { questionTypesFor, difficulties } = useBaseData()
 const basket = useComposeBasket()
 
 void ensure()
+
+/**
+ * 材料组合题在细目表里**整题抽入**：配额按「题数」算，一道组合题占一格、占一个分值，
+ * 子题不单独占格（子题没有独立 id，也无法落进 `picked` 的 id 列表）。
+ * 它的作答单位在子题里，故抽题抽屉里要把子题铺开 —— 只给一段共用材料，教师没法判断是否合适。
+ */
+function isComposite(row: OrgQuestion | undefined): boolean {
+  return !!row && isCompositeQuestion(row)
+}
+function subsOf(row: OrgQuestion | undefined) {
+  return row ? subQuestionsOf(row) : []
+}
+function subCount(row: OrgQuestion | undefined): number {
+  return row ? subQuestionCount(row) : 0
+}
 
 /* ===== 配额矩阵的持久化 ===== */
 
@@ -419,12 +437,15 @@ function cellState(cell: BlueprintCell): 'full' | 'partial' | 'empty' | 'idle' {
         <div v-for="id in activeCell.picked" :key="id" class="bp-d-item">
           <div class="bp-d-head">
             <span class="tag tag-blue">#{{ id }}</span>
+            <CompositeTag v-if="isComposite(questionOf(id))" :count="subCount(questionOf(id))" />
             <span class="tag tag-gray">{{ questionOf(id)?.difficulty }}</span>
             <span class="bp-d-kp">{{ questionOf(id)?.knowledge.join('、') }}</span>
             <button class="mini-btn" type="button" @click="swapAt(id)">换一题</button>
             <button class="mini-btn danger" type="button" @click="dropFrom(id)">移除</button>
           </div>
           <RichTextViewer class="bp-d-stem" :content="questionOf(id)?.stem ?? ''" />
+          <!-- 组合题：子题一并铺开；「换一题 / 移除」动的都是整道组合题 -->
+          <CompositeSubList v-if="isComposite(questionOf(id))" class="bp-d-subs" :subs="subsOf(questionOf(id))" />
         </div>
 
         <h4 class="bp-d-title">候选题（{{ cellCandidates.length }}）</h4>
@@ -437,6 +458,7 @@ function cellState(cell: BlueprintCell): 'full' | 'partial' | 'empty' | 'idle' {
         >
           <div class="bp-d-head">
             <span class="tag tag-blue">#{{ row.id }}</span>
+            <CompositeTag v-if="isComposite(row)" :count="subCount(row)" />
             <span class="tag tag-gray">{{ row.difficulty }}</span>
             <span class="bp-d-kp">{{ row.knowledge.join('、') }}</span>
             <span v-if="usedElsewhere(row.id)" class="tag tag-orange">已被其它格子占用</span>
@@ -452,6 +474,8 @@ function cellState(cell: BlueprintCell): 'full' | 'partial' | 'empty' | 'idle' {
             <span v-else class="bp-d-flag">已选</span>
           </div>
           <RichTextViewer class="bp-d-stem" :content="row.stem" />
+          <!-- 组合题：子题一并铺开 —— 「选用」加的是整道组合题 -->
+          <CompositeSubList v-if="isComposite(row)" class="bp-d-subs" :subs="subsOf(row)" />
         </div>
       </div>
     </AppDrawer>
@@ -588,4 +612,6 @@ function cellState(cell: BlueprintCell): 'full' | 'partial' | 'empty' | 'idle' {
 .bp-d-head .mini-btn + .mini-btn { margin-left: 0; }
 .bp-d-flag { margin-left: auto; font-size: 11.5px; font-weight: 600; color: var(--success); }
 .bp-d-stem { font-size: 13px; color: var(--ink); line-height: 1.75; }
+/* 组合题的子题列表：与共用材料拉开一点距离（子题自身样式在 CompositeSubList 里） */
+.bp-d-subs { margin-top: 6px; }
 </style>
