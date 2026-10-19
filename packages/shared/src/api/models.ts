@@ -2283,13 +2283,28 @@ export interface GeneratedQuestion {
 /** 教学班（机构端班级管理） */
 export interface OrgClass {
   id: number
+  /**
+   * 所属校区。多校区机构里班级必须归属到校区：学生档案的「年级 / 班级」下拉
+   * 按校区带出来（见 `OrgStudent.campus`），两边不一致就会出现「A 校区的学生挂在 B 校区的班」。
+   */
+  campus: string
   /** 班级名称，如「高一(1)班」 */
   name: string
+  /**
+   * 班号（如「1」/「4 班」）。新建时由它 + 年级自动合成班级名称，姓名可再手改，
+   * 所以它是**合成用的素材**，不是名称的唯一来源 —— 校验重名看的是 `name`。
+   */
+  classNo?: string
   grade: string
   /** 班主任 */
   headTeacher: string
   /** 助教 / 副班主任 */
   assistant?: string
+  /**
+   * 任课教师（可多选）。与「班主任 / 助教」是两回事：一个是教学分工，一个是管理分工，
+   * 同一个人可以既是班主任又任教本班，故不去重合并成一个字段。
+   */
+  teachers: string[]
   studentCount: number
   /** 本学期开的学科 */
   subjects: string[]
@@ -2297,6 +2312,48 @@ export interface OrgClass {
   room?: string
   enabled: boolean
   createdAt: string
+}
+
+/**
+ * 班级 / 学生表单的基础数据（校区、年级、学科、教师候选）。
+ *
+ * 单独一个接口而不是让前端自己拼三份字典：这几项要在同一个表单里级联
+ * （学科随年级、班级随校区），一次取齐才能保证「同一次弹窗里看到的是同一份配置」。
+ */
+export interface ClassFormMeta {
+  campuses: Array<{ name: string; code: string; enabled: boolean }>
+  /** 当前登录用户所在校区：新建时的默认值（查不到本人归属时退回首个启用校区） */
+  defaultCampus: string
+  grades: Array<{ name: string; stage: string }>
+  /**
+   * 学科 + 适配年级（`grades` 为空 = 不限年级）。
+   * 来自基础字典的 `subject` 项，年级切换后按这里收窄 —— 化学不会出现在小学班级的学科里。
+   */
+  subjects: Array<{ name: string; grades: string[] }>
+  /** 教师候选：来源是机构员工名单（班主任 / 助教 / 任课教师三处共用） */
+  teachers: Array<{ name: string; role: string; campus: string }>
+}
+
+/** 学生批量导入的一行（前端按模板列解析后逐行提交，服务端负责校验与落库） */
+export interface StudentImportRow {
+  name: string
+  gender?: string
+  campus?: string
+  grade?: string
+  /** 班级名称（模板里可直接填「高一(1)班」；只填班号时由服务端按年级补齐） */
+  className?: string
+  /** 留空则自动生成 */
+  studentNo?: string
+  guardianName?: string
+  guardianPhone?: string
+}
+
+/** 批量导入结果：成功条数 + 逐行失败原因（行号从 1 起，不含表头） */
+export interface StudentImportResult {
+  successCount: number
+  failCount: number
+  failures: Array<{ row: number; name: string; message: string }>
+  created: Array<{ row: number; name: string; studentNo: string; className: string }>
 }
 
 export type ConsentStatus = 'granted' | 'pending' | 'withdrawn'
@@ -2307,11 +2364,19 @@ export const CONSENT_STATUS_TEXT: Record<ConsentStatus, string> = {
   withdrawn: '已撤回',
 }
 
+/**
+ * 签署渠道。留档用：纸质签署（机构代录）与家长自助签署在合规审计里是两回事，
+ * 前者需要人工复核原件，后者有完整的电子轨迹。
+ */
+export type ConsentChannel = '家长端 H5' | '纸质签署' | '机构代录'
+
 /** 监护人知情同意记录（T-08-06，K12 合规红线） */
 export interface ConsentRecord {
   id: number
   studentId: number
   studentName: string
+  /** 学号：生成同意书 PDF 的正文要用，单独带一份省得页面再查一次学生 */
+  studentNo?: string
   /** 监护人姓名（脱敏展示：张*） */
   guardianName: string
   relation: '父亲' | '母亲' | '其他'
@@ -2320,6 +2385,15 @@ export interface ConsentRecord {
   status: ConsentStatus
   /** 同意范围 */
   scopes: string[]
+  /**
+   * 监护人签名文字（电子签名的落款）。
+   *
+   * 与「手写签名图片」刻意分开：同意书正文里要能读到签名人，检索、脱敏、导出都靠文本；
+   * 图片只在 PDF 留档里出现（见机构端 `utils/consent-pdf.ts`）。
+   */
+  signature?: string
+  /** 签署渠道 */
+  channel?: ConsentChannel
   signedAt?: string
   /** 撤回时间 */
   withdrawnAt?: string
@@ -2330,6 +2404,8 @@ export interface OrgStudent {
   id: number
   name: string
   studentNo: string
+  /** 所属校区：与所读班级的校区一致（校区隔离的落点） */
+  campus: string
   className: string
   grade: string
   gender: '男' | '女'
@@ -2458,8 +2534,6 @@ export interface AiArtifactReview {
   kind: '题目' | '试卷' | '讲义' | '课件' | '批改' | '画像'
   title: string
   scene: string
-  /** 生成来源模型 */
-  model: string
   status: ArtifactReviewStatus
   /** AI 自动质检结论 */
   autoCheck: 'pass' | 'warn' | 'error'
@@ -2469,6 +2543,135 @@ export interface AiArtifactReview {
   createdAt: string
   reviewer?: string
   reviewedAt?: string
+}
+
+/** AI 用量统计粒度：日 / 周 / 月 */
+export type AiUsageGranularity = 'day' | 'week' | 'month'
+
+export const AI_USAGE_GRANULARITY_TEXT: Record<AiUsageGranularity, string> = {
+  day: '按日',
+  week: '按周',
+  month: '按月',
+}
+
+/**
+ * 一次模型调用的明细（T-10-01 用量统计的最小单位）。
+ *
+ * 任务中心里的「请求明细」就是按 `taskId` 捞这份日志：一个「AI 组卷」任务往往要来回调十几次
+ * 模型（出题 → 质检 → 改写），只给老师看一条汇总的 token 数，出问题时无从对账。
+ */
+export interface AiRequestLog {
+  id: number
+  /** 归属任务；问答、单次识题这类零散调用不落任务，故可空 */
+  taskId?: number
+  /** 功能场景（出题 / 组卷 / 讲义 …），「按功能统计」按它分组 */
+  scene: string
+  /** 使用人，「按个人统计」按它分组 */
+  userName: string
+  promptTokens: number
+  completionTokens: number
+  /** 输入 + 输出 */
+  totalTokens: number
+  /** 折算费用（元），按模型单价算 */
+  cost: number
+  /** 耗时（秒） */
+  elapsed: number
+  status: 'success' | 'failed'
+  createdAt: string
+}
+
+/** 趋势图上的一格 */
+export interface AiUsageBucket {
+  /** 桶标签：日 = 09-26，周 = 09-22 ~ 09-28，月 = 2026-09 */
+  label: string
+  requests: number
+  tokens: number
+  cost: number
+}
+
+/** 按人或按功能的汇总行 */
+export interface AiUsageGroupRow {
+  key: string
+  name: string
+  requests: number
+  tokens: number
+  cost: number
+  /** 占总量比例（0~100，保留 1 位小数） */
+  share: number
+}
+
+/** AI 额度快照：token 是计量口径，金额是折算口径，两者都给才看得懂账单 */
+export interface AiQuotaSnapshot {
+  tokenQuota: number
+  tokenUsed: number
+  tokenLeft: number
+  costQuota: number
+  costUsed: number
+  costLeft: number
+  /** 额度周期重置时间 */
+  resetAt: string
+}
+
+/** AI 用量报表（AI 工作台整页数据） */
+export interface AiUsageReport {
+  quota: AiQuotaSnapshot
+  /** 当前筛选口径下的汇总 */
+  summary: { requests: number; tokens: number; cost: number; failRate: number }
+  granularity: AiUsageGranularity
+  /** 趋势（按时间升序） */
+  buckets: AiUsageBucket[]
+  byUser: AiUsageGroupRow[]
+  byScene: AiUsageGroupRow[]
+  /** 请求明细（当前筛选口径，时间倒序） */
+  logs: AiRequestLog[]
+}
+
+/** AI 用量查询条件 */
+export interface AiUsageQuery {
+  granularity?: AiUsageGranularity
+  /** 统计最近 N 天（默认 30） */
+  days?: number
+  /** 按人下钻 */
+  userName?: string
+  /** 按功能下钻 */
+  scene?: string
+}
+
+/** 任务中心查询条件 */
+export interface AiTaskQuery {
+  keyword?: string
+  scene?: string
+  status?: string
+  creator?: string
+}
+
+/** 任务产出明细（一条任务产出的每份产物） */
+export interface AiTaskOutput {
+  id: number
+  title: string
+  /** 产物类型：题目 / 试卷 / 讲义 / 课件 / 批改 / 画像 */
+  kind: string
+  status: 'ok' | 'reviewing' | 'rejected'
+  /** 该产物消耗的 token（任务总消耗按产物分摊） */
+  tokens: number
+  createdAt: string
+  /** 产物落点，有则前端给「查看」入口 */
+  link?: string
+}
+
+export const AI_TASK_OUTPUT_STATUS_TEXT: Record<AiTaskOutput['status'], string> = {
+  ok: '可用',
+  reviewing: '待复核',
+  rejected: '已驳回',
+}
+
+/** AI 内容复核的查询条件 */
+export interface AiArtifactQuery {
+  keyword?: string
+  kind?: string
+  scene?: string
+  status?: string
+  autoCheck?: string
 }
 
 /* ================ 机构系统设置（T-11） ================ */

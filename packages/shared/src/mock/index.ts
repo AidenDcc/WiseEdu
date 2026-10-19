@@ -2,6 +2,7 @@ import { registerMockRoutes } from './engine'
 import { mockRoutes } from './routes'
 import { registerMockPersist, restoreMockState } from './persist'
 import { ORG_STATE_VERSION, captureOrgState, restoreOrgState } from './org-store'
+import { STUDENT_STATE_VERSION, captureStudentState, restoreStudentState } from './student-store'
 
 registerMockRoutes(mockRoutes)
 
@@ -16,4 +17,14 @@ registerMockPersist({
   capture: captureOrgState,
   restore: restoreOrgState,
 })
+
+/* 班级 / 学生档案 / 同意记录：老师当场录入的数据，刷新不能回种子 —— 否则「新增的班级」
+   一刷新就消失，会被当成保存失败。与 org 分开一个键，两个仓库各存各的版本号。 */
+registerMockPersist({
+  key: 'student',
+  version: STUDENT_STATE_VERSION,
+  capture: captureStudentState,
+  restore: restoreStudentState,
+})
+
 restoreMockState()

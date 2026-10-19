@@ -25,7 +25,7 @@ async function load() {
   loading.value = true
   const [classReport, studentList] = await Promise.all([
     fetchClassProfile(className.value),
-    fetchStudents('', className.value),
+    fetchStudents({ className: className.value }),
   ])
   report.value = classReport
   /* 只列在读学生：与班级报告的「在读人数」口径一致（休学 / 转班学生不参与学情统计） */

@@ -8448,6 +8448,137 @@ export function importRecognizedFile(
   return { file: item, questionCount: imported.length, paperId }
 }
 
+/* ================= 试卷导入（AI 识别确认后整卷入库） ================= */
+
+/** 试卷导入确认入库的单题载荷（识别结果经教师二次编辑后的最终值） */
+export interface ImportedPaperQuestion {
+  stem: string
+  options: string[]
+  answer: string
+  analysis: string
+  subject: string
+  grade: string
+  type: string
+  difficulty: string
+  knowledge: string[]
+  score: number
+}
+
+/** 一次试卷导入的落库载荷：卷头 + 大题结构 + 每题分值（整卷一次提交，不留半成品） */
+export interface ImportRecognizedPaperPayload {
+  name: string
+  subject: string
+  grade: string
+  duration: number
+  notices?: string[]
+  sections: Array<{
+    title: string
+    /** 作答提示（印在大题标题下方） */
+    hint?: string
+    /** 大题共用材料 */
+    material?: string
+    questions: ImportedPaperQuestion[]
+  }>
+}
+
+/**
+ * 试卷导入确认入库。
+ *
+ * 与「我的文件 → 文档识别」的区别：那条链路产出的是**草稿卷 + 待审题**（识别完还要走审核），
+ * 而试卷导入是教师在试卷预览里逐题核对过、整卷确认过的，所以这里
+ * - 试卷直接以 `approved` 进试卷库（来源记「真题导入」）；
+ * - 题目以 `approved` 进机构题库（可立即检索组卷），并带上 AI 九项检测结果，审核中心仍可复核。
+ *
+ * 卷面结构按识别出的大题原样保留（不按题型重排）：导入的是别人出的成品卷，改结构就不是那张卷了。
+ */
+export function importRecognizedPaper(payload: ImportRecognizedPaperPayload): {
+  paperId: number
+  paperName: string
+  questionCount: number
+} {
+  const name = payload.name.trim()
+  if (name.length < 2 || name.length > 50) throw new Error('试卷名称须为 2-50 字')
+  const rows = payload.sections.flatMap((section) => section.questions)
+  if (!rows.length) throw new Error('请至少保留 1 道题目')
+  if (!payload.subject) throw new Error('请选择试卷学科')
+  if (!payload.grade) throw new Error('请选择试卷年级')
+
+  consumeQuota(1)
+  const at = nowStr()
+
+  /* 逐题入库：返回 题 id → 分值，供后面拼大题 */
+  const scored = rows.map((row) => {
+    const type = row.type || '解答'
+    const question = seedQuestion({
+      id: ++questionSeq,
+      stem: sanitizeRichHtml(row.stem),
+      subject: row.subject || payload.subject,
+      grade: row.grade || payload.grade,
+      type,
+      difficulty: row.difficulty || '中等',
+      knowledge: row.knowledge.slice(0, 3),
+      /* 客观题答案是选项字母，保持纯文本；主观题答案是富文本（公式 / 插图），同解析口径净化 */
+      answer: row.options.length ? row.answer.trim() : sanitizeRichHtml(row.answer),
+      analysis: sanitizeRichHtml(row.analysis),
+      options: (row.options ?? []).map((opt) => sanitizeRichHtml(opt)),
+      source: '文档导入',
+      status: 'approved',
+      library: 'org',
+      categoryId: 2,
+      owner: CURRENT.name,
+      ownerId: CURRENT.id,
+      updatedAt: at,
+    })
+    question.aiChecks = aiChecksFor(question)
+    question.aiSuspects = []
+    questions.unshift(question)
+    return { questionId: question.id, score: Number(row.score) > 0 ? Number(row.score) : type === '解答' ? 10 : 5 }
+  })
+
+  /* 按载荷的大题分组拼卷面：顺序、标题、提示、材料都以识别结果为准 */
+  let cursor = 0
+  const sections: PaperSection[] = payload.sections
+    .map((section) => {
+      const rowsOfSection = scored.slice(cursor, cursor + section.questions.length)
+      cursor += section.questions.length
+      if (!rowsOfSection.length) return null
+      return {
+        id: ++sectionSeq,
+        title: section.title.trim() || '试题',
+        material: section.material?.trim() || undefined,
+        materialHint: section.hint?.trim() || undefined,
+        questions: rowsOfSection,
+      } as PaperSection
+    })
+    .filter((section): section is PaperSection => section !== null)
+
+  const paper = seedPaper({
+    id: ++paperSeq,
+    name,
+    subject: payload.subject,
+    grade: payload.grade,
+    duration: Number(payload.duration) > 0 ? Number(payload.duration) : 120,
+    /* 教师已在预览里逐题确认过整卷，直接进试卷库；来源记「真题导入」（与「文档识别」区分来路） */
+    status: 'approved',
+    sections,
+    owner: CURRENT.name,
+    source: '真题导入',
+    notices: payload.notices?.length ? payload.notices.map((row) => row.trim()).filter(Boolean) : undefined,
+  })
+  /* 年份 / 月份按入库时间填：与 savePaper 同一口径，否则新卷在年份筛选里一个档都命中不了 */
+  const created = new Date()
+  paper.year = String(created.getFullYear())
+  paper.month = String(created.getMonth() + 1)
+  paper.viewCount = 0
+  paper.downloadCount = 0
+  papers.unshift(paper)
+  /* 落一份「我的文件」里的试卷文件（folderId 0 = 全部文件），老师能从文件侧再打开它 */
+  paper.folderId = 0
+  linkPaperFile(paper)
+
+  return { paperId: paper.id, paperName: paper.name, questionCount: scored.length }
+}
+
 /* ================= 公式中心（FR-FX-001 ~ 004） ================= */
 
 export const standardFormulas: StandardFormula[] = [
@@ -9138,6 +9269,7 @@ export const orgMenuTree: OrgMenuNode[] = [
     enabled: true,
     children: [
       { key: 'ai-center/workbench', title: 'AI 工作台', enabled: true },
+      { key: 'ai-center/tasks', title: '任务中心', enabled: true },
       { key: 'ai-center/review', title: 'AI 内容复核', enabled: true },
       // 提示词模板已从一级菜单并入 AI 能力中心；平台套餐仍锁定它，故保留 platformLocked
       { key: 'prompt', title: '提示词模板', enabled: true, platformLocked: true },
@@ -9420,6 +9552,11 @@ const ROSTER: Array<{ className: string; names: string[] }> = [
   { className: '高一(1)班', names: ['张一鸣', '李思远', '王梓涵', '陈亦帆', '刘梦琪', '赵子谦', '孙嘉悦', '周浩然', '吴欣怡', '郑天宇', '冯语彤', '蒋泽楷', '韩雨薇', '杨博文', '何佳宁'] },
   { className: '高一(2)班', names: ['曹峻熙', '彭思睿', '董一诺', '袁子墨', '于书瑶', '余泽楷', '叶知秋', '程思远', '苏子航', '魏灵犀', '吕明轩', '丁若曦', '任嘉树', '沈亦舟', '姚静姝'] },
   { className: '高一(3)班', names: ['卢俊熙', '傅诗涵', '钟子昂', '姜雨泽', '崔艺萌', '谭博衍', '陆思彤', '汪子睿', '范晓萱', '金昊然', '石佳怡', '廖晨曦', '贾一凡', '韦思远', '樊悦然'] },
+  /* 第二个年级的班：班级管理 / 学生档案要能演示「年级 + 校区」两个维度，
+     只有高一一个年级的话，年级筛选点下去永远是同一批数据。
+     名单与 student-store 的班级花名册同名同步 —— 两处错位就会出现
+     「班级管理里有 4 个班，布置作业只能选 3 个」。 */
+  { className: '高二(1)班', names: ['何思远', '许清和', '邓雅涵', '蒋文博', '曹欣然', '刘佳琪', '范志远', '沈逸凡', '宋婉清', '唐子墨', '薛晨曦', '汤雨桐'] },
 ]
 
 export const CLASS_NAMES = ROSTER.map((row) => row.className)
@@ -9559,8 +9696,12 @@ function demoPaper(index: number): OrgPaper {
   return pool[index] ?? pool[0] ?? papers[0]
 }
 
-seedSession({ id: ++sessionSeq, name: '2026 秋季高一数学期中考试', paperId: demoPaper(0).id, classes: CLASS_NAMES, status: 'grading', examAtOffset: -60 })
-seedSession({ id: ++sessionSeq, name: '高一数学 9 月月考', paperId: demoPaper(1).id, classes: CLASS_NAMES, status: 'finished', examAtOffset: -320 })
+/* 卷名写的是「高一」，班级就只取高一的班 —— 花名册里还有高二(1)班（班级管理演示用），
+   直接给 CLASS_NAMES 会让「高一数学期中考试」的成绩单里冒出一个高二的班 */
+const SENIOR1_CLASSES = CLASS_NAMES.filter((name) => name.startsWith('高一'))
+
+seedSession({ id: ++sessionSeq, name: '2026 秋季高一数学期中考试', paperId: demoPaper(0).id, classes: SENIOR1_CLASSES, status: 'grading', examAtOffset: -60 })
+seedSession({ id: ++sessionSeq, name: '高一数学 9 月月考', paperId: demoPaper(1).id, classes: SENIOR1_CLASSES, status: 'finished', examAtOffset: -320 })
 seedSession({
   id: ++sessionSeq,
   name: '高一(1)班 第三章周测',

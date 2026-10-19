@@ -114,6 +114,14 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/paper/ListView.vue'),
         meta: { title: '试卷库' },
       },
+      /* 试卷导入：上传（图片 / PDF / Word）→ AI 识别（卷面 + 试题 + 检查轮次）
+         → 试卷预览里逐题校对 → 整卷确认入库。是普通内容页（要边看卷面边改），不进新标签页。 */
+      {
+        path: 'paper/import',
+        name: 'paper-import',
+        component: () => import('@/views/paper/ImportView.vue'),
+        meta: { title: '试卷导入' },
+      },
       {
         path: 'paper/collab',
         name: 'paper-collab',
@@ -213,6 +221,13 @@ const routes: RouteRecordRaw[] = [
         name: 'ai-workbench',
         component: () => import('@/views/ai/WorkbenchView.vue'),
         meta: { title: 'AI 工作台' },
+      },
+      /* 任务中心：从 AI 工作台迁出（工作台管用量总账，任务中心管执行轨迹） */
+      {
+        path: 'ai-center/tasks',
+        name: 'ai-tasks',
+        component: () => import('@/views/ai/TaskCenterView.vue'),
+        meta: { title: '任务中心' },
       },
       {
         path: 'ai-center/review',

@@ -52,6 +52,9 @@ export const menus: MenuItem[] = [
     module: 'paper',
     children: [
       { path: '/paper/list', title: '试卷库', module: 'paper' },
+      /* 试卷导入：把外部卷子（图片 / PDF / Word）识成可编辑的试卷并整卷入库。
+         放在试卷库旁边 —— 它也是「往库里加卷」的一条路，与组卷并列。 */
+      { path: '/paper/import', title: '试卷导入', module: 'paper' },
       // 紧邻试卷库：组卷是「新建」动作，与「看已有试卷」放在一起更顺手；新标签页独立全屏
       { path: '/paper/compose', title: '题库组卷', module: 'paper', newTab: true },
       // 协同组卷对参与组卷的老师同样可见（他要在里面干活），「发起任务」另由 op 控制
@@ -111,6 +114,9 @@ export const menus: MenuItem[] = [
     module: 'ai-center',
     children: [
       { path: '/ai-center/workbench', title: 'AI 工作台', module: 'ai-center' },
+      /* 任务中心独立成页：工作台讲「花了多少」，任务中心讲「那些活干完没有」，
+         两者节奏不同，挤在一页时任务表会把用量图表顶出首屏 */
+      { path: '/ai-center/tasks', title: '任务中心', module: 'ai-center' },
       { path: '/ai-center/review', title: 'AI 内容复核', module: 'ai-center' },
       /* 提示词模板并入「AI 能力中心」：它本就是喂给 AI 工作台与各业务页的提示词资产，
          独立挂一级菜单会与 AI 工作台割裂。路径保留 `/prompt`（理由同上：层级只在菜单树表达）。

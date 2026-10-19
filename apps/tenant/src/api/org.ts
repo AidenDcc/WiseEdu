@@ -60,7 +60,7 @@ import type {
   TextbookOption,
   VideoClip,
 } from '@aiteach/shared'
-import type { PhotoResultEdit, PhotoTask, RecognizedImportQuestion } from '@aiteach/shared'
+import type { PhotoResultEdit, PhotoTask, RecognizedImportQuestion, ImportRecognizedPaperPayload } from '@aiteach/shared'
 
 function withQuery<T extends object>(url: string, params: T): string {
   const search = new URLSearchParams()
@@ -208,6 +208,18 @@ export function savePaper(data: Partial<OrgPaper> & { name: string; submit?: boo
 }
 export function deletePaper(id: number) {
   return request<null>('/tenant/papers/delete', { method: 'POST', data: { id } })
+}
+/**
+ * 试卷导入确认入库（FR-PP 扩展）：整卷一次提交 —— 试卷进试卷库、题目进题目库。
+ *
+ * 不做「先存草稿卷、再逐题入库」的分步提交：识别结果里的分值与卷面结构是一个整体，
+ * 分两步落库必然出现「卷已入库、题还没进」的中间态，用户此时刷新就丢一整套校对成果。
+ */
+export function importRecognizedPaper(payload: ImportRecognizedPaperPayload) {
+  return request<{ paperId: number; paperName: string; questionCount: number }>('/tenant/papers/import-recognized', {
+    method: 'POST',
+    data: payload,
+  })
 }
 export function reviewPaper(id: number, pass: boolean, opinion: string) {
   return request<OrgPaper>('/tenant/papers/review', { method: 'POST', data: { id, pass, opinion } })

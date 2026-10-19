@@ -60,9 +60,17 @@ export interface AiVerifyReport {
 const ROUNDS_KEY = 'aiteach.ai-check-rounds'
 const MAX_ROUNDS = 3
 
-/** 当前设置的检查轮次（0 = 关闭自动质检，1~3 轮） */
+/**
+ * 当前设置的检查轮次（0 = 关闭自动质检，1~3 轮）。
+ *
+ * 未设置过时默认 **1 轮**（注释与页面文案都是这个口径）。注意 `Number(null)` 是 0 而不是
+ * NaN —— 直接 `Number(localStorage.getItem(...))` 会让「从没设置过」被读成「关闭」，
+ * 于是首次使用的用户拿到的是「AI 检查默认不跑」，与「默认 1 轮」的承诺相反。
+ */
 export function getCheckRounds(): number {
-  const raw = Number(localStorage.getItem(ROUNDS_KEY))
+  const stored = localStorage.getItem(ROUNDS_KEY)
+  if (stored === null || stored === '') return 1
+  const raw = Number(stored)
   if (!Number.isFinite(raw)) return 1
   return Math.min(MAX_ROUNDS, Math.max(0, Math.round(raw)))
 }

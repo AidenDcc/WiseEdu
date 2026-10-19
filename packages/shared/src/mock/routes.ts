@@ -98,6 +98,8 @@ const orgRoutes: MockRoute[] = [
   // 试卷
   { method: 'GET', path: '/tenant/papers', handler: () => guard(() => org.papers) },
   { method: 'POST', path: '/tenant/papers/save', handler: ({ body }) => guard(() => org.savePaper(body as never)) },
+  /* 试卷导入：整卷（卷头 + 大题 + 题目）一次提交，试卷入试卷库、题目入题目库 */
+  { method: 'POST', path: '/tenant/papers/import-recognized', handler: ({ body }) => guard(() => org.importRecognizedPaper(body as never)) },
   { method: 'POST', path: '/tenant/papers/delete', handler: ({ body }) => guard(() => { org.deletePaper(Number(body.id)); return null }) },
   { method: 'POST', path: '/tenant/papers/review', handler: ({ body }) => guard(() => org.reviewPaper(Number(body.id), Boolean(body.pass), String(body.opinion ?? ''))) },
   { method: 'POST', path: '/tenant/papers/ai-compose', handler: ({ body }) => guard(() => org.aiComposePaper(body as never)) },
@@ -912,15 +914,36 @@ export const mockRoutes: MockRoute[] = [
   ...orgRoutes,
 
   /* ================= 机构端 · 班级与学生管理（T-08） ================= */
+  /* 表单基础数据（校区 / 年级 / 学科+适配年级 / 教师候选）：一次取齐，级联才不会错位 */
+  { method: 'GET', path: '/tenant/students/classes/meta', handler: () => guard(() => student.classFormMeta()) },
   { method: 'GET', path: '/tenant/students/classes', handler: () => guard(() => student.classes) },
   { method: 'POST', path: '/tenant/students/classes/save', handler: ({ body }) => guard(() => student.saveClass(body as never)) },
   { method: 'POST', path: '/tenant/students/classes/toggle', handler: ({ body }) => guard(() => student.toggleClass(Number(body.id))) },
-  { method: 'GET', path: '/tenant/students', handler: ({ query }) => guard(() => student.listStudents(String(query.keyword ?? ''), String(query.className ?? ''))) },
+  /* 学号自动生成：新增学生时先取一个号展示（用户不可改），保存时服务端再校验一次唯一性 */
+  { method: 'GET', path: '/tenant/students/next-no', handler: ({ query }) => guard(() => ({ studentNo: student.nextStudentNo(String(query.className ?? '')) })) },
+  {
+    method: 'GET',
+    path: '/tenant/students',
+    handler: ({ query }) =>
+      guard(() =>
+        student.listStudents({
+          keyword: String(query.keyword ?? ''),
+          campus: String(query.campus ?? ''),
+          grade: String(query.grade ?? ''),
+          className: String(query.className ?? ''),
+          consentStatus: String(query.consentStatus ?? ''),
+          warning: String(query.warning ?? ''),
+        }),
+      ),
+  },
   { method: 'GET', path: '/tenant/students/detail', handler: ({ query }) => guard(() => student.getStudent(Number(query.id))) },
   { method: 'POST', path: '/tenant/students/save', handler: ({ body }) => guard(() => student.saveStudent(body as never)) },
+  { method: 'POST', path: '/tenant/students/import', handler: ({ body }) => guard(() => student.importStudents((body.rows ?? []) as never)) },
   { method: 'POST', path: '/tenant/students/delete', handler: ({ body }) => guard(() => { student.deleteStudent(Number(body.id)); return null }) },
   { method: 'GET', path: '/tenant/students/consents', handler: ({ query }) => guard(() => student.listConsents(String(query.keyword ?? ''))) },
-  { method: 'POST', path: '/tenant/students/consents/sign', handler: ({ body }) => guard(() => student.signConsent(Number(body.id), body.scopes as string[])) },
+  /* 知情同意已并入学生档案详情：详情抽屉按学生 id 取记录 */
+  { method: 'GET', path: '/tenant/students/consents/by-student', handler: ({ query }) => guard(() => student.getConsentByStudent(Number(query.studentId))) },
+  { method: 'POST', path: '/tenant/students/consents/sign', handler: ({ body }) => guard(() => student.signConsent(Number(body.id), body.scopes as string[], body.signature as string | undefined)) },
   { method: 'POST', path: '/tenant/students/consents/withdraw', handler: ({ body }) => guard(() => student.withdrawConsent(Number(body.id))) },
 
   /* ================= 机构端 · AI 学情画像（T-07-08 ~ 10） ================= */
@@ -931,9 +954,30 @@ export const mockRoutes: MockRoute[] = [
 
   /* ================= 机构端 · AI 能力中心（T-10） ================= */
   { method: 'GET', path: '/tenant/ai-center/capabilities', handler: () => guard(() => student.AI_CAPABILITIES) },
-  { method: 'GET', path: '/tenant/ai-center/tasks', handler: ({ query }) => guard(() => student.listAiTasks(String(query.scene ?? ''))) },
+  /* 用量报表：额度 / 趋势（日周月）/ 按人 / 按功能 / 请求明细一次返回 ——
+     页面上四处数字必须来自同一个窗口，分三个接口取会出现「汇总和明细对不上」 */
+  { method: 'GET', path: '/tenant/ai-center/usage', handler: ({ query }) => guard(() => student.aiUsageReport({
+    granularity: (query.granularity as never) || undefined,
+    days: query.days == null ? undefined : Number(query.days),
+    userName: String(query.userName ?? '') || undefined,
+    scene: String(query.scene ?? '') || undefined,
+  })) },
+  { method: 'GET', path: '/tenant/ai-center/tasks/requests', handler: ({ query }) => guard(() => student.taskRequests(Number(query.id))) },
+  { method: 'GET', path: '/tenant/ai-center/tasks/outputs', handler: ({ query }) => guard(() => student.taskOutputs(Number(query.id))) },
+  { method: 'GET', path: '/tenant/ai-center/tasks', handler: ({ query }) => guard(() => student.listAiTasks({
+    keyword: String(query.keyword ?? ''),
+    scene: String(query.scene ?? ''),
+    status: String(query.status ?? ''),
+    creator: String(query.creator ?? ''),
+  })) },
   { method: 'POST', path: '/tenant/ai-center/tasks/cancel', handler: ({ body }) => guard(() => { student.cancelAiTask(Number(body.id)); return null }) },
-  { method: 'GET', path: '/tenant/ai-center/artifacts', handler: ({ query }) => guard(() => student.listAiArtifacts(String(query.status ?? ''))) },
+  { method: 'GET', path: '/tenant/ai-center/artifacts', handler: ({ query }) => guard(() => student.listAiArtifacts({
+    keyword: String(query.keyword ?? ''),
+    kind: String(query.kind ?? ''),
+    scene: String(query.scene ?? ''),
+    status: String(query.status ?? ''),
+    autoCheck: String(query.autoCheck ?? ''),
+  })) },
   { method: 'POST', path: '/tenant/ai-center/artifacts/review', handler: ({ body }) => guard(() => student.reviewAiArtifact(Number(body.id), Boolean(body.pass))) },
   { method: 'GET', path: '/tenant/ai-center/overview', handler: () => guard(() => student.studentOverview()) },
 

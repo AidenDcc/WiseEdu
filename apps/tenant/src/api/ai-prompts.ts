@@ -559,6 +559,124 @@ export function buildFileUserPrompt(fileName: string): string {
   ].join('\n')
 }
 
+/* ==================== 试卷导入提示词（卷面识别 / 试题识别 两段式） ==================== */
+
+/**
+ * 试卷导入的**卷面识别**：只读版式，不读题目内容。
+ *
+ * 与试题识别分开的理由：试卷的「骨架」（几道大题、每大题多少分、有无答题卡 / 密封线、
+ * 注意事项）决定入库后的试卷结构，而题目正文可能有几十道 —— 两件事塞进一次请求，
+ * 模型容易只顾转录题目、把卷头与大题标题漏掉，最后整卷没有大题结构。
+ */
+export const PAPER_LAYOUT_SYSTEM_PROMPT = `你是一名资深 K12 试卷版面分析专家，负责从试卷页面（照片或 PDF / Word 转出的文本）中读出**卷面骨架**，不转录题目正文。
+
+# 任务
+1. 识别卷头信息：试卷名称、学科、年级、考试时长（分钟）、满分。
+2. 识别大題结构：按卷面顺序列出每一道大题的标题、作答提示、大题材料，以及「每小题分值」（卷面明确标注时给出）。
+3. 识别版式特征：分栏数、本卷总页数（页面能看出来的话）、是否有答题卡、是否有密封线。
+4. 识别卷首「注意事项」：逐条列出，去掉「注意事项」这个标题本身。
+5. 识别页面里**不属于题目**的区域（页眉页脚、装订线、考生信息栏、水印、广告），在 notes 里说明已忽略。
+
+# 硬性规则
+- 忠实于卷面：卷面没有写学科 / 年级 / 时长 / 满分就留空字符串或 0，**不要猜测填空**。
+- 大题标题保留卷面原编号（如「一、单项选择题」），不要改写、不要合并。
+- 同一份试卷分多页时，你只看到其中一页：只描述**这一页上出现**的大题；跨页延续的大题（如第 2 页继续选择题）请照样给出标题，程序会按标题合并。
+- 只输出一个合法 JSON 对象，不要输出 markdown 代码块或任何解释文字。
+
+# 输出格式
+{
+  "paper_name": "试卷名称，卷面未印则空字符串",
+  "subject": "学科，如 数学",
+  "grade": "年级，如 高一",
+  "duration": 120,
+  "total_score": 150,
+  "notices": ["注意事项条目"],
+  "columns": 1,
+  "page_count": 4,
+  "has_answer_sheet": true,
+  "has_seal_line": false,
+  "sections": [
+    { "title": "一、单项选择题", "hint": "本题共 8 小题，每小题 5 分，共 40 分。", "material": "", "score_per": 5 }
+  ],
+  "notes": ["已忽略页眉与考生信息栏"]
+}
+字段规则：
+- duration / total_score / columns / page_count 为数字；判断不出时 duration=0、total_score=0、columns=1、page_count=1。
+- has_answer_sheet / has_seal_line 为布尔值。
+- score_per 为该大题每小题分值（数字）；卷面未标注则填 0。
+- material 为该大题共用的阅读材料 / 题干引导（没有则空字符串）。
+- sections 至少给出 1 项；整页都是某一题的续页时，给出该题所属大题的标题即可。`
+
+/**
+ * 卷面识别的用户提示词。
+ * 图片走多模态（正文不附）；PDF / Word 走文本，正文直接拼进提示词。
+ */
+export function buildPaperLayoutUserPrompt(p: {
+  fileName: string
+  pageNo: number
+  pageCount: number
+  /** 文本类文件的正文；图片为空 */
+  text?: string
+}): string {
+  const lines = [
+    `这是待导入试卷的第 ${p.pageNo} / ${p.pageCount} 页（文件：${p.fileName}）。`,
+    '请只做卷面识别：输出卷头信息、大题结构、版式特征与注意事项，不要转录题目正文。',
+  ]
+  if (p.text) {
+    lines.push(
+      '',
+      '下面是这一页的正文（由 PDF / Word 抽取，可能与卷面视觉顺序略有差异，按题号与标题判断结构）：',
+      '```',
+      p.text,
+      '```',
+    )
+  } else {
+    lines.push('', '请根据图片判断版面结构；模糊、倾斜、被裁切的部分不要臆造。')
+  }
+  lines.push('', '现在输出规定的 JSON。')
+  return lines.join('\n')
+}
+
+/**
+ * 试题识别：在拍照识题的基础上，额外要求「所属大题」与「分值」。
+ *
+ * 不复用 `PHOTO_SYSTEM_PROMPT` 的 SCHEMA_RULES 而另写一段附加要求，是因为
+ * 那套字段规则是「每题字段齐全、不缺不漏」的强约束，直接往里塞可选字段容易让模型
+ * 为了凑字段而编造大题名。这里把两个字段的语义写清楚，并在归一化时做兜底。
+ */
+export const PAPER_QUESTIONS_SYSTEM_PROMPT = `${PHOTO_SYSTEM_PROMPT}
+
+# 试卷导入的附加字段（与标准字段同级，每题都要给）
+- "section"：该题所属大题的标题，必须严格使用用户消息里列出的标题之一；无法归入时填空字符串。
+- "score"：该题分值（数字，如 5 或 2.5）；卷面未标注时按题型惯例给（客观题 5 分、主观题 10 分）。
+- "number"：卷面题号（数字）；跨页时保持卷面原编号，不要从 1 重新开始。`
+
+/** 试题识别的用户提示词：带上已识别出的大题标题，让每题都能落到正确的大题里 */
+export function buildPaperQuestionsUserPrompt(p: {
+  fileName: string
+  pageNo: number
+  pageCount: number
+  /** 卷面识别得到的大题标题（按卷面顺序） */
+  sections: string[]
+  /** 文本类文件的正文；图片为空 */
+  text?: string
+}): string {
+  const lines = [
+    `这是待导入试卷的第 ${p.pageNo} / ${p.pageCount} 页（文件：${p.fileName}）。`,
+    '请识别这一页上的全部试题，按卷面题号顺序逐题输出 JSON。',
+    `卷面已识别出的大题（section 只能取其中之一，或用空字符串表示不属任何大题）：${p.sections.length ? p.sections.join(' / ') : '（本页未识别到大题，全部填空字符串）'}`,
+    '客观题（选择/判断）务必转录全部选项；解答、填空、计算、证明、连线、作文 options 填空数组。',
+    '每题必须额外给出 section / score / number 三个字段。',
+  ]
+  if (p.text) {
+    lines.push('', '下面是这一页的正文（由 PDF / Word 抽取）：', '```', p.text, '```')
+  } else {
+    lines.push('', '卷面上的图形若印刷不清，可在 diagram 字段用 SVG 按规则重绘，否则填 null。')
+  }
+  lines.push('', '现在输出 JSON。')
+  return lines.join('\n')
+}
+
 /* ==================== 图片搜索提示词（全局搜索的以图搜资源） ==================== */
 
 export const SEARCH_IMAGE_SYSTEM_PROMPT = `你是 K12 教学资源检索助手。用户会给你一张图片（题目截图、试卷照片、教辅或课件页面、微课封面），你要判断它在机构资源库中对应什么检索意图。

@@ -285,9 +285,13 @@ export type {
   GeneratedQuestion,
   /* 班级与学生管理（T-08） */
   OrgClass,
+  ClassFormMeta,
   ConsentStatus,
+  ConsentChannel,
   ConsentRecord,
   OrgStudent,
+  StudentImportRow,
+  StudentImportResult,
   /* AI 学情画像（T-07-08 ~ 10） */
   MasteryNode,
   StudentProfile,
@@ -298,6 +302,17 @@ export type {
   AiCapabilityCard,
   ArtifactReviewStatus,
   AiArtifactReview,
+  /* AI 用量统计与任务明细（T-10-01 / 02） */
+  AiUsageGranularity,
+  AiRequestLog,
+  AiUsageBucket,
+  AiUsageGroupRow,
+  AiQuotaSnapshot,
+  AiUsageReport,
+  AiUsageQuery,
+  AiTaskQuery,
+  AiTaskOutput,
+  AiArtifactQuery,
   /* 机构系统设置（T-11） */
   OrgSettings,
   ReviewFlowConfig,
@@ -368,6 +383,8 @@ export {
   STUDENT_WARNING_TEXT,
   AI_TASK_STATUS_TEXT,
   ARTIFACT_REVIEW_STATUS_TEXT,
+  AI_USAGE_GRANULARITY_TEXT,
+  AI_TASK_OUTPUT_STATUS_TEXT,
   PLATFORM_CONTENT_STATUS_TEXT,
 } from './api/models'
 /* 平台端 · 内容运营 / AI 治理 / 系统配置（仅类型） */
@@ -391,4 +408,4 @@ export type {
 } from './api/models'
 /* 班级名册：阅卷、作业按班统计时需要，真实场景来自教务系统 */
 export { CLASS_NAMES } from './mock/org-store'
-export type { PhotoTask, RecognizedImportQuestion } from './mock/org-store'
+export type { PhotoTask, RecognizedImportQuestion, ImportedPaperQuestion, ImportRecognizedPaperPayload } from './mock/org-store'
