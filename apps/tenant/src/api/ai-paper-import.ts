@@ -300,6 +300,10 @@ async function recognizePageQuestions(
     text: source.text,
   })
   const raw = await askJson(engine, PAPER_QUESTIONS_SYSTEM_PROMPT, source, prompt, 8192)
+  /* 这里**不开** normalizeQuestionList 的 mergeComposite（拍照识题 / 文档识题开着）：
+     下面要按数组下标把 raw.questions 里的 section / score / number 补回每一题，
+     一旦归一化阶段合并了两行，下标就整体错位，题会被归到别人的大题与分值上。
+     组合题不拆靠提示词（PAPER_QUESTIONS_SYSTEM_PROMPT 继承 PHOTO_SYSTEM_PROMPT）保证。 */
   const list = normalizeQuestionList(JSON.stringify(raw), { maxCount: MAX_QUESTIONS_PER_PAGE, richAnswer: true })
   const rawRows = (Array.isArray(raw.questions) ? raw.questions : []).slice(0, list.length) as unknown as Array<
     Record<string, unknown>

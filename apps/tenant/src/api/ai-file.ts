@@ -97,7 +97,8 @@ async function recognizeByAi(file: OrgFile): Promise<FileRecognizeResult> {
 /** 解析识别 JSON：questions 走归一化管线；is_paper / paper_name 取顶层字段；内嵌图片转存素材库 */
 async function parseRecognized(content: string, file: OrgFile): Promise<FileRecognizeResult> {
   const raw = extractJsonObject(content) as { is_paper?: unknown; paper_name?: unknown }
-  const list = normalizeQuestionList(content, { maxCount: MAX_QUESTIONS_PER_FILE, richAnswer: true })
+  /* mergeComposite：与拍照识题同一口径 —— 材料组合题被模型按小问拆条时接回一条 */
+  const list = normalizeQuestionList(content, { maxCount: MAX_QUESTIONS_PER_FILE, richAnswer: true, mergeComposite: true })
   if (!list.length) throw new Error('AI 未识别出题目')
   const paperName = typeof raw.paper_name === 'string' && raw.paper_name.trim() ? raw.paper_name.trim() : file.name.replace(/\.\w+$/, '')
   const questions: RecognizedQuestion[] = []

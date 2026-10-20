@@ -9,6 +9,9 @@
  * Deepseek 官方模型不支持图片输入，视觉通道独立配置（见 deepseek.ts 顶部注释），
  * 可指向任意 OpenAI 兼容多模态端点。解析复用 ai-normalize 的归一化管线，
  * 与 AI 出题共用公式/SVG 净化逻辑，解析失败自动重试一次。
+ *
+ * 材料组合题（一段材料 + 多个小问）在卷面上是一个题号：提示词要求模型只输出一条，
+ * 归一化时再用 `mergeComposite` 把偶发拆开的小问接回去（见 ai-composite）。
  */
 import type { PhotoTask } from '@aiteach/shared'
 import { isVisionConfigured, visionChat } from './deepseek'
@@ -26,8 +29,9 @@ export function photoEngine(): PhotoEngine {
 /** 单张图片识别出的结果题数上限（防御模型无限拆题） */
 const MAX_QUESTIONS_PER_PHOTO = 15
 /** 识别出的题干文本长度上限，防止异常输出撑爆存储与渲染
- *  （多小问解答题的完整解析可能较长，给到 8000 字符，避免把正常长解析拦腰截断） */
-const MAX_FIELD_LENGTH = 8000
+ *  （多小问解答题的完整解析可能较长，给到 12000 字符：
+ *   材料组合题的「材料 + 全部小问 + 各小问选项」会明显长于单题，8000 会把题干拦腰截断） */
+const MAX_FIELD_LENGTH = 12000
 
 /** 本地图片文件 → base64 data URL：等比压缩到长边 ≤1568px（视觉模型性价比最高的区间），JPEG 0.85 */
 export async function fileToDataUrl(file: File): Promise<string> {
@@ -83,8 +87,13 @@ export async function recognizePhotoFile(file: File, taskId: string): Promise<Ph
     try {
       const { content } = await visionChat(messages, { json: true, maxTokens: 8192 })
       /* richAnswer：解答/填空类（无选项）题的答案转富文本，校对区用编辑器承载，
-         LaTeX 公式还原为标准公式节点；客观题答案仍是选项字母，不受影响 */
-      const list = normalizeQuestionList(content, { maxCount: MAX_QUESTIONS_PER_PHOTO, richAnswer: true })
+         LaTeX 公式还原为标准公式节点；客观题答案仍是选项字母，不受影响。
+         mergeComposite：材料组合题被模型按小问拆条时接回一条（一个题号 = 一道题） */
+      const list = normalizeQuestionList(content, {
+        maxCount: MAX_QUESTIONS_PER_PHOTO,
+        richAnswer: true,
+        mergeComposite: true,
+      })
       return list.map((q, i) => ({
         id: `${taskId}_r${i}`,
         stem: clip(q.stem),

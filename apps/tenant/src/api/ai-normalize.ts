@@ -14,6 +14,7 @@
 import { isRichContent, sanitizeRichHtml } from '@aiteach/shared'
 import type { GeneratedQuestion } from '@aiteach/shared'
 import type { UserPromptParams } from './ai-prompts'
+import { ANALYSIS_FALLBACK, mergeSplitCompositeRows } from './ai-composite'
 
 /* ==================== JSON 提取与结构校验 ==================== */
 
@@ -72,7 +73,7 @@ function toRawQuestion(value: unknown, index: number): RawQuestion {
     stem,
     options: asStringArray(q.options).map((s) => s.trim()).filter(Boolean).slice(0, 6),
     answer: asString(q.answer).trim(),
-    analysis: asString(q.analysis).trim() || '（AI 未提供解析，请人工补充）',
+    analysis: asString(q.analysis).trim() || ANALYSIS_FALLBACK,
     knowledge: asStringArray(q.knowledge).map((s) => s.trim()).filter(Boolean).slice(0, 3),
     difficulty,
     subject: asString(q.subject).trim() || undefined,
@@ -254,6 +255,15 @@ interface NormalizeOptions {
    * 校对区用编辑器承载答案，$...$ LaTeX 还原为标准公式节点。
    */
   richAnswer?: boolean
+  /**
+   * 是否把模型**按小问拆开**的材料组合题接回一条（识别场景开启，AI 出题不开启）。
+   *
+   * 卷面上「一段材料 + （1）（2）（3）」是一个题号、一道题，提示词里已明确禁止拆条，
+   * 但模型仍会偶发按小问拆成多条记录。识别场景下这种拆分一定是错的，所以再走一道确定性兜底
+   * （判定与合并规则见 ai-composite）。出题场景不开启：那里本来就没有「共用材料」这回事，
+   * 多道独立题里出现「（1）」开头也很正常，合并只会把好数据弄坏。
+   */
+  mergeComposite?: boolean
 }
 
 /** 模型回复 → 归一化后的题目数组（出题与拍照识别共用的核心管线） */
@@ -262,8 +272,12 @@ export function normalizeQuestionList(content: string, options: NormalizeOptions
   const rawList = parsed.questions
   if (!Array.isArray(rawList) || rawList.length === 0) throw new Error('AI 返回中缺少 questions 数组')
 
-  return rawList.slice(0, options.maxCount).map((value, i): GeneratedQuestion => {
-    const raw = toRawQuestion(value, i)
+  /* 先逐条校验（不合格照样整批重试，不比以前宽松），再做组合题还原：
+     合并会改题干、把选项并进正文，必须在「字段齐全、类型正确」之后做 */
+  const rows = rawList.slice(0, options.maxCount).map((value, i) => toRawQuestion(value, i))
+  const list = options.mergeComposite ? mergeSplitCompositeRows(rows) : rows
+
+  return list.map((raw, i): GeneratedQuestion => {
     let stemHtml = richField(raw.stem)
     if (raw.diagram) {
       try {

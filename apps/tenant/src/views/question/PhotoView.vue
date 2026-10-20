@@ -766,7 +766,7 @@ onBeforeUnmount(() => {
         >
           <AppIcon name="upload" :size="28" />
           <p>点击选择（可多选）/ 拖拽图片到此处 / 直接粘贴截图，单张不超过 10MB</p>
-          <p class="f-hint">识别引擎：版面分析 → 公式还原（LaTeX）→ 结构化入库</p>
+          <p class="f-hint">识别引擎：版面分析 → 公式还原（LaTeX）→ 结构化入库；材料组合题按「一道题 + 多个小问」识别</p>
         </div>
         <input ref="fileInput" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden @change="addFiles(fileInput?.files ?? null)" />
 
