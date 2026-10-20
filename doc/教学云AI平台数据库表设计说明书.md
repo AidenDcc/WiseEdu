@@ -2,12 +2,13 @@
 
 | 项 | 内容 |
 |----|------|
-| 文档版本 | v1.0 |
-| 编写日期 | 2026-10-17 |
+| 文档版本 | v1.2 |
+| 编写日期 | 2026-10-17（v1.0）／2026-10-19（v1.1）／2026-10-20（v1.2） |
 | 适用范围 | 平台运营端（admin）+ 机构端（tenant）全部菜单对应业务 |
-| 表数量 | 145 张业务表（另有 0 张纯中间表） |
+| 表数量 | 145 张业务表（另有 0 张纯中间表），共 2486 字段（含 7 个公共字段） |
 | 数据库 | MySQL 8.0 / InnoDB / utf8mb4 |
 | 配套脚本 | schema.sql（与本文字段逐字一致，同源生成） |
+| v1.2 变更 | 未新增表，仅补 7 个字段与 6 组索引：`q_question.scope`；`p_paper.scope` / `reviewer_id` / `reviewer_name` / `reviewed_at`；`r_resource_approval.submit_note`；`ai_trace.safety_reason`。索引含 `q_question`、`p_paper` 的 `scope` 组合索引，以及 `ai_billing_rule` 的 `(tenant_id, scene, model_key)` 唯一键 —— 用于支撑「全局默认 + 租户专属价」两级计价 |
 
 > 生成方式说明：本文与 `schema.sql` 由同一份表定义生成，字段、类型、索引不允许手工分别维护，避免文档与脚本漂移。
 
@@ -100,7 +101,7 @@
 | 35 | dc_textbook_catalog_knowledge | 目录知识点关联 | 内容字典域 | 10 | 章节关联知识点（含名称快照） |
 | 36 | dc_knowledge_node | 知识点树 | 内容字典域 | 18 | 平台知识点/考点树（最多 5 级） |
 | 37 | dc_exam_type_node | 考试类型树 | 内容字典域 | 17 | 考试类型与杯赛合并树（最多 5 级） |
-| 38 | q_question | 题目主表 | 题目域 | 43 | 校本题库、个人题库与错题本统一题目模型 |
+| 38 | q_question | 题目主表 | 题目域 | 44 | 校本题库、个人题库与错题本统一题目模型，按 scope 区分业务归属（与库位 library 不是一个维度） |
 | 39 | q_question_sub | 材料组合题子题 | 题目域 | 18 | 组合题的作答单位 |
 | 40 | q_question_knowledge | 题目知识点关联 | 题目域 | 11 | 支撑按知识点检索与统计 |
 | 41 | q_question_category | 题库分类目录 | 题目域 | 13 | 题库/个人题库的自定义目录树 |
@@ -110,7 +111,7 @@
 | 45 | q_question_version | 题目版本 | 题目域 | 14 | 题目修改留痕，支持对比与回滚 |
 | 46 | q_question_check | 题目 AI 质检结果 | 题目域 | 15 | 逐题质检项结果与修正建议 |
 | 47 | q_basket_item | 试题篮条目 | 题目域 | 12 | 选题到组卷的中间态（会话级/草稿） |
-| 48 | p_paper | 试卷主表 | 试卷域 | 38 | 试卷元数据、卷面设置与统计 |
+| 48 | p_paper | 试卷主表 | 试卷域 | 42 | 试卷元数据、卷面设置与统计 |
 | 49 | p_paper_section | 试卷大题 | 试卷域 | 14 | 大题结构与材料 |
 | 50 | p_paper_section_question | 大题题目 | 试卷域 | 13 | 大题内题目顺序、分值与快照 |
 | 51 | p_paper_version | 试卷版本 | 试卷域 | 17 | 完整卷面快照，支持撤销与替换 |
@@ -143,7 +144,7 @@
 | 78 | r_formula_standard | 标准公式库 | 资源域 | 14 | 平台标准公式（只读，可收藏） |
 | 79 | r_formula_org | 机构与个人公式 | 资源域 | 16 | 我的公式与机构共享公式 |
 | 80 | r_resource_ref | 资源引用关系 | 资源域 | 13 | 题目/媒体/公式被文档与试卷引用的双向台账 |
-| 81 | r_resource_approval | 资源审批单 | 资源域 | 21 | 校本资源上行共享审批 |
+| 81 | r_resource_approval | 资源审批单 | 资源域 | 22 | 校本资源上行共享审批 |
 | 82 | r_resource_approval_log | 审批流转日志 | 资源域 | 12 | 审批动作留痕 |
 | 83 | r_square_resource | 知识广场资源 | 资源域 | 19 | 机构内共享的优质资源 |
 | 84 | r_square_interaction | 广场互动 | 资源域 | 10 | 收藏/下载/点赞行为 |
@@ -176,8 +177,8 @@
 | 111 | ai_task | AI 任务 | AI 域 | 23 | 异步 AI 任务中心 |
 | 112 | ai_artifact_review | AI 产物复核 | AI 域 | 20 | AI 生成内容的教师复核（合规强制） |
 | 113 | ai_quality_eval | AI 质量评测 | AI 域 | 18 | 评测集抽样与多维度得分 |
-| 114 | ai_trace | AI 生成留痕 | AI 域 | 17 | 生成内容溯源（模型/Prompt/知识库版本） |
-| 115 | ai_billing_rule | AI 计费规则 | AI 域 | 14 | 按场景与模型配置单价 |
+| 114 | ai_trace | AI 生成留痕 | AI 域 | 18 | 生成内容溯源（模型/Prompt/知识库版本） |
+| 115 | ai_billing_rule | AI 计费规则 | AI 域 | 14 | 两级计价：tenant_id=0 为全局默认价，tenant_id>0 为该租户专属覆盖价 |
 | 116 | ai_quota_account | AI 额度账户 | AI 域 | 13 | 租户额度账户（充值/赠送/月度） |
 | 117 | ai_quota_flow | AI 额度流水 | AI 域 | 15 | 额度变动台账（禁止直接改余额） |
 | 118 | ai_tenant_switch | 租户 AI 能力开关 | AI 域 | 13 | 按租户控制各 AI 能力 |
@@ -1188,7 +1189,7 @@ c_public_question / c_public_paper 1─N c_content_distribution / c_feedback_tic
 
 #### q_question　题目主表
 
-校本题库、个人题库与错题本统一题目模型。
+校本题库、个人题库与错题本统一题目模型，按 scope 区分业务归属（与库位 library 不是一个维度）。
 
 | 字段 | 类型 | 允许空 | 说明 |
 |------|------|--------|------|
@@ -1199,7 +1200,8 @@ c_public_question / c_public_paper 1─N c_content_distribution / c_feedback_tic
 | update_by | BIGINT | 是 | 最后修改人用户 ID |
 | update_time | DATETIME | 否 | 最后修改时间 |
 | deleted | TINYINT | 否 | 删除标识：0 正常 / 1 已删除（软删除，彻底删除由留存策略任务执行） |
-| library | VARCHAR(16) | 否 | 题库归属：personal 个人 / org 校本 / wrong 错题 |
+| library | VARCHAR(16) | 否 | 库位：personal 个人 / org 校本 / wrong 错题（存在哪） |
+| scope | VARCHAR(16) | 否 | 所属对象（业务归属，决定可见性）：platform 平台 / school 校本 / personal 个人；存量按 library 兜底推导 |
 | category_id | BIGINT | 是 | 题库分类目录 ID |
 | question_category | VARCHAR(16) | 否 | 题目类别：独立单题 / 材料组合题（组合题 stem 存共用材料） |
 | subject | VARCHAR(32) | 否 | 学科 |
@@ -1222,7 +1224,7 @@ c_public_question / c_public_paper 1─N c_content_distribution / c_feedback_tic
 | knowledge_json | JSON | 是 | 知识点名称数组（冗余，供列表渲染） |
 | owner_id | BIGINT | 否 | 归属人 ID |
 | owner_name | VARCHAR(64) | 否 | 归属人姓名 |
-| status | VARCHAR(16) | 否 | draft 草稿/checking 机审中/pending 待审核/approved 已通过/rejected 已驳回/offline 已下架 |
+| status | VARCHAR(16) | 否 | draft 草稿/checking 机审中/pending 待审核/approved 已通过/rejected 已驳回/offline 已下架；个人题免审，保存即 approved |
 | variant_of | BIGINT | 是 | 母题 ID（变式题回溯） |
 | use_count | INT | 否 | 被组卷/引用次数 |
 | ai_flag | TINYINT | 否 | 是否 AI 生成（合规标识） |
@@ -1239,6 +1241,8 @@ c_public_question / c_public_paper 1─N c_content_distribution / c_feedback_tic
 索引：
 
 - `KEY idx_lib_status (library, status)`
+- `KEY idx_scope_status (scope, status)`
+- `KEY idx_scope_owner (scope, owner_id)`
 - `KEY idx_subject_grade (subject, grade)`
 - `KEY idx_owner (owner_id)`
 - `KEY idx_type_diff (question_type, difficulty)`
@@ -1500,7 +1504,8 @@ c_public_question / c_public_paper 1─N c_content_distribution / c_feedback_tic
 | duration | INT | 否 | 考试时长（分钟） |
 | total_score | DECIMAL(6,2) | 否 | 卷面总分 |
 | question_count | INT | 否 | 题目总数 |
-| status | VARCHAR(16) | 否 | draft 草稿/aiReview AI 复审/pending 待审核/approved 已通过/rejected 已驳回 |
+| status | VARCHAR(16) | 否 | draft 草稿/aiReview AI 复审/pending 待审核/approved 已通过/rejected 已驳回；个人卷免审，保存即 approved |
+| scope | VARCHAR(16) | 否 | 所属对象：platform 平台 / school 校本 / personal 个人；新建卷一律 personal，提审或协同送审通过后翻 school |
 | paper_source | VARCHAR(16) | 否 | 来源：手动组卷/协同组卷/AI 组卷/真题导入/文档识别 |
 | difficulty | VARCHAR(16) | 是 | 整卷难度 |
 | exam_type | VARCHAR(64) | 是 | 考试类型 |
@@ -1522,7 +1527,10 @@ c_public_question / c_public_paper 1─N c_content_distribution / c_feedback_tic
 | ai_checks_json | JSON | 是 | 整卷质检结果 |
 | ai_suspects_json | JSON | 是 | 疑点列表 |
 | review_opinion | VARCHAR(1024) | 是 | 审核意见 |
-| owner_id | BIGINT | 否 | 创建人 |
+| reviewer_id | BIGINT | 是 | 审核人 ID（审核中心或审批单通过时写入；个人卷免审时为空） |
+| reviewer_name | VARCHAR(64) | 是 | 审核人姓名 |
+| reviewed_at | DATETIME | 是 | 审核时间（驳回也写；与 published_at 语义不同） |
+| owner_id | BIGINT | 否 | 创建人；个人卷可见性判定依据（禁止用姓名比较，同名教师会互相看见） |
 | owner_name | VARCHAR(64) | 否 | 创建人姓名 |
 | published_at | DATETIME | 是 | 通过审核时间 |
 
@@ -1530,6 +1538,8 @@ c_public_question / c_public_paper 1─N c_content_distribution / c_feedback_tic
 
 - `KEY idx_owner (owner_id)`
 - `KEY idx_status (status)`
+- `KEY idx_scope (scope, status)`
+- `KEY idx_scope_owner (scope, owner_id)`
 - `KEY idx_subject_grade (subject, grade)`
 - `KEY idx_parallel (parallel_of)`
 
@@ -2590,7 +2600,8 @@ c_public_question / c_public_paper 1─N c_content_distribution / c_feedback_tic
 | resource_name | VARCHAR(255) | 否 | 资源名称 |
 | subject | VARCHAR(32) | 是 | 学科 |
 | grade | VARCHAR(32) | 是 | 年级 |
-| scope | VARCHAR(16) | 否 | 目标范围：personal/group/school/public |
+| scope | VARCHAR(16) | 否 | 目标范围：personal/group/school/public；个人内容提审校本固定 school |
+| submit_note | VARCHAR(512) | 是 | 申请说明（来源与用途）；审批页「来源与版权」预检项据此判定，为空则该预检项不通过 |
 | applicant_id | BIGINT | 否 | 申请人 |
 | applicant_name | VARCHAR(64) | 否 | 申请人姓名 |
 | approval_status | VARCHAR(16) | 否 | pending 待审批/approved 已通过/rejected 已驳回 |
@@ -2604,6 +2615,7 @@ c_public_question / c_public_paper 1─N c_content_distribution / c_feedback_tic
 
 - `KEY idx_status (approval_status)`
 - `KEY idx_kind (resource_kind)`
+- `KEY idx_resource (resource_kind, resource_id, approval_status)`
 
 
 #### r_resource_approval_log　审批流转日志
@@ -3976,6 +3988,7 @@ AI 生成内容的教师复核（合规强制）。
 | artifact_title | VARCHAR(255) | 是 | 产物标题 |
 | input_digest | VARCHAR(2048) | 是 | 输入摘要（脱敏） |
 | safety_result | VARCHAR(16) | 否 | pass/masked/blocked |
+| safety_reason | VARCHAR(1024) | 是 | 命中触发条件：命中哪条策略、命中什么内容、执行了什么动作（masked/blocked 必有值） |
 | prompt_version | INT | 是 | Prompt 版本 |
 | knowledge_version | VARCHAR(32) | 是 | 知识库版本 |
 
@@ -3986,7 +3999,7 @@ AI 生成内容的教师复核（合规强制）。
 
 #### ai_billing_rule　AI 计费规则
 
-按场景与模型配置单价。
+两级计价：tenant_id=0 为全局默认价，tenant_id>0 为该租户专属覆盖价。
 
 | 字段 | 类型 | 允许空 | 说明 |
 |------|------|--------|------|
@@ -4000,14 +4013,15 @@ AI 生成内容的教师复核（合规强制）。
 | scene | VARCHAR(64) | 否 | 场景 |
 | model_key | VARCHAR(64) | 否 | 模型 |
 | billing_unit | VARCHAR(16) | 否 | call 按次 / 1k-token 按千 token |
-| price | DECIMAL(10,4) | 否 | 单价（元） |
+| price | DECIMAL(10,4) | 否 | 单价（元）；租户覆盖行只覆盖单价，不覆盖启停 |
 | currency | VARCHAR(8) | 否 | 币种（CNY） |
-| enabled | TINYINT | 否 | 是否启用 |
+| enabled | TINYINT | 否 | 是否启用（以全局行为准；租户覆盖行该列不参与判定） |
 | effective_from | DATETIME | 是 | 生效时间 |
 
 索引：
 
 - `KEY idx_scene (scene, model_key)`
+- `UNIQUE KEY uk_tenant_scene_model (tenant_id, scene, model_key)`
 
 
 #### ai_quota_account　AI 额度账户

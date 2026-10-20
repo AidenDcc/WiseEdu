@@ -864,7 +864,8 @@ DROP TABLE IF EXISTS `q_question`;
 CREATE TABLE `q_question` (
   `id` BIGINT NOT NULL COMMENT '主键（雪花ID）',
   `tenant_id` BIGINT NOT NULL DEFAULT 0 COMMENT '租户ID，平台级为0',
-  `library` VARCHAR(16) NOT NULL COMMENT '题库归属：personal 个人 / org 校本 / wrong 错题',
+  `library` VARCHAR(16) NOT NULL COMMENT '库位：personal 个人 / org 校本 / wrong 错题（存在哪）',
+  `scope` VARCHAR(16) NOT NULL COMMENT '所属对象（业务归属，决定可见性）：platform 平台 / school 校本 / personal 个人；存量按 library 兜底推导',
   `category_id` BIGINT NULL COMMENT '题库分类目录 ID',
   `question_category` VARCHAR(16) NOT NULL COMMENT '题目类别：独立单题 / 材料组合题（组合题 stem 存共用材料）',
   `subject` VARCHAR(32) NOT NULL COMMENT '学科',
@@ -887,7 +888,7 @@ CREATE TABLE `q_question` (
   `knowledge_json` JSON NULL COMMENT '知识点名称数组（冗余，供列表渲染）',
   `owner_id` BIGINT NOT NULL COMMENT '归属人 ID',
   `owner_name` VARCHAR(64) NOT NULL COMMENT '归属人姓名',
-  `status` VARCHAR(16) NOT NULL COMMENT 'draft 草稿/checking 机审中/pending 待审核/approved 已通过/rejected 已驳回/offline 已下架',
+  `status` VARCHAR(16) NOT NULL COMMENT 'draft 草稿/checking 机审中/pending 待审核/approved 已通过/rejected 已驳回/offline 已下架；个人题免审，保存即 approved',
   `variant_of` BIGINT NULL COMMENT '母题 ID（变式题回溯）',
   `use_count` INT NOT NULL COMMENT '被组卷/引用次数',
   `ai_flag` TINYINT NOT NULL COMMENT '是否 AI 生成（合规标识）',
@@ -907,6 +908,8 @@ CREATE TABLE `q_question` (
   `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
   PRIMARY KEY (`id`),
   KEY idx_lib_status (library, status),
+  KEY idx_scope_status (scope, status),
+  KEY idx_scope_owner (scope, owner_id),
   KEY idx_subject_grade (subject, grade),
   KEY idx_owner (owner_id),
   KEY idx_type_diff (question_type, difficulty),
@@ -1103,7 +1106,8 @@ CREATE TABLE `p_paper` (
   `duration` INT NOT NULL COMMENT '考试时长（分钟）',
   `total_score` DECIMAL(6,2) NOT NULL COMMENT '卷面总分',
   `question_count` INT NOT NULL COMMENT '题目总数',
-  `status` VARCHAR(16) NOT NULL COMMENT 'draft 草稿/aiReview AI 复审/pending 待审核/approved 已通过/rejected 已驳回',
+  `status` VARCHAR(16) NOT NULL COMMENT 'draft 草稿/aiReview AI 复审/pending 待审核/approved 已通过/rejected 已驳回；个人卷免审，保存即 approved',
+  `scope` VARCHAR(16) NOT NULL COMMENT '所属对象：platform 平台 / school 校本 / personal 个人；新建卷一律 personal，提审或协同送审通过后翻 school',
   `paper_source` VARCHAR(16) NOT NULL COMMENT '来源：手动组卷/协同组卷/AI 组卷/真题导入/文档识别',
   `difficulty` VARCHAR(16) NULL COMMENT '整卷难度',
   `exam_type` VARCHAR(64) NULL COMMENT '考试类型',
@@ -1125,7 +1129,10 @@ CREATE TABLE `p_paper` (
   `ai_checks_json` JSON NULL COMMENT '整卷质检结果',
   `ai_suspects_json` JSON NULL COMMENT '疑点列表',
   `review_opinion` VARCHAR(1024) NULL COMMENT '审核意见',
-  `owner_id` BIGINT NOT NULL COMMENT '创建人',
+  `reviewer_id` BIGINT NULL COMMENT '审核人 ID（审核中心或审批单通过时写入；个人卷免审时为空）',
+  `reviewer_name` VARCHAR(64) NULL COMMENT '审核人姓名',
+  `reviewed_at` DATETIME NULL COMMENT '审核时间（驳回也写；与 published_at 语义不同）',
+  `owner_id` BIGINT NOT NULL COMMENT '创建人；个人卷可见性判定依据（禁止用姓名比较，同名教师会互相看见）',
   `owner_name` VARCHAR(64) NOT NULL COMMENT '创建人姓名',
   `published_at` DATETIME NULL COMMENT '通过审核时间',
   `create_by` BIGINT NULL COMMENT '创建人',
@@ -1136,6 +1143,8 @@ CREATE TABLE `p_paper` (
   PRIMARY KEY (`id`),
   KEY idx_owner (owner_id),
   KEY idx_status (status),
+  KEY idx_scope (scope, status),
+  KEY idx_scope_owner (scope, owner_id),
   KEY idx_subject_grade (subject, grade),
   KEY idx_parallel (parallel_of)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='试卷主表';
@@ -1870,7 +1879,8 @@ CREATE TABLE `r_resource_approval` (
   `resource_name` VARCHAR(255) NOT NULL COMMENT '资源名称',
   `subject` VARCHAR(32) NULL COMMENT '学科',
   `grade` VARCHAR(32) NULL COMMENT '年级',
-  `scope` VARCHAR(16) NOT NULL COMMENT '目标范围：personal/group/school/public',
+  `scope` VARCHAR(16) NOT NULL COMMENT '目标范围：personal/group/school/public；个人内容提审校本固定 school',
+  `submit_note` VARCHAR(512) NULL COMMENT '申请说明（来源与用途）；审批页「来源与版权」预检项据此判定，为空则该预检项不通过',
   `applicant_id` BIGINT NOT NULL COMMENT '申请人',
   `applicant_name` VARCHAR(64) NOT NULL COMMENT '申请人姓名',
   `approval_status` VARCHAR(16) NOT NULL COMMENT 'pending 待审批/approved 已通过/rejected 已驳回',
@@ -1886,7 +1896,8 @@ CREATE TABLE `r_resource_approval` (
   `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
   PRIMARY KEY (`id`),
   KEY idx_status (approval_status),
-  KEY idx_kind (resource_kind)
+  KEY idx_kind (resource_kind),
+  KEY idx_resource (resource_kind, resource_id, approval_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='资源审批单';
 
 DROP TABLE IF EXISTS `r_resource_approval_log`;
@@ -2659,6 +2670,7 @@ CREATE TABLE `ai_trace` (
   `artifact_title` VARCHAR(255) NULL COMMENT '产物标题',
   `input_digest` VARCHAR(2048) NULL COMMENT '输入摘要（脱敏）',
   `safety_result` VARCHAR(16) NOT NULL COMMENT 'pass/masked/blocked',
+  `safety_reason` VARCHAR(1024) NULL COMMENT '命中触发条件：命中哪条策略、命中什么内容、执行了什么动作（masked/blocked 必有值）',
   `prompt_version` INT NULL COMMENT 'Prompt 版本',
   `knowledge_version` VARCHAR(32) NULL COMMENT '知识库版本',
   `create_by` BIGINT NULL COMMENT '创建人',
@@ -2677,9 +2689,9 @@ CREATE TABLE `ai_billing_rule` (
   `scene` VARCHAR(64) NOT NULL COMMENT '场景',
   `model_key` VARCHAR(64) NOT NULL COMMENT '模型',
   `billing_unit` VARCHAR(16) NOT NULL COMMENT 'call 按次 / 1k-token 按千 token',
-  `price` DECIMAL(10,4) NOT NULL COMMENT '单价（元）',
+  `price` DECIMAL(10,4) NOT NULL COMMENT '单价（元）；租户覆盖行只覆盖单价，不覆盖启停',
   `currency` VARCHAR(8) NOT NULL COMMENT '币种（CNY）',
-  `enabled` TINYINT NOT NULL COMMENT '是否启用',
+  `enabled` TINYINT NOT NULL COMMENT '是否启用（以全局行为准；租户覆盖行该列不参与判定）',
   `effective_from` DATETIME NULL COMMENT '生效时间',
   `create_by` BIGINT NULL COMMENT '创建人',
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -2687,7 +2699,8 @@ CREATE TABLE `ai_billing_rule` (
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
   `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
   PRIMARY KEY (`id`),
-  KEY idx_scene (scene, model_key)
+  KEY idx_scene (scene, model_key),
+  UNIQUE KEY uk_tenant_scene_model (tenant_id, scene, model_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='AI 计费规则';
 
 DROP TABLE IF EXISTS `ai_quota_account`;
