@@ -8,6 +8,7 @@
 import type {
   AiBillingRule,
   AiQualityEval,
+  AiTenantBillingRow,
   AiTraceRecord,
   BackupRecord,
   ComplianceSpotCheck,
@@ -395,13 +396,87 @@ export function runQualityEval(scene: string): AiQualityEval {
   return evalRecord
 }
 
-export const traceRecords: AiTraceRecord[] = [
-  { id: ++traceSeq, traceId: 'trace-20260926-0142', scene: 'AI 出题', model: 'deepseek-chat', tenantName: '星辰教育', artifactKind: '题目 ×10', artifactTitle: '「三角函数」专项出题', inputDigest: '学科=数学；知识点=三角函数；难度=中等；数量=10', safety: 'pass', createdAt: '2026-09-26 10:24:00' },
-  { id: ++traceSeq, traceId: 'trace-20260926-0141', scene: 'AI 组卷', model: 'deepseek-chat', tenantName: '星辰教育', artifactKind: '试卷 ×1', artifactTitle: '高一数学期中卷（AI 生成）', inputDigest: '范围=函数+三角；时长=120 分钟；难度=中', safety: 'pass', createdAt: '2026-09-26 10:12:00' },
-  { id: ++traceSeq, traceId: 'trace-20260926-0138', scene: '学生 AI 问答', model: 'deepseek-chat', tenantName: '启航培训', artifactKind: '问答 ×1', artifactTitle: '二次函数最值引导问答', inputDigest: '问题=二次函数最值怎么求（学生提问）', safety: 'masked', createdAt: '2026-09-26 09:47:00' },
-  { id: ++traceSeq, traceId: 'trace-20260925-0119', scene: 'AI 阅卷', model: 'deepseek-chat', tenantName: '星辰教育', artifactKind: '批改 ×45', artifactTitle: '期中考试解答批改', inputDigest: '试卷=期中卷；题目=解答 17-22；份数=45', safety: 'pass', createdAt: '2026-09-25 20:31:00' },
-  { id: ++traceSeq, traceId: 'trace-20260925-0102', scene: 'AI 课件', model: 'deepseek-chat', tenantName: '博学堂', artifactKind: '课件 ×1', artifactTitle: '《平面向量》课件生成', inputDigest: '课题=平面向量；课时=2', safety: 'blocked', createdAt: '2026-09-25 16:02:00' },
+/**
+ * 生成内容留痕种子（P-05-12）。
+ *
+ * 时间按「相对今天」生成（最近 24 天），写死日期会让新增的「时间」筛选永远查不到东西 ——
+ * 演示数据里最容易被忽略的就是「日期一过，筛近 7 天全是空」。
+ *
+ * 覆盖 4 个租户 × 4 个模型 × 6 类场景，并给 masked / blocked 记录补上命中依据：
+ * 列表里点「已脱敏」「已拦截」后面的问号，看到的就是这条 reason。
+ */
+type TraceSeed = {
+  /** 距今天数（0 = 今天） */
+  day: number
+  hour: number
+  minute: number
+  scene: string
+  model: string
+  tenantName: string
+  artifactKind: string
+  artifactTitle: string
+  inputDigest: string
+  safety: AiTraceRecord['safety']
+  safetyReason?: string
+}
+
+const TRACE_SEEDS: TraceSeed[] = [
+  { day: 0, hour: 9, minute: 12, scene: 'AI 出题', model: 'deepseek-reasoner', tenantName: '星辰教育', artifactKind: '题目 ×10', artifactTitle: '「导数应用」专项出题', inputDigest: '学科=数学；知识点=导数应用；难度=中等；数量=10', safety: 'pass' },
+  { day: 0, hour: 8, minute: 47, scene: 'AI 组卷', model: 'deepseek-chat', tenantName: '明思书院', artifactKind: '试卷 ×1', artifactTitle: '高二物理单元测（AI 组卷）', inputDigest: '范围=电磁感应；题量=22；难度=中', safety: 'pass' },
+  { day: 0, hour: 8, minute: 5, scene: '学生 AI 问答', model: 'deepseek-chat', tenantName: '启航培训', artifactKind: '问答 ×1', artifactTitle: '二次函数最值引导问答', inputDigest: '问题=二次函数最值怎么求（学生提问）', safety: 'masked', safetyReason: '命中「隐私信息保护」策略：提问里带手机号 138****2210，按脱敏动作替换为掩码后放行。' },
+  { day: 1, hour: 21, minute: 30, scene: 'AI 课件', model: 'Qwen-VL-Max', tenantName: '博学堂', artifactKind: '课件 ×1', artifactTitle: '《平面向量》互动课件', inputDigest: '课题=平面向量；课时=2；风格=图示优先', safety: 'blocked', safetyReason: '命中「内容合规 · 政治敏感」策略（高风险词 2 个），按拒答动作拦截，产物未落库。' },
+  { day: 1, hour: 17, minute: 18, scene: 'AI 阅卷', model: 'deepseek-chat', tenantName: '星辰教育', artifactKind: '批改 ×45', artifactTitle: '期中考试解答批改', inputDigest: '试卷=期中卷；题目=解答 17-22；份数=45', safety: 'pass' },
+  { day: 1, hour: 11, minute: 2, scene: 'AI 讲义', model: 'deepseek-chat', tenantName: '明思书院', artifactKind: '讲义 ×1', artifactTitle: '《指数与对数》讲义初稿', inputDigest: '学科=数学；章节=指数与对数；课时=2', safety: 'pass' },
+  { day: 2, hour: 20, minute: 26, scene: '学生 AI 问答', model: 'deepseek-chat', tenantName: '星辰教育', artifactKind: '问答 ×1', artifactTitle: '物理受力分析引导问答', inputDigest: '问题=斜面受力怎么分解（学生提问）', safety: 'masked', safetyReason: '命中「未成年人信息」策略：监护人姓名与家庭住址被替换为掩码后放行。' },
+  { day: 2, hour: 15, minute: 44, scene: 'AI 出题', model: 'deepseek-chat', tenantName: '启航培训', artifactKind: '题目 ×8', artifactTitle: '「文言文实词」AI 生成题', inputDigest: '学科=语文；知识点=文言实词；难度=中；数量=8', safety: 'pass' },
+  { day: 2, hour: 10, minute: 20, scene: 'AI 组卷', model: 'deepseek-reasoner', tenantName: '星辰教育', artifactKind: '试卷 ×1', artifactTitle: '高一数学期中卷（AI 生成）', inputDigest: '范围=函数+三角；时长=120 分钟；难度=中', safety: 'pass' },
+  { day: 3, hour: 19, minute: 5, scene: 'AI 画插图', model: '文生图（演示）', tenantName: '博学堂', artifactKind: '插图 ×4', artifactTitle: '《细胞结构》配图', inputDigest: '学科=生物；知识点=细胞器；数量=4；风格=扁平', safety: 'blocked', safetyReason: '命中「商业广告」策略：输入含外部机构招生链接，拦截后转人工复核。' },
+  { day: 3, hour: 16, minute: 37, scene: 'AI 阅卷', model: 'deepseek-chat', tenantName: '明思书院', artifactKind: '批改 ×38', artifactTitle: '月考主观题 AI 批改', inputDigest: '试卷=月考卷；题目=解答 18-21；份数=38', safety: 'pass' },
+  { day: 3, hour: 9, minute: 51, scene: 'AI 课件', model: 'deepseek-chat', tenantName: '启航培训', artifactKind: '课件 ×1', artifactTitle: '《电磁感应》互动课件', inputDigest: '课题=电磁感应；课时=1', safety: 'pass' },
+  { day: 4, hour: 22, minute: 8, scene: '学生 AI 问答', model: 'deepseek-chat', tenantName: '博学堂', artifactKind: '问答 ×1', artifactTitle: '化学方程式配平问答', inputDigest: '问题=如何配平氧化还原反应（学生提问）', safety: 'masked', safetyReason: '命中「隐私信息保护」策略：输入含学生身份证号，替换为掩码后放行。' },
+  { day: 4, hour: 14, minute: 12, scene: 'AI 出题', model: 'deepseek-reasoner', tenantName: '星辰教育', artifactKind: '题目 ×12', artifactTitle: '「立体几何」AI 生成题', inputDigest: '学科=数学；知识点=立体几何；难度=偏难；数量=12', safety: 'pass' },
+  { day: 4, hour: 10, minute: 39, scene: 'AI 讲义', model: 'deepseek-chat', tenantName: '博学堂', artifactKind: '讲义 ×1', artifactTitle: '《平面向量》讲义初稿', inputDigest: '学科=数学；章节=平面向量；课时=2', safety: 'pass' },
+  { day: 5, hour: 18, minute: 24, scene: 'AI 组卷', model: 'deepseek-chat', tenantName: '启航培训', artifactKind: '试卷 ×1', artifactTitle: '初三英语一模卷（AI 组卷）', inputDigest: '范围=完形+阅读；题量=46；难度=中', safety: 'pass' },
+  { day: 5, hour: 13, minute: 6, scene: 'AI 课件', model: 'Qwen-VL-Max', tenantName: '明思书院', artifactKind: '课件 ×1', artifactTitle: '《光合作用》图文课件', inputDigest: '课题=光合作用；课时=2；风格=图示优先', safety: 'pass' },
+  { day: 6, hour: 20, minute: 41, scene: '学生 AI 问答', model: 'deepseek-chat', tenantName: '启航培训', artifactKind: '问答 ×1', artifactTitle: '作文立意引导问答', inputDigest: '问题=议论文立意怎么展开（学生提问）', safety: 'blocked', safetyReason: '命中「未成年人保护」策略：提问涉及自伤内容，直接拒答并推送心理辅导提示。' },
+  { day: 6, hour: 11, minute: 55, scene: 'AI 阅卷', model: 'deepseek-chat', tenantName: '星辰教育', artifactKind: '批改 ×52', artifactTitle: '周测解答题批改', inputDigest: '试卷=周测卷；题目=解答 15-19；份数=52', safety: 'pass' },
+  { day: 7, hour: 15, minute: 28, scene: 'AI 出题', model: 'deepseek-chat', tenantName: '博学堂', artifactKind: '题目 ×10', artifactTitle: '「概率统计」AI 生成题', inputDigest: '学科=数学；知识点=概率统计；难度=中等；数量=10', safety: 'pass' },
+  { day: 8, hour: 9, minute: 33, scene: 'AI 讲义', model: 'deepseek-reasoner', tenantName: '明思书院', artifactKind: '讲义 ×1', artifactTitle: '《牛顿运动定律》讲义', inputDigest: '学科=物理；章节=牛顿运动定律；课时=3', safety: 'pass' },
+  { day: 9, hour: 17, minute: 47, scene: 'AI 组卷', model: 'deepseek-chat', tenantName: '博学堂', artifactKind: '试卷 ×1', artifactTitle: '高三化学二轮复习卷', inputDigest: '范围=电化学+有机；题量=24；难度=偏难', safety: 'pass' },
+  { day: 11, hour: 10, minute: 15, scene: 'AI 课件', model: 'deepseek-chat', tenantName: '星辰教育', artifactKind: '课件 ×1', artifactTitle: '《指数函数》互动课件', inputDigest: '课题=指数函数；课时=1', safety: 'pass' },
+  { day: 13, hour: 16, minute: 2, scene: 'AI 阅卷', model: 'deepseek-chat', tenantName: '启航培训', artifactKind: '批改 ×30', artifactTitle: '英语作文 AI 批改', inputDigest: '试卷=作文 30 份；维度=内容+语言', safety: 'masked', safetyReason: '命中「隐私信息保护」策略：作文中出现的班级群号被替换为掩码后放行。' },
+  { day: 16, hour: 14, minute: 20, scene: 'AI 出题', model: 'deepseek-reasoner', tenantName: '明思书院', artifactKind: '题目 ×6', artifactTitle: '「电磁感应」AI 生成题', inputDigest: '学科=物理；知识点=电磁感应；难度=偏难；数量=6', safety: 'pass' },
+  { day: 21, hour: 9, minute: 40, scene: '学生 AI 问答', model: 'deepseek-chat', tenantName: '星辰教育', artifactKind: '问答 ×1', artifactTitle: '英语时态辨析问答', inputDigest: '问题=现在完成时和过去时的区别（学生提问）', safety: 'pass' },
 ]
+
+/** 留痕时间：相对今天往前推 N 天，保证「近 7 天 / 近 30 天」这类时间筛选始终有数据 */
+function stampDaysAgo(days: number, hour: number, minute = 0): string {
+  const date = new Date(Date.now() - days * 86400000)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(hour)}:${pad(minute)}:00`
+}
+
+/** traceId 与日期一致（trace-20261019-0021），否则列表里「日期」与「traceId」对不上会被当成假数据 */
+function traceIdOf(createdAt: string, seq: number): string {
+  return `trace-${createdAt.slice(0, 10).replace(/-/g, '')}-${String(seq).padStart(4, '0')}`
+}
+
+export const traceRecords: AiTraceRecord[] = TRACE_SEEDS.map((seed, index) => {
+  const createdAt = stampDaysAgo(seed.day, seed.hour, seed.minute)
+  return {
+    id: ++traceSeq,
+    traceId: traceIdOf(createdAt, TRACE_SEEDS.length - index),
+    scene: seed.scene,
+    model: seed.model,
+    tenantName: seed.tenantName,
+    artifactKind: seed.artifactKind,
+    artifactTitle: seed.artifactTitle,
+    inputDigest: seed.inputDigest,
+    safety: seed.safety,
+    safetyReason: seed.safetyReason,
+    createdAt,
+  }
+})
 
 export function listTraceRecords(scene: string, safety: string): AiTraceRecord[] {
   return traceRecords.filter((row) => {
@@ -413,8 +488,14 @@ export function listTraceRecords(scene: string, safety: string): AiTraceRecord[]
 
 /* ================= AI 计费与租户能力开关（P-05-13 / 14） ================= */
 
+/**
+ * 全局默认计费规则：没单独签约的租户一律按这份价目表计费。
+ *
+ * 只有全局表是「完整」的；租户表只放被改过价的场景（见 tenantBillingRules），
+ * 这样新增场景时只补一条全局规则，不会漏掉某个租户。
+ */
 export const billingRules: AiBillingRule[] = [
-  { id: ++ruleSeq, scene: 'AI 出题', model: 'deepseek-chat', unit: '1k-token', price: 0.008, enabled: true },
+  { id: ++ruleSeq, scene: 'AI 出题', model: 'deepseek-reasoner', unit: '1k-token', price: 0.008, enabled: true },
   { id: ++ruleSeq, scene: 'AI 组卷', model: 'deepseek-chat', unit: '1k-token', price: 0.01, enabled: true },
   { id: ++ruleSeq, scene: 'AI 讲义', model: 'deepseek-chat', unit: '1k-token', price: 0.009, enabled: true },
   { id: ++ruleSeq, scene: 'AI 课件', model: 'deepseek-chat', unit: 'call', price: 0.5, enabled: true },
@@ -422,8 +503,45 @@ export const billingRules: AiBillingRule[] = [
   { id: ++ruleSeq, scene: 'AI 画插图', model: '文生图（演示）', unit: 'call', price: 0.2, enabled: false },
 ]
 
+/** 租户专属规则（覆盖全局）：只给签约时谈过价的场景各留一条 */
+export const tenantBillingRules: AiBillingRule[] = [
+  /* 星辰教育：走量客户，出题 / 组卷按千 token 打包价 */
+  { id: ++ruleSeq, tenantId: 1, scene: 'AI 出题', model: 'deepseek-reasoner', unit: '1k-token', price: 0.006, enabled: true },
+  { id: ++ruleSeq, tenantId: 1, scene: 'AI 组卷', model: 'deepseek-chat', unit: '1k-token', price: 0.008, enabled: true },
+  /* 启航培训：课件按次单独议价 */
+  { id: ++ruleSeq, tenantId: 2, scene: 'AI 课件', model: 'deepseek-chat', unit: 'call', price: 0.8, enabled: true },
+]
+
 export function listBillingRules(): AiBillingRule[] {
-  return [...billingRules]
+  return billingRules.filter((row) => row.tenantId == null).map((row) => ({ ...row }))
+}
+
+/**
+ * 某租户的生效价目表：以全局默认规则为骨架，逐场景套用租户覆盖价。
+ *
+ * 返回值带上 `overridden` 与 `globalPrice`，页面才能同时表达「现在按多少计费」
+ * 和「改成了多少 / 全局是多少」—— 只给生效价，运营看不出这个租户到底有没有单独谈价。
+ */
+export function listTenantBillingRows(tenantId: number): AiTenantBillingRow[] {
+  const tenant = tenantAiSwitches.find((row) => row.tenantId === tenantId)
+  if (!tenant) throw new Error('租户不存在')
+  return billingRules
+    .filter((row) => row.tenantId == null)
+    .map((base) => {
+      const override = tenantBillingRules.find((row) => row.tenantId === tenantId && row.scene === base.scene)
+      return {
+        id: override?.id ?? base.id,
+        scene: base.scene,
+        model: override?.model ?? base.model,
+        unit: override?.unit ?? base.unit,
+        price: override?.price ?? base.price,
+        enabled: override?.enabled ?? base.enabled,
+        tenantId,
+        overridden: Boolean(override),
+        globalUnit: base.unit,
+        globalPrice: base.price,
+      }
+    })
 }
 
 export function saveBillingRule(id: number, input: Partial<AiBillingRule>): AiBillingRule {
@@ -432,6 +550,40 @@ export function saveBillingRule(id: number, input: Partial<AiBillingRule>): AiBi
   if (input.price != null && input.price <= 0) throw new Error('单价必须大于 0')
   Object.assign(rule, input)
   return rule
+}
+
+/** 设置租户专属价：同一租户同一场景只留一条，重复保存即改价 */
+export function saveTenantBillingRule(
+  tenantId: number,
+  scene: string,
+  input: { unit: AiBillingRule['unit']; price: number },
+): AiTenantBillingRow[] {
+  if (input.price <= 0) throw new Error('单价必须大于 0')
+  const base = billingRules.find((row) => row.tenantId == null && row.scene === scene)
+  if (!base) throw new Error('计费场景不存在')
+  const existing = tenantBillingRules.find((row) => row.tenantId === tenantId && row.scene === scene)
+  if (existing) {
+    existing.unit = input.unit
+    existing.price = input.price
+  } else {
+    tenantBillingRules.push({
+      id: ++ruleSeq,
+      tenantId,
+      scene,
+      model: base.model,
+      unit: input.unit,
+      price: input.price,
+      enabled: base.enabled,
+    })
+  }
+  return listTenantBillingRows(tenantId)
+}
+
+/** 恢复继承全局默认价：物理删除该租户的这个覆盖项 */
+export function resetTenantBillingRule(tenantId: number, scene: string): AiTenantBillingRow[] {
+  const index = tenantBillingRules.findIndex((row) => row.tenantId === tenantId && row.scene === scene)
+  if (index >= 0) tenantBillingRules.splice(index, 1)
+  return listTenantBillingRows(tenantId)
 }
 
 export const AI_CAPABILITY_KEYS = [

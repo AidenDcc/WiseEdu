@@ -29,6 +29,7 @@ import type {
   PaperComment,
   PaperExtra,
   PaperExtraKind,
+  PaperScope,
   PaperSection,
   QuestionCorrection,
 } from '@aiteach/shared'
@@ -148,6 +149,8 @@ const noticesDraft = ref('')
 /** 卷首注意事项条目：拆行、去空行。空数组 = 卷面不印这一块（见 paper-layouts 的默认稿说明） */
 const notices = computed(() => noticesDraft.value.split('\n').map((row) => row.trim()).filter(Boolean))
 const meta = reactive({ owner: '', sharedSquare: false, status: 'draft' as OrgPaper['status'] })
+/** 所属对象：新建的卷一律个人卷（免审入库），已存的卷取自身归属 —— 决定送审按钮怎么说 */
+const paperScope = ref<PaperScope>('personal')
 const questions = ref<OrgQuestion[]>([])
 const ownPaperIds = ref<number[]>([])
 const collabTasks = ref<OrgCollabTask[]>([])
@@ -423,6 +426,7 @@ function adoptPaper(next: OrgPaper) {
   sectionSeq = Math.max(...sections.value.map((row) => row.id), sectionSeq - 1, 0) + 1
   baselineIds.value = new Set(sections.value.flatMap((row) => row.questions.map((q) => q.questionId)))
   meta.status = next.status
+  paperScope.value = next.scope ?? 'school'
   /* 服务端卷面是新的基准：本地撤销栈指向的是换进来之前的内容，留着会把别人的改动撤回来 */
   snapshots.value = []
   pointer.value = -1
@@ -1619,9 +1623,20 @@ async function save(submit = false) {
     })
     form.id = saved.id
     meta.status = saved.status
+    if (saved.scope) paperScope.value = saved.scope
     ownPaperIds.value = [...ownPaperIds.value, saved.id]
     markSaved()
-    showToast(submit ? '已提交：AI 九项检测通过后推送人工审核' : '试卷已保存', 'success')
+    /* 个人卷免审：保存完就能用，要共享再由老师在试卷库提交校本；
+       校本 / 平台卷走人工审核（协同卷另有 collabSubmitReview，到不了这一支） */
+    const personal = paperScope.value === 'personal'
+    showToast(
+      submit
+        ? personal
+          ? '已保存到个人试卷，如需共享可在试卷库「提交校本」'
+          : '已提交：AI 九项检测通过后推送人工审核'
+        : '试卷已保存',
+      'success',
+    )
     await loadVersions()
     commit('保存到试卷库')
     if (submit) router.push('/paper/list')
@@ -1777,8 +1792,18 @@ interface SubmitAction {
 const submitAction = computed<SubmitAction | null>(() => {
   const task = currentTask.value
   if (!task) {
-    /* 普通试卷：走 `savePaper` 的 submit 分支（保存并推送人工审核），与顶栏「保存」同一个函数 */
-    return { text: '提交审核', icon: 'upload', disabled: false, hint: '保存当前卷面并推送人工审核', run: () => void save(true) }
+    /* 普通试卷：
+       - 个人卷（组卷 / 导入产出）免审 → 「保存到个人试卷」，保存即入库；
+       - 校本卷重新送审 → 「提交审核」，走 savePaper 的 submit 分支推送人工审核。 */
+    return paperScope.value === 'personal'
+      ? {
+          text: '保存到个人试卷',
+          icon: 'upload',
+          disabled: false,
+          hint: '保存当前卷面并入个人试卷（免审）；要共享到校本请在试卷库「提交校本」',
+          run: () => void save(true),
+        }
+      : { text: '提交审核', icon: 'upload', disabled: false, hint: '保存当前卷面并推送人工审核', run: () => void save(true) }
   }
   if (isOwner.value) {
     if (task.status === 'ready') {
@@ -2008,6 +2033,7 @@ async function load() {
     meta.owner = source.owner
     meta.sharedSquare = source.sharedSquare
     meta.status = source.status
+    paperScope.value = source.scope ?? 'school'
     sections.value = JSON.parse(JSON.stringify(source.sections)) as PaperSection[]
     attachments.value = JSON.parse(JSON.stringify(source.attachments ?? [])) as PaperAttachment[]
     extras.value = JSON.parse(JSON.stringify(source.extras ?? [])) as PaperExtra[]

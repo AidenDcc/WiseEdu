@@ -27,7 +27,12 @@ const COLLAPSE_KEY = `aiteach:${getAppConfig().appName}:sidebar-collapsed`
 const collapsed = ref(localStorage.getItem(COLLAPSE_KEY) === '1')
 watch(collapsed, (value) => {
   localStorage.setItem(COLLAPSE_KEY, value ? '1' : '0')
-  if (!value) flyout.value = null
+  if (!value) {
+    flyout.value = null
+    /* 重新展开侧边栏时把**当前页所在分组**打开：不然会看到「试卷管理高亮着、子项却全收着」，
+       用户一眼看不出自己在哪一页 —— 收起再展开后组状态没复位，就是这种观感。 */
+    expandActiveGroup()
+  }
 })
 
 /** 分组展开状态：默认展开包含当前路由的分组 */
@@ -445,7 +450,15 @@ onMounted(() => restoreDemoIdentity())
 .brand-sub { font-size: 11.5px; color: var(--sub); margin-top: 2px; }
 .layout.collapsed .brand-text { display: none; }
 
-.menu { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 10px 10px 14px; }
+.menu {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 10px 10px 14px;
+  /* 常驻滚动条槽：菜单内容高度会随「子菜单开合」变化，不留槽的话滚动条一会儿在一会儿没，
+     菜单项宽度跟着 8px 来回跳 —— 展开 / 收起一次就能看到右边距在动。 */
+  scrollbar-gutter: stable;
+}
 .menu-item {
   display: flex;
   align-items: center;
@@ -478,7 +491,11 @@ onMounted(() => restoreDemoIdentity())
 .group-head .chev { margin-left: auto; transition: transform 0.2s; }
 .menu-group.open .chev { transform: rotate(180deg); }
 
-/* 二级菜单：grid 高度动画实现平滑折叠/展开 */
+/* 二级菜单：grid 高度动画实现平滑折叠/展开。
+   ⚠️ 1fr / 0fr 这套写法只有在**内容高度稳定**时才成立，所以下面的 `.menu-sub` 必须 nowrap：
+   侧边栏宽度 232 ↔ 64 是 0.22s 的过渡，收起后重新展开的头 100 多毫秒里，菜单栏只有几十像素宽，
+   标签一旦允许折行，4 个字的「试卷库」就会断成两行，把整行撑高一倍（实测 223px → 403px），
+   于是「展开子菜单 → 收起菜单 → 再展开」时会看到菜单先撑开再缩回的一次跳动。 */
 .sub-items {
   display: grid;
   grid-template-rows: 1fr;
@@ -486,7 +503,9 @@ onMounted(() => restoreDemoIdentity())
 }
 .sub-items.collapsed { grid-template-rows: 0fr; }
 .sub-inner { overflow: hidden; min-height: 0; }
-.layout.collapsed .sub-items { display: none; }
+/* 整栏收起时用 0fr 而不是 display:none —— 保住那个过渡：
+   display 一翻，回来时 grid 行要重新量一次内容高度，正是上面那个跳动的另一半原因。 */
+.layout.collapsed .sub-items { grid-template-rows: 0fr; }
 .menu-sub {
   display: block;
   padding: 0 12px 0 40px;
@@ -495,6 +514,7 @@ onMounted(() => restoreDemoIdentity())
   color: var(--ink-2);
   border-radius: 9px;
   margin: 1px 0;
+  white-space: nowrap;
   transition: background 0.15s, color 0.15s;
 }
 .menu-sub:hover { background: #f2f4fa; color: var(--ink); }

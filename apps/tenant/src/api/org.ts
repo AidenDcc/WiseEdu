@@ -92,6 +92,13 @@ export function saveQuestion(data: Partial<OrgQuestion> & { stem: string; submit
 export function submitQuestions(ids: number[]) {
   return request<{ count: number }>('/tenant/questions/submit', { method: 'POST', data: { ids } })
 }
+/**
+ * 个人题提交校本审核：生成一条 `kind='题目'` 的审批单（审批管理里处理）。
+ * 通过后题目的所属对象由「个人」翻成「校本」，机构内可见。
+ */
+export function submitQuestionToSchool(id: number, note?: string) {
+  return request<ResourceApproval>('/tenant/questions/submit-school', { method: 'POST', data: { id, note } })
+}
 export function deleteQuestions(ids: number[]) {
   return request<{ count: number }>('/tenant/questions/delete', { method: 'POST', data: { ids } })
 }
@@ -223,6 +230,13 @@ export function importRecognizedPaper(payload: ImportRecognizedPaperPayload) {
 }
 export function reviewPaper(id: number, pass: boolean, opinion: string) {
   return request<OrgPaper>('/tenant/papers/review', { method: 'POST', data: { id, pass, opinion } })
+}
+/**
+ * 个人试卷提交校本：生成一条 `kind='试卷'` 的审批单。
+ * 同一张单会出现在「试卷审核中心」与「校本资源 → 审批管理」，任一处通过都算数。
+ */
+export function submitPaperToSchool(id: number, note?: string) {
+  return request<ResourceApproval>('/tenant/papers/submit-school', { method: 'POST', data: { id, note } })
 }
 /** 智能组卷：参数口径见 `AiComposeParams`（知识点是硬条件，其余四维是优先） */
 export function aiComposePaper(data: AiComposeParams) {
@@ -847,6 +861,8 @@ export function fetchApprovalSummary() {
 }
 export function submitApproval(data: {
   kind: ApprovalKind
+  /** 被提审资源编号：详情弹窗按资源类型取正文 */
+  resourceId?: number
   name: string
   subject: string
   grade: string

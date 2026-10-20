@@ -1295,17 +1295,19 @@ export function studentOverview(): { classCount: number; studentCount: number; c
  * 刷新一下就回到种子数据，演示时会被当成「保存没成功」。持久化机制本身见 persist.ts，
  * 这里只提供本仓库的抓取 / 灌回。
  *
- * 只涉及这三张表 + 三个自增水位：AI 能力中心那些卡片、审核流程是平台侧配置，
- * 不属于机构端录入的数据，不跨刷新保留（与改动前一致）。
+ * 机构设置与审核流程也收进快照：它们是这一页里用户亲手改、并点了「保存」的东西，
+ * 刷新就还原成种子会直接读成「保存按钮没生效」。AI 能力中心那些卡片不属于本页，仍不保留。
  */
 
-export const STUDENT_STATE_VERSION = 1
+export const STUDENT_STATE_VERSION = 2
 
 export function captureStudentState(): Record<string, unknown> {
   return {
     classes,
     students,
     consents,
+    orgSettings,
+    reviewFlows,
     seqs: { classSeq, studentSeq, consentSeq },
   }
 }
@@ -1313,6 +1315,7 @@ export function captureStudentState(): Record<string, unknown> {
 /**
  * 灌回快照。集合一律**原地替换**（`splice`）—— 它们是 `export const`，
  * 换成新数组的话，别处 `import { classes }` 拿到的还是旧数组。
+ * 单个对象（机构设置）用 `Object.assign` 同样保持引用不变。
  */
 export function restoreStudentState(data: Record<string, unknown>): void {
   const nextClasses = data.classes
@@ -1321,6 +1324,11 @@ export function restoreStudentState(data: Record<string, unknown>): void {
   if (Array.isArray(nextStudents)) students.splice(0, students.length, ...(nextStudents as OrgStudent[]))
   const nextConsents = data.consents
   if (Array.isArray(nextConsents)) consents.splice(0, consents.length, ...(nextConsents as ConsentRecord[]))
+  const nextFlows = data.reviewFlows
+  if (Array.isArray(nextFlows)) reviewFlows.splice(0, reviewFlows.length, ...(nextFlows as ReviewFlowConfig[]))
+  if (data.orgSettings && typeof data.orgSettings === 'object') {
+    Object.assign(orgSettings, data.orgSettings as OrgSettings)
+  }
 
   const seqs = data.seqs as Record<string, number> | undefined
   if (!seqs) return

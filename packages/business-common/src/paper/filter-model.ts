@@ -9,7 +9,14 @@
  * 但考试类型**确实参与过滤**，所以它仍在 `PAPER_ALL_ROWS` 里（页面拿它算 `matches` 与左树计数），
  * 只是不进 `PAPER_PANEL_ROWS`（面板渲染的那几行）。
  */
-import { PAPER_SOURCE_OPTIONS, type FilterRowDef, type OrgPaper } from '@aiteach/shared'
+import {
+  PAPER_SCOPE_OPTIONS,
+  PAPER_SCOPE_TEXT,
+  PAPER_SOURCE_OPTIONS,
+  paperScopeOf,
+  type FilterRowDef,
+  type OrgPaper,
+} from '@aiteach/shared'
 
 export interface PaperFilterRow {
   /** 各端可以加自己的 key，故不写成联合类型 */
@@ -34,6 +41,9 @@ export const PAPER_FILTER_ROWS: PaperFilterRow[] = [
 /** 次要条件：收在「更多查询」里 */
 export const PAPER_MORE_ROWS: PaperFilterRow[] = [
   { key: 'competition', label: '杯赛', dict: 'competition' },
+  /* 所属对象与题库管理同一顺序、同一位置（杯赛下面）：平台 / 校本 / 个人。
+     候选项写死，不走字典 —— 它是业务归属而不是可维护的字典项。 */
+  { key: 'scope', label: '所属对象', options: PAPER_SCOPE_OPTIONS.map((item) => PAPER_SCOPE_TEXT[item]) },
   { key: 'source', label: '来源', options: [...PAPER_SOURCE_OPTIONS] },
 ]
 
@@ -79,5 +89,7 @@ export function paperFilterFields(): Record<string, (row: OrgPaper) => string> {
     competition: (row) => row.competition ?? '',
     region: (row) => row.region ?? '',
     source: (row) => row.source ?? '',
+    /* 所属对象按**兜底后的归属**取（存量卷没有 scope → 校本），否则那批卷在这一维上筛不出来 */
+    scope: (row) => PAPER_SCOPE_TEXT[paperScopeOf(row)],
   }
 }

@@ -160,3 +160,13 @@ export function compositeBadgeText(item: {
 }): string {
   return compositeBadgeLabel(subQuestionCount(item))
 }
+
+/**
+ * 紧凑文案（窄列专用）：`组合题 · N`。
+ *
+ * 题库列表的「题型」列只有 92px，完整文案「材料组合题 · 3 小问」会折行把行高顶起来，
+ * 而这一列要跟题型文字一起竖排两行 —— 所以在这里另给一份短文案，而不是让页面各自截断。
+ */
+export function compositeBadgeShort(count: number): string {
+  return count > 0 ? `组合题 · ${count}` : '组合题'
+}

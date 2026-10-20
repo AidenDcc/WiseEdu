@@ -115,6 +115,8 @@ export { default as AppPagination } from './components/ui/AppPagination.vue'
 export { default as AppSwitch } from './components/ui/AppSwitch.vue'
 export { default as AppTabs } from './components/ui/AppTabs.vue'
 export { default as AppSegmented } from './components/ui/AppSegmented.vue'
+/* 行内提示（标题 / 标签旁的小问号）：hover 或点击弹出说明，Teleport 到 body 以免被表格容器裁切 */
+export { default as AppHelpTip } from './components/ui/AppHelpTip.vue'
 /* 浮层（弹窗 / 抽屉）：与 appConfirm 共用 overlay 栈，Esc 只关最上层 */
 export { default as AppModal } from './components/ui/AppModal.vue'
 export { default as AppDrawer } from './components/ui/AppDrawer.vue'
@@ -193,6 +195,8 @@ export type {
   QuestionStatus,
   QuestionSource,
   QuestionLibrary,
+  QuestionScope,
+  PaperScope,
   AiCheckResult,
   OrgQuestion,
   OrgSubQuestion,
@@ -347,6 +351,14 @@ export { resetMockState } from './mock/persist'
 export {
   QUESTION_CORRECTION_TYPES,
   QUESTION_SOURCE_OPTIONS,
+  /* 题目所属对象（平台 / 校本 / 个人）：文本、候选项与兜底推导，题库管理与审批管理共用 */
+  QUESTION_SCOPE_TEXT,
+  QUESTION_SCOPE_OPTIONS,
+  questionScopeOf,
+  /* 试卷所属对象（口径同题目）：试卷库的标签与筛选项、审核/审批共用 */
+  PAPER_SCOPE_TEXT,
+  PAPER_SCOPE_OPTIONS,
+  paperScopeOf,
   PAPER_SOURCE_OPTIONS,
   /* 机构端「试卷类型树」的分组：直接按考试类型项的 `paperCategory` 现算，不再有写死的分类常量 */
   groupByPaperCategory,
@@ -399,6 +411,7 @@ export type {
   AiQualityEval,
   AiTraceRecord,
   AiBillingRule,
+  AiTenantBillingRow,
   TenantAiSwitch,
   ServiceHealthItem,
   SystemParam,

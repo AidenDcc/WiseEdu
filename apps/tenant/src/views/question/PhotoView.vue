@@ -638,7 +638,7 @@ function startEdit(row: PhotoTask['results'][number]) {
 }
 
 /**
- * 保存：写进 drafts，退回只读态。改动随卡片上的「存草稿 / 提交审核 / 丢弃」一并提交。
+ * 保存：写进 drafts，退回只读态。改动随卡片上的「存草稿 / 入库 / 丢弃」一并提交。
  *
  * 存进 drafts 的必须是**深拷贝**：编辑器按 v-model 就地改 `editDraft.options[i]` 这类元素，
  * 浅拷会把「已保存」的那份一起改掉，取消也退不回去。
@@ -671,7 +671,10 @@ async function decide(row: PhotoTask['results'][number], decision: 'import' | 'd
   /* 决策后这条的内容已定稿，暂存改动没必要再留着 */
   drafts.delete(row.id)
   if (editingId.value === row.id) editingId.value = null
-  showToast(decision === 'import' ? '已提交审核（待人工终审）' : decision === 'draft' ? '已存入题库草稿' : '已丢弃', 'success')
+  showToast(
+    decision === 'import' ? '已存入个人题库，可直接组卷' : decision === 'draft' ? '已存入题库草稿' : '已丢弃',
+    'success',
+  )
 }
 
 /** 全部存草稿：一次收尾整张卷子（连同各自校对过的改动） */
@@ -686,7 +689,7 @@ async function draftAll() {
 
 /** 已处理结果的标签：识别结果列表里要能一眼看出这道题的去向 */
 const DECIDED_TEXT: Record<'import' | 'draft' | 'drop', string> = {
-  import: '已提交审核',
+  import: '已入库',
   draft: '已存草稿',
   drop: '已丢弃',
 }
@@ -1045,7 +1048,7 @@ onBeforeUnmount(() => {
                   </p>
                 </div>
 
-                <!-- 操作行：「编辑 / 存草稿 / 提交审核 / 丢弃」。编辑不再就地展开，开「题目编辑」弹窗 -->
+                <!-- 操作行：「编辑 / 存草稿 / 入库 / 丢弃」。编辑不再就地展开，开「题目编辑」弹窗 -->
                 <div class="qc-ops">
                   <template v-if="card.row.decided">
                     <span class="f-hint">该结果已处理</span>
@@ -1053,7 +1056,14 @@ onBeforeUnmount(() => {
                   <template v-else>
                     <button class="mini-btn" type="button" @click="startEdit(card.row)">编辑</button>
                     <button class="mini-btn" type="button" @click="decide(card.row, 'draft')">存草稿</button>
-                    <button class="mini-btn success" type="button" @click="decide(card.row, 'import')">提交审核</button>
+                    <button
+                      class="mini-btn success"
+                      type="button"
+                      title="直接存入个人题库，无需审核；如需共享到校本，在题库管理提交校本"
+                      @click="decide(card.row, 'import')"
+                    >
+                      入库
+                    </button>
                     <button class="mini-btn danger" type="button" @click="decide(card.row, 'drop')">丢弃</button>
                   </template>
                 </div>
@@ -1065,7 +1075,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- 校对改题：与录题中心同一张「题目编辑」表单（含题型 / 难度 / 知识点）。
-         这里只是改，入库仍走卡片上的 存草稿 / 提交审核 / 丢弃 —— 保住「全部存草稿」这个批量收尾。
+         这里只是改，入库仍走卡片上的 存草稿 / 入库 / 丢弃 —— 保住「全部存草稿」这个批量收尾。
          rows 收掉 学期 / 考试类型 / 来源 / 教材版本：识别结果里没有这四项，`decidePhotoResult`
          也不落它们 —— 摆出来能填却不生效，正是这次要消灭的那种「改了没存」 -->
     <QuestionEditorModal

@@ -8,9 +8,17 @@
  * 本页只保留「机构端自己的事」：
  * - 取数：`@/api/org`（含 `tenant_id` 与机构权限），公共层不认识这些；
  * - 本端专属筛选条件：走 `BankFilterBar` 的 `extraRows`（仍是 chip 行、进折叠汇总与「清空」）
- *   或 `#extraFilter`（开关 / 区间这类非 chip 控件）。当前两端条件一致，故 `EXTRA_ROWS` 为空；
- * - 操作按钮：走 `QuestionBankPanel` 的 `#renderOperation` —— 机构端的「编辑 / 变式」都要进录题中心；
- * - 行内标识：走 `#renderQuestionNo` / `#renderCardMeta`（机构端的「纠错 N」）。
+ *   或 `#extraFilter`（开关 / 区间这类非 chip 控件）。本端的专属行是**所属对象**
+ *   （平台 / 校本 / 个人），排在「杯赛」后面；
+ * - 操作按钮：走 `QuestionBankPanel` 的 `#renderOperation` —— 机构端的「编辑 / 变式」都要进录题中心，
+ *   个人题另有「提交校本」；
+ * - 行内标识：走 `#renderQuestionNo` / `#renderCardMeta`（所属对象 + 「纠错 N」）。
+ *
+ * ## 个人题库已并入本页
+ *
+ * 原本「个人题库」是独立一页（按 owner 过滤看自己录的题）。现在它的内容就是本页
+ * 「所属对象 = 个人」这一档，所以那一页连同菜单入口一起撤掉了，草稿 / 已入库的个人题都在这里看。
+ * 个人题**只有创建人可见**，直到提交校本并通过审批（`scope` 翻成 `school`）才对全机构可见。
  *
  * 公共组件内部不判断当前是哪个端，也不知道 `tenant_id`。
  */
@@ -20,11 +28,15 @@ import {
   AppIcon,
   AppModal,
   ApiError,
+  QUESTION_SCOPE_OPTIONS,
+  QUESTION_SCOPE_TEXT,
   RichTextViewer,
+  appConfirm,
+  questionScopeOf,
   showToast,
   truncateRich,
 } from '@aiteach/shared'
-import type { FilterRowDef, OrgQuestion, QuestionCorrection } from '@aiteach/shared'
+import type { FilterRowDef, OrgQuestion, QuestionCorrection, ResourceApproval } from '@aiteach/shared'
 import {
   BANK_ALL_ROWS,
   BANK_FILTER_ROWS,
@@ -46,16 +58,23 @@ import {
   type BankFilterRow,
 } from '@aiteach/business-common'
 import {
+  fetchApprovals,
   fetchQuestionCorrections,
   fetchQuestions,
   fetchTenantDict,
+  submitQuestionToSchool,
   toggleQuestionOffline,
   variantOf,
 } from '@/api/org'
 import type { TenantDictItem } from '@/api/org'
+import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
 const route = useRoute()
+const auth = useAuthStore()
+
+/** 当前登录人：个人题的可见性、以及「我的题」判定都按这个 id */
+const currentUserId = computed(() => auth.user?.id ?? 101)
 
 /** 顶部栏的全局年级 / 学科：只用来给下面的 scope 一个初值，之后以左侧面板为准 */
 const { grade: scopeGrade, subject: scopeSubject, ensureScope } = useScope()
@@ -68,6 +87,13 @@ const list = ref<OrgQuestion[]>([])
  * 本地按 questionId 分组即可 —— 记录量级是「一题几条」，不值得再开一个「哪些题有纠错」的接口。
  */
 const corrections = ref<QuestionCorrection[]>([])
+/**
+ * 提审单（只为「这一题是否正在审核中」服务）。
+ *
+ * 个人题提交校本后**题本身不动状态**（仍是可用的个人题），所以「审核中」只能从审批单看出来 ——
+ * 列表上的按钮据此变成「审核中」并禁用，避免重复提交。
+ */
+const approvals = ref<ResourceApproval[]>([])
 const loading = ref(false)
 
 async function load() {
@@ -79,13 +105,29 @@ async function load() {
     if (!scope.value.grade && scopeGrade.value) {
       scope.value = { grade: scopeGrade.value, subject: scopeSubject.value }
     }
-    const [rows, records] = await Promise.all([fetchQuestions(), fetchQuestionCorrections()])
+    const [rows, records, pending] = await Promise.all([
+      fetchQuestions(),
+      fetchQuestionCorrections(),
+      /* 审批单拉不到不该挡住题库 —— 退化为空数组，「提交校本」按「可以提交」处理 */
+      fetchApprovals().catch(() => [] as ResourceApproval[]),
+    ])
     list.value = rows
     corrections.value = records
+    approvals.value = pending
   } finally {
     loading.value = false
   }
 }
+
+/** 正在走校本审批的个人题 id（按钮据此显示「审核中」） */
+const schoolPendingIds = computed(
+  () =>
+    new Set(
+      approvals.value
+        .filter((row) => row.status === 'pending' && row.kind === '题目' && row.resourceId != null)
+        .map((row) => row.resourceId as number),
+    ),
+)
 
 const correctionsByQuestion = computed(() => {
   const grouped = new Map<number, QuestionCorrection[]>()
@@ -135,7 +177,20 @@ function onScopeChange(next: { grade: string; subject: string }) {
 /* ================= 右上：可折叠筛选条件 =================
    行定义与候选项解析都在公共层（`bank/filter-model`），本页只提供本端数据与 scope。
    机构端专属条件加在 EXTRA_ROWS 里即可 —— 与共有行同权：进折叠汇总、也进「清空」。 */
-const EXTRA_ROWS: BankFilterRow[] = []
+
+/**
+ * 本端专属条件：**所属对象**（平台 / 校本 / 个人）。
+ *
+ * 位置由 `BankFilterBar` 决定（共有行在前、专属行在后），所以它天然排在「杯赛」下面，
+ * 正是产品要求的顺序。chip 多选：三个都不选 = 全部可见范围。
+ */
+const SCOPE_ROW: BankFilterRow = {
+  key: 'scope',
+  label: '所属对象',
+  options: QUESTION_SCOPE_OPTIONS.map((scope) => QUESTION_SCOPE_TEXT[scope]),
+}
+
+const EXTRA_ROWS: BankFilterRow[] = [SCOPE_ROW]
 
 /** 主条件 + 更多查询 + 本端专属（面板里渲染的行） */
 const PANEL_ROWS = [...BANK_ALL_ROWS, ...EXTRA_ROWS]
@@ -198,14 +253,31 @@ const correctedIds = computed(() => new Set(corrections.value.map((record) => re
  */
 const fields = computed(() => bankFilterFields({ correctedIds: correctedIds.value }))
 
+/**
+ * 一道题是否可见。
+ *
+ * - **个人题只有创建人可见**：别人录的题在题库里根本不出现，直到提交校本并通过审批
+ *   （届时 `scope` 变成 `school`，对全机构可见）。这条是硬性规则，不参与筛选
+ *   —— 筛选面板里选「个人」看到的是「我自己的个人题」，不是「所有人的」。
+ * - 机构 / 平台题：仍按状态白名单（已入库 / 已下架 / 草稿）过，待审中 / 已驳回属于审核流。
+ */
+function visibleOf(row: OrgQuestion): boolean {
+  const scopeOf = questionScopeOf(row)
+  if (scopeOf === 'personal') return row.ownerId === currentUserId.value
+  return BANK_VISIBLE_STATUS.includes(row.status)
+}
+
 const filtered = computed(() => {
   const kw = keyword.value.trim()
   const field = fields.value
-  /* 状态不选时 = 只看已入库；选「已下架」才把下架题翻出来重新上架。
-     硬性可见性（BANK_VISIBLE_STATUS）在下面第一道卡住草稿 / 校验中 / 待终审 / 已驳回。 */
-  const statusSel = filterSel.status.length ? filterSel.status : [BANK_STATUS_LABEL.approved]
+  /* 状态不选时 = 只看可用题（已入库 + 自己的草稿）；选「已下架」才把下架题翻出来重新上架。
+     草稿放进默认档，是因为个人题库并进来之后「保存草稿」的题只在这里能看到 ——
+     默认藏起来等于让老师找不到刚存的东西。 */
+  const statusSel = filterSel.status.length
+    ? filterSel.status
+    : [BANK_STATUS_LABEL.approved, BANK_STATUS_LABEL.draft]
   return list.value.filter((row) => {
-    if (!BANK_VISIBLE_STATUS.includes(row.status)) return false
+    if (!visibleOf(row)) return false
     if (scope.value.grade && row.grade !== scope.value.grade) return false
     if (scope.value.subject && row.subject !== scope.value.subject) return false
     if (activeTags.value && !row.knowledge.some((tag) => activeTags.value!.includes(tag))) return false
@@ -268,8 +340,46 @@ function goAiVariant() {
   variantOpen.value = null
 }
 
+/* ===== 所属对象（行内标签 / 按钮分支共用） ===== */
+/** 题目的所属对象取值（'platform' | 'school' | 'personal'），模板按它决定标签与按钮 */
+function scopeKeyOf(row: OrgQuestion) {
+  return questionScopeOf(row)
+}
+/** 所属对象标签的配色：平台蓝、校本绿、个人橙（与审批状态、纠错标签的色系区分开） */
+const SCOPE_TAG_CLASS: Record<string, string> = {
+  platform: 'tag-blue',
+  school: 'tag-green',
+  personal: 'tag-orange',
+}
+
+/**
+ * 提交校本审核。
+ *
+ * 只有个人题有这个动作：提交后生成一条 `kind='题目'` 的审批单，题**仍留在个人题库**可用，
+ * 审批通过后才翻成校本题（`scope=school`，全机构可见）。审核中重复点没有意义，
+ * 所以按钮在这一状态下变成「审核中」并禁用。
+ */
+async function onSubmitSchool(row: OrgQuestion) {
+  const ok = await appConfirm(`将题目 #${row.id} 提交校本审核？通过后该题将进入校本题库，全机构可见。`, {
+    title: '提交校本',
+    type: 'info',
+    confirmText: '提交审核',
+  })
+  if (!ok) return
+  try {
+    await submitQuestionToSchool(row.id)
+    showToast('已提交校本审核，可在「审批管理」或「题目审核中心」跟进', 'success')
+    await load()
+  } catch (error) {
+    showToast(error instanceof ApiError ? error.message : '提交失败', 'error')
+  }
+}
+
 /* ===== 挂载 ===== */
 onMounted(() => {
+  /* 个人题库并入后，旧入口（含书签）会带 ?scope=personal 跳过来：预选「所属对象 = 个人」，
+     让用户落到的正是他原来那一屏 */
+  if (route.query.scope === 'personal') filterSel.scope = [QUESTION_SCOPE_TEXT.personal]
   void load()
   void loadDicts()
 })
@@ -277,8 +387,15 @@ onMounted(() => {
 
 <template>
   <div class="bank-layout">
-    <!-- 年级 / 学科由左侧教材级联驱动（scopeChange），右上不再重复出这两行 -->
-    <KnowledgeFilterPanel :rows="list" @change="onKnowledgeChange" @scope-change="onScopeChange" />
+    <!-- 年级 / 学科由左侧教材级联驱动（scopeChange），右上不再重复出这两行。
+         题库管理左侧是「知识点 / 章节」双页签，知识点页签只选年级 / 学科（不选教材版本） -->
+    <KnowledgeFilterPanel
+      :rows="list"
+      with-chapter
+      :with-version="false"
+      @change="onKnowledgeChange"
+      @scope-change="onScopeChange"
+    />
 
     <!-- 右侧 -->
     <div class="right-col">
@@ -307,8 +424,12 @@ onMounted(() => {
         @update:keyword="keyword = $event"
         @preview="preview = $event"
       >
-        <!-- 编号列下挂「纠错 N」：这一列本来就窄，骨架已把它排成竖列 -->
+        <!-- 编号列下挂两枚标识：所属对象（平台 / 校本 / 个人）+ 纠错 N。
+             这一列本来就窄，骨架已把这一格排成竖列 -->
         <template #renderQuestionNo="{ row }">
+          <span class="tag no-badge" :class="SCOPE_TAG_CLASS[scopeKeyOf(row)]">
+            {{ QUESTION_SCOPE_TEXT[scopeKeyOf(row)] }}
+          </span>
           <span
             v-if="correctionsOf(row.id).length"
             class="tag tag-red no-badge"
@@ -318,19 +439,41 @@ onMounted(() => {
           </span>
         </template>
 
-        <!-- 详细卡片信息行里的同一枚标识 -->
+        <!-- 详细卡片信息行里的同一组标识（编号后面是所属对象，与预览抽屉的排法一致） -->
         <template #renderCardMeta="{ row }">
+          <span class="tag" :class="SCOPE_TAG_CLASS[scopeKeyOf(row)]">{{ QUESTION_SCOPE_TEXT[scopeKeyOf(row)] }}</span>
           <span v-if="correctionsOf(row.id).length" class="tag tag-red" :title="correctionTitle(row.id)">
             纠错 {{ correctionsOf(row.id).length }}
           </span>
         </template>
 
-        <!-- 操作列：机构端的入口（编辑 / 变式都进录题中心），表格与详细两处共用 -->
+        <!-- 操作列：机构端的入口（编辑 / 变式都进录题中心），表格与详细两处共用。
+             按钮按**所属对象**分：
+             - 平台题只读：可预览、可变式（变式产出的是一份自己的个人题）；
+             - 个人题：预览 / 编辑 / 提交校本（审核中禁用）/ 变式；
+             - 校本题：预览 / 编辑 / 变式 / 上下架。 -->
         <template #renderOperation="{ row }">
           <button class="mini-btn" type="button" @click="preview = row">预览</button>
-          <button class="mini-btn" type="button" @click="goEdit(row.id)">编辑</button>
+          <button v-if="scopeKeyOf(row) !== 'platform'" class="mini-btn" type="button" @click="goEdit(row.id)">编辑</button>
           <button class="mini-btn" type="button" @click="variantOpen = row">变式</button>
-          <button class="mini-btn" type="button" @click="onToggleOffline(row)">
+          <template v-if="scopeKeyOf(row) === 'personal'">
+            <button
+              v-if="schoolPendingIds.has(row.id)"
+              class="mini-btn"
+              type="button"
+              disabled
+              title="已提交校本审核，通过后自动进入校本题库"
+            >
+              审核中
+            </button>
+            <button v-else class="mini-btn success" type="button" @click="onSubmitSchool(row)">提交校本</button>
+          </template>
+          <button
+            v-if="scopeKeyOf(row) === 'school'"
+            class="mini-btn"
+            type="button"
+            @click="onToggleOffline(row)"
+          >
             {{ row.status === 'offline' ? '上架' : '下架' }}
           </button>
         </template>

@@ -25,6 +25,8 @@ export interface PreviewQuestion {
   knowledge: string[]
   source: string
   library: string
+  /** 所属对象（平台 / 校本 / 个人）；缺省时由 library 兜底推导，草稿不传 */
+  scope?: 'platform' | 'school' | 'personal'
   term?: string
   examType?: string
   /** 使用次数：草稿尚未入库、更没被使用过，不传则显示「—」而不是假数据「0 次」 */

@@ -73,11 +73,10 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/question/BankView.vue'),
         meta: { title: '题库管理' },
       },
+      /* 个人题库已并入题库管理（所属对象 = 个人）：旧地址仍能打开，落到预选「个人」的题库管理 */
       {
         path: 'question/personal',
-        name: 'question-personal',
-        component: () => import('@/views/question/PersonalBankView.vue'),
-        meta: { title: '个人题库' },
+        redirect: (to) => ({ path: '/question/bank', query: { ...to.query, scope: 'personal' } }),
       },
       {
         path: 'question/create',
@@ -242,19 +241,17 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/prep/PrepView.vue'),
         meta: { title: '集体备课' },
       },
-      /* ===== 校本资源：资源库 / 审批管理（同一组件两个 Tab） ===== */
+      /* ===== 校本资源：资源库 / 审批管理各自成页（审批不再挂在资源库的页签下） ===== */
       {
         path: 'resource/library',
         name: 'resource-library',
         component: () => import('@/views/resource/ResourceView.vue'),
-        props: { tab: 'library' },
         meta: { title: '校本资源库' },
       },
       {
         path: 'resource/approval',
         name: 'resource-approval',
-        component: () => import('@/views/resource/ResourceView.vue'),
-        props: { tab: 'approval' },
+        component: () => import('@/views/resource/ApprovalView.vue'),
         meta: { title: '审批管理' },
       },
       /* ===== 作业系统 ===== */

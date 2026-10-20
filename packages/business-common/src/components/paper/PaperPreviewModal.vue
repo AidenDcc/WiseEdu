@@ -97,6 +97,14 @@ const props = defineProps<{
    * （如组卷车抽屉 310 那类宿主），必须把宿主层级 + 10 传进来，否则预览会被宿主压住。
    */
   zIndex?: number
+  /**
+   * 只渲染**纸面画布**（不包弹窗壳、不要顶栏与左栏），供「试卷审核中心」把整卷铺在中栏里。
+   *
+   * 为什么复用同一个组件而不是另写一套：分版、测量、纸张与排版样式全在这一份实现里，
+   * 另抄一套的下场就是「预览是 A 纸两版、审核里是 B 纸一版」，审核员看到的不是他通过的那张卷。
+   * 开启后本组件退化成普通块级容器（不 Teleport、不锁滚动、不登记浮层栈）。
+   */
+  canvasOnly?: boolean
 }>()
 const emit = defineEmits<{
   close: []
@@ -627,8 +635,11 @@ const bodyStyle = computed(() => ({ height: `${geo.value.contentH}px` }))
  * 本弹窗是最后一个没登记的浮层：`onKeydown` 对 Esc 无条件响应，于是在它里面开出来的
  * 浮层（顶栏的分享 / 平行卷 / 分析，以及任何 appConfirm）按一次 Esc 会把
  * **子弹窗和预览一起关掉**。登记之后只有栈顶响应 —— 子弹窗后挂载即栈顶，Esc 只关它。
+ *
+ * `canvasOnly`（嵌在页面里的画布，如试卷审核中心中栏）不是浮层，不登记 ——
+ * 否则它会占着栈顶，让页面上其它真正弹出来的浮层收不到 Esc。
  */
-const overlayId = enterOverlay()
+const overlayId = props.canvasOnly ? 0 : enterOverlay()
 
 function onKeydown(event: KeyboardEvent) {
   if (event.key !== 'Escape' || !isTopOverlay(overlayId)) return
@@ -697,12 +708,15 @@ function onExport(kind: 'doc' | 'pdf') {
 }
 
 onMounted(async () => {
-  document.addEventListener('keydown', onKeydown)
-  /* 预览期间锁背景滚动 */
-  bodyOverflow = document.body.style.overflow
-  document.body.style.overflow = 'hidden'
-  /* 打印样式只在预览打开时生效，避免影响其它页面的正常打印 */
-  document.body.classList.add('pp-preview-open')
+  /* 内嵌画布不是浮层：不接管 Esc、不锁背景滚动、不加打印专用 body class */
+  if (!props.canvasOnly) {
+    document.addEventListener('keydown', onKeydown)
+    /* 预览期间锁背景滚动 */
+    bodyOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    /* 打印样式只在预览打开时生效，避免影响其它页面的正常打印 */
+    document.body.classList.add('pp-preview-open')
+  }
 
   await nextTick()
   /* 画布宽度决定「适应宽度」的缩放比例，先取一次再量高 */
@@ -731,10 +745,12 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  exitOverlay(overlayId)
-  document.removeEventListener('keydown', onKeydown)
-  document.body.style.overflow = bodyOverflow
-  document.body.classList.remove('pp-preview-open')
+  if (overlayId) exitOverlay(overlayId)
+  if (!props.canvasOnly) {
+    document.removeEventListener('keydown', onKeydown)
+    document.body.style.overflow = bodyOverflow
+    document.body.classList.remove('pp-preview-open')
+  }
   resizeObserver?.disconnect()
   canvasObserver?.disconnect()
   if (frame) cancelAnimationFrame(frame)
@@ -742,11 +758,17 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div class="pp-mask" :style="{ zIndex: maskZ }" @click.self="emit('close')">
+  <!-- canvasOnly：不 Teleport，直接挂在调用方的 DOM 里（审核中心的中栏） -->
+  <Teleport to="body" :disabled="canvasOnly">
+    <div
+      class="pp-mask"
+      :class="{ 'pp-embed': canvasOnly }"
+      :style="canvasOnly ? undefined : { zIndex: maskZ }"
+      @click.self="!canvasOnly && emit('close')"
+    >
       <div class="pp-dialog">
         <!-- 头部 -->
-        <header class="pp-head">
+        <header v-if="!canvasOnly" class="pp-head">
           <div class="pp-head-main">
             <h3 class="pp-title">{{ paper.name }}</h3>
             <!-- 元信息用标签（同上架试卷库卡片的口径），空的维度不出现空标签。
@@ -797,8 +819,9 @@ onBeforeUnmount(() => {
         </header>
 
         <!-- 工具栏（纸张 / 版数 / 方向 / 内容 / 缩放 / 教师版）：两个页签下都在 ——
-             「怎么排」与「这是什么卷」是两件事，切左栏页签不该把排版参数一起藏起来 -->
-        <div class="pp-bar">
+             「怎么排」与「这是什么卷」是两件事，切左栏页签不该把排版参数一起藏起来。
+             内嵌画布（审核中心）不显示：那里要的是「卷子长什么样」，排版参数由卷自己定。 -->
+        <div v-if="!canvasOnly" class="pp-bar">
           <div class="pp-bar-group">
             <span class="pp-bar-label">纸张</span>
             <select v-model="sizeKey" class="f-select" style="width: 178px">
@@ -858,7 +881,7 @@ onBeforeUnmount(() => {
           <!-- 左栏两个页签：「试卷分析」= 这是什么卷（试题统计 + 推荐卷）、
                「排版样式」= 它怎么排的（内置样式 + 卷面信息）。
                参考资料与裁切警告两个页签下都留 —— 前者是卷的内容，后者说的是「你正看的这版有缺陷」 -->
-          <aside class="pp-side">
+          <aside v-if="!canvasOnly" class="pp-side">
             <div class="pp-side-tabs">
               <button
                 v-for="row in SIDE_TABS"
@@ -1173,6 +1196,30 @@ onBeforeUnmount(() => {
   overflow: hidden;
   animation: pop-in 0.2s cubic-bezier(0.34, 1.4, 0.64, 1);
 }
+
+/* ===== 内嵌画布（canvasOnly） =====
+   遮罩与弹窗壳退化成普通容器：不占视口、不要圆角投影，画布吃满宿主给的高度并自己滚动。
+   只保留 `.pp-canvas` 那一段（纸面 + 分页标签），顶栏 / 工具栏 / 左栏已用 v-if 收掉。 */
+.pp-mask.pp-embed {
+  position: static;
+  inset: auto;
+  z-index: auto;
+  padding: 0;
+  background: none;
+  backdrop-filter: none;
+  animation: none;
+  display: block;
+  height: 100%;
+}
+.pp-embed .pp-dialog {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  animation: none;
+}
+.pp-embed .pp-main { height: 100%; }
 
 .pp-head {
   display: flex;

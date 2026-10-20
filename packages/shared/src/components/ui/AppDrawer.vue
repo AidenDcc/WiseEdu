@@ -49,7 +49,9 @@ onBeforeUnmount(() => {
       <aside class="drawer" :style="{ width: `${width}px` }">
         <header class="drawer-head">
           <div class="drawer-titles">
-            <h3 class="drawer-title">{{ title }}</h3>
+            <!-- 标题右侧可挂一枚标识（如题目预览的「所属对象」标签）：标题本身是纯文本，
+                 带样式的徽标只能从插槽进来 -->
+            <h3 class="drawer-title">{{ title }}<slot name="title-extra" /></h3>
             <p v-if="subtitle" class="drawer-sub">{{ subtitle }}</p>
           </div>
           <button class="drawer-x" type="button" @click="emit('close')">
@@ -95,7 +97,7 @@ onBeforeUnmount(() => {
   padding: 20px 24px 14px;
   border-bottom: 1px solid var(--border);
 }
-.drawer-title { font-size: 16.5px; font-weight: 700; }
+.drawer-title { font-size: 16.5px; font-weight: 700; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .drawer-sub { font-size: 12.5px; color: var(--sub); margin-top: 4px; }
 .drawer-x {
   width: 30px;

@@ -14,7 +14,7 @@
  * 文案与计数口径收敛在 `compositeBadgeText`，各页不再各写一份。
  */
 import { computed } from 'vue'
-import { compositeBadgeLabel } from '../../utils/question-card'
+import { compositeBadgeLabel, compositeBadgeShort } from '../../utils/question-card'
 
 const props = withDefaults(
   defineProps<{
@@ -22,15 +22,17 @@ const props = withDefaults(
     count?: number
     /** 题干行首的小胶囊形态；默认是常规标签 */
     inline?: boolean
+    /** 紧凑文案「组合题 · N」，用于题库列表 92px 的题型列 */
+    short?: boolean
   }>(),
-  { count: undefined, inline: false },
+  { count: undefined, inline: false, short: false },
 )
 
-const text = computed(() => compositeBadgeLabel(props.count ?? 0))
+const text = computed(() => (props.short ? compositeBadgeShort(props.count ?? 0) : compositeBadgeLabel(props.count ?? 0)))
 </script>
 
 <template>
-  <span :class="inline ? 'ct-inline' : 'tag tag-orange'">{{ text }}</span>
+  <span :class="inline || short ? 'ct-inline' : 'tag tag-orange'">{{ text }}</span>
 </template>
 
 <style scoped>

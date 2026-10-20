@@ -88,6 +88,9 @@ import {
   MISTAKE_REASONS,
   MAX_SUB_QUESTIONS,
   isEarlierYear,
+  /* 所属对象的兜底推导（存量题没有 scope 时按库反推），「提交校本」「审批通过转校本」都要用 */
+  paperScopeOf,
+  questionScopeOf,
 } from '../api/models'
 import { getCacheUser } from '../api/auth'
 import { registerMediaSrc, unregisterMediaSrc } from '../utils/media-ref'
@@ -273,7 +276,7 @@ function compositeChecksFor(question: QuestionCheckTarget, suspects: string[]): 
 }
 
 function seedQuestion(input: Partial<OrgQuestion> & { stem: string; id: number }): OrgQuestion {
-  return {
+  const row = {
     subject: '数学',
     grade: '高一',
     type: '单选',
@@ -298,6 +301,10 @@ function seedQuestion(input: Partial<OrgQuestion> & { stem: string; id: number }
     ...seedQuestionMeta(input.id, input.subject ?? '数学'),
     ...input,
   } as OrgQuestion
+  /* 所属对象按「放哪个库」兜底：个人库 → 个人，机构库 → 校本。
+     平台题必须显式写 scope: 'platform'（种子见下方 PLATFORM_* 那几道） */
+  row.scope = input.scope ?? (row.library === 'personal' ? 'personal' : 'school')
+  return row
 }
 
 export const questions: OrgQuestion[] = [
@@ -2837,6 +2844,91 @@ export const questions: OrgQuestion[] = [
     useCount: 5,
     updatedAt: nowStr(-27),
   }),
+  /* ---------- 平台公共题库下发的题（所属对象 = 平台） ----------
+     机构端题库管理要能按「所属对象 = 平台」筛出这批题，并区分「校本」「个人」——
+     只靠机构自建题的话这个筛选维度永远只有一个取值，看不出效果。
+     平台题在机构侧只读：可预览、可组卷，不可编辑 / 下架。 */
+  seedQuestion({
+    id: 9390,
+    stem: '若函数 f(x)=logₐ(x²-ax+2) 在区间 (-∞,1] 上单调递减，则实数 a 的取值范围是（　　）',
+    type: '单选',
+    options: ['(0,1)', '(1,2)', '(1,2]', '[2,+∞)'],
+    answer: 'C',
+    analysis:
+      '复合函数「同增异减」：外层 logₐu 在 a>1 时递增，故内层 u=x²-ax+2 需在 (-∞,1] 上递减且恒正，' +
+      '即对称轴 a/2 ≥ 1 且 u(1)=3-a>0，解得 1<a<2；再检验 a=2 时 u(1)=1>0 成立，故 a∈(1,2]。',
+    knowledge: ['对数函数', '函数单调性'],
+    difficulty: '困难',
+    library: 'org',
+    categoryId: 11,
+    scope: 'platform',
+    owner: '平台资源中心',
+    ownerId: 1,
+    source: '名校考试',
+    examType: '一模',
+    term: '上学期',
+    aiChecks: aiChecksFor(''),
+    aiSuspects: [],
+  }),
+  seedQuestion({
+    id: 9391,
+    stem: '在等差数列 {aₙ} 中，a₁=1，公差 d=2，则 a₁+a₃+a₅+…+a₁₉ = ______',
+    type: '填空',
+    answer: '100',
+    analysis: '奇数项共 10 项，构成首项 1、公差 4 的等差数列，和 = 10×1 + 10×9/2×4 = 100。',
+    knowledge: ['等差数列'],
+    library: 'org',
+    categoryId: 12,
+    scope: 'platform',
+    owner: '平台资源中心',
+    ownerId: 1,
+    source: '名校考试',
+    examType: '高考真题',
+    term: '下学期',
+    aiChecks: aiChecksFor(''),
+    aiSuspects: [],
+  }),
+  seedQuestion({
+    id: 9392,
+    stem:
+      '阅读下面的文字，完成题目。\n' +
+      '「故乡的秋来得早，院子里的枣树先落了叶。」\n' +
+      '请分析这句话在全文中的作用。',
+    type: '解答',
+    answer: '点明时令与地点，以枣树落叶渲染萧瑟氛围，为下文写故乡人事的变迁作铺垫。',
+    analysis: '作用题从「内容 + 结构 + 情感」三层作答：内容上交代时令景物，结构上开篇铺垫，情感上奠定基调。',
+    knowledge: ['文学类文本'],
+    subject: '语文',
+    library: 'org',
+    categoryId: 13,
+    scope: 'platform',
+    owner: '平台资源中心',
+    ownerId: 1,
+    source: '名校考试',
+    examType: '期末考试',
+    aiChecks: aiChecksFor(''),
+    aiSuspects: [],
+  }),
+  /* ---------- 个人题提审校本的样本 ----------
+     这道题本身是「已入库的个人题」（可直接组卷），另挂一条待审批的校本申请
+     （见 approvals 里 kind='题目' 的那条），用来演示审批通过后所属对象的变化。 */
+  seedQuestion({
+    id: 9393,
+    stem: '已知 sinα+cosα=1/2，求 sinα·cosα 的值。',
+    type: '解答',
+    answer: '-3/8',
+    analysis: '两边平方得 1+2sinαcosα=1/4，故 sinαcosα=(1/4-1)/2=-3/8。',
+    knowledge: ['三角函数'],
+    library: 'personal',
+    categoryId: 2,
+    scope: 'personal',
+    owner: '陈明远',
+    ownerId: 101,
+    source: '手动录入',
+    examType: '课后作业',
+    aiChecks: aiChecksFor(''),
+    aiSuspects: [],
+  }),
   ...EXAM_QUESTIONS,
 ]
 
@@ -3621,6 +3713,8 @@ export function saveQuestion(input: Partial<OrgQuestion> & { stem: string; submi
   /* seedQuestion 是纯工厂，不会入池；新建题目须显式入池，否则保存后被静默丢弃 */
   if (!isEdit) questions.unshift(target)
   const type = input.type ?? target.type
+  /* 这次保存后题目落在哪个库：新建个人题一律 personal（三个录入入口都是先入个人题库） */
+  const nextLibrary = input.library ?? target.library
   Object.assign(target, {
     stem,
     subject: input.subject ?? target.subject,
@@ -3643,7 +3737,9 @@ export function saveQuestion(input: Partial<OrgQuestion> & { stem: string; submi
     analysis: isComposite ? '' : (analysis ?? ''),
     /* 非填空题不留上一位编辑的填写结构（换题型后残留会让「重新打开」看到旧空答案） */
     fillAnswers: !isComposite && type === '填空' ? fillAnswers : [],
-    library: input.library ?? target.library,
+    library: nextLibrary,
+    /* 所属对象：落在个人库就是个人题；编辑既有校本题保留原归属（校本题改一次内容不该退回个人库） */
+    scope: input.scope ?? (nextLibrary === 'personal' ? 'personal' : (target.scope ?? 'school')),
     categoryId: input.categoryId ?? target.categoryId,
     owner: isEdit ? target.owner : CURRENT.name,
     ownerId: isEdit ? target.ownerId : CURRENT.id,
@@ -3651,21 +3747,17 @@ export function saveQuestion(input: Partial<OrgQuestion> & { stem: string; submi
     source: input.source ?? (isEdit ? target.source : '手动录入'),
     updatedAt: nowStr(),
   })
+  /**
+   * 提交 / 完成录入：**个人题库不再走审核**（产品口径：手动录入 / AI 出题 / 图片识题
+   * 都可以直接进个人题库使用），所以这里直接把题置为可用的「已入库」。
+   *
+   * 要进校本库是另一条路 —— 在题库管理里对个人题点「提交校本」，生成一条校本审批单
+   * （见 `submitQuestionToSchool`），审批通过后 `scope` 才翻成 `school`。
+   * 因此这里不再推「AI 校验 / 终审」消息，也不再有 checking → pending 的过渡态。
+   */
   if (input.submit) {
-    target.status = 'checking'
-    pushMessage({
-      tab: 'review',
-      title: `题目《${truncateRich(target.stem, 18)}…》已提交 AI 校验`,
-      summary: '多智能体并行检测完成后将推送终审待办',
-      module: '题目管理',
-      link: '/question/review',
-    })
-    // 演示：AI 校验即时完成 → 待终审
-    window_setTimeout(() => {
-      target.status = 'pending'
-      target.aiChecks = aiChecksFor(target)
-      target.aiSuspects = []
-    }, 0)
+    target.status = 'approved'
+    target.updatedAt = nowStr()
   } else if (!isEdit) {
     target.status = 'draft'
   }
@@ -3813,7 +3905,11 @@ export function reviewQuestion(id: number, pass: boolean, opinion: string): OrgQ
   item.reviewer = getCacheUser()?.name ?? '当前审核员'
   item.reviewedAt = nowStr()
   item.updatedAt = nowStr()
-  if (pass && item.library === 'personal') item.library = 'org'
+  /* 审核通过的历史题：升到机构库，同时把所属对象翻成校本（个人题走审批后就是校本题） */
+  if (pass && item.library === 'personal') {
+    item.library = 'org'
+    item.scope = 'school'
+  }
   pushMessage({
     tab: 'todo',
     title: `题目审核${pass ? '通过' : '驳回'}：《${truncateRich(item.stem, 16)}…》`,
@@ -3892,18 +3988,14 @@ export function adoptGenerated(item: GeneratedQuestion, subject: string, grade: 
     analysis: sanitizeRichHtml(item.analysis),
     options: (item.options ?? []).map((opt) => sanitizeRichHtml(opt)),
     source: 'AI 出题',
-    status: 'checking',
+    /* AI 出题与手动录入同一口径：**直接入个人题库、无需审核**（要进校本库另走「提交校本」审批） */
+    status: 'approved',
     library: 'personal',
     categoryId: 2,
     owner: CURRENT.name,
     ownerId: CURRENT.id,
   })
   questions.unshift(q)
-  window_setTimeout(() => {
-    q.status = 'pending'
-    q.aiChecks = aiChecksFor(q)
-    q.aiSuspects = []
-  }, 0)
   return q
 }
 
@@ -4037,18 +4129,15 @@ export function decidePhotoResult(
       subject: result.subject ?? '数学',
       grade: result.grade ?? '高一',
       source: '拍照识别',
-      status: 'checking',
+      /* 图片识题与手动录入同一口径：**直接入个人题库、无需审核**（scope 由 library 推导为 personal）。
+         要进校本库由老师在题库管理里「提交校本」，走校本审批流。 */
+      status: 'approved',
       library: 'personal',
       categoryId: 2,
       owner: CURRENT.name,
       ownerId: CURRENT.id,
     })
     questions.unshift(q)
-    window_setTimeout(() => {
-      q.status = 'pending'
-      q.aiChecks = aiChecksFor(q)
-      q.aiSuspects = []
-    }, 0)
   }
   return task
 }
@@ -4057,7 +4146,8 @@ export function decidePhotoResult(
 
 /* 330 而不是 300：种子试卷已手工占用 301~322（含 exam-seeds 的 313~315），
    从 300 起步的话新建的第一张卷就与种子卷撞 id，保存时改到的是别人的卷子。 */
-let paperSeq = 330
+/* 340 起步：331~334 已被平台卷 / 个人卷种子占用，从 330 起步的话新建的第一张卷会撞 id */
+let paperSeq = 340
 let sectionSeq = 900
 
 export const PAPER_STATUS_TEXT: Record<string, string> = {
@@ -4262,6 +4352,158 @@ function orderIndexOf(type: string): number {
 }
 
 export const papers: OrgPaper[] = [
+  /* 平台下发的公共试卷（所属对象 = 平台）：机构侧只读，可预览 / 导出 / 平行组卷。
+     没有这两份的话，试卷库「所属对象」里的「平台」一档点下去永远是空列表。 */
+  seedPaper({
+    id: 331,
+    name: '2026 届全国高考数学模拟卷（平台下发）',
+    scope: 'platform',
+    owner: '平台资源中心',
+    grade: '高三',
+    sharedSquare: true,
+    updatedAt: nowStr(-18),
+  }),
+  seedPaper({
+    id: 332,
+    name: '高一数学 · 函数与导数单元卷（平台下发）',
+    scope: 'platform',
+    owner: '平台资源中心',
+    grade: '高一',
+    updatedAt: nowStr(-31),
+  }),
+  /* 个人卷：只有创建人自己能在试卷库看到，可作为「提交校本」的演示样本 */
+  seedPaper({
+    id: 333,
+    name: '高一数学 · 三角函数随堂测（个人）',
+    scope: 'personal',
+    owner: '陈明远',
+    ownerId: 101,
+    source: 'AI 组卷',
+    examType: '随堂练习',
+    updatedAt: nowStr(-3),
+  }),
+  seedPaper({
+    id: 334,
+    name: '高一数学 · 数列基础练习（李文博个人卷）',
+    scope: 'personal',
+    owner: '李文博',
+    ownerId: 102,
+    examType: '课后作业',
+    updatedAt: nowStr(-7),
+  }),
+  /* ===== 试卷审核中心的演示队列（335-342） =====
+     审核中心的队列有**两条来源**、结论有**两种**。种子里原本只有 334 一条待审提审单，
+     左栏只有一行、底部「已审核试卷」永远是 0，这一页在演示里看不出在做什么。这里按
+     「来源 × 结论」四格铺满，每一格都有样本：
+
+     - 335 / 336：个人卷提交校本 → 待审（走审批单，标签「校本提审」）
+     - 337 / 338：协同组卷送审 → 待审（走卷状态 pending，标签「协同送审」）
+     - 339 / 340：提审已处理 → 已入校本 / 已驳回（走审批单）
+     - 341 / 342：协同卷已审 → 已通过 / 已驳回（走卷上的 reviewer）
+
+     提交时间按 -1 到 -58 小时错开，左栏「按提交时间倒序」才看得出排序是真的。 */
+  seedPaper({
+    id: 335,
+    name: '高二数学 · 空间向量与立体几何单元卷',
+    scope: 'personal',
+    owner: '沈丽华',
+    grade: '高二',
+    examType: '单元测试',
+    difficulty: '中等',
+    source: '手动组卷',
+    updatedAt: nowStr(-2),
+  }),
+  seedPaper({
+    id: 336,
+    name: '八年级物理 · 压强与浮力专题卷',
+    scope: 'personal',
+    owner: '孙悦',
+    subject: '物理',
+    grade: '八年级',
+    examType: '单元测试',
+    difficulty: '较易',
+    source: '手动组卷',
+    updatedAt: nowStr(-3),
+  }),
+  seedPaper({
+    id: 337,
+    name: '高一数学 · 集合与常用逻辑用语单元卷（协同）',
+    status: 'pending',
+    owner: '王静',
+    examType: '单元测试',
+    source: '协同组卷',
+    collaborators: [
+      { name: '王静', perms: ['选题', '改分值'], online: false },
+      { name: '孙悦', perms: ['选题'], online: true },
+    ],
+    aiChecks: paperChecks(['第 4 题与第 9 题为同源变式，需确认是否保留']),
+    updatedAt: nowStr(-5),
+  }),
+  seedPaper({
+    id: 338,
+    name: '高二数学 · 导数及其应用阶段测（协同）',
+    status: 'pending',
+    owner: '赵鹏',
+    grade: '高二',
+    examType: '月考',
+    difficulty: '较难',
+    source: '协同组卷',
+    updatedAt: nowStr(-11),
+  }),
+  seedPaper({
+    id: 339,
+    name: '高一数学 · 指数函数与对数函数单元卷',
+    scope: 'school',
+    status: 'approved',
+    owner: '沈丽华',
+    examType: '单元测试',
+    difficulty: '中等',
+    source: '手动组卷',
+    reviewer: '陈明远',
+    reviewedAt: nowStr(-20),
+    reviewOpinion: '题目梯度合理，卷面规范，同意入校本资源库',
+    updatedAt: nowStr(-20),
+  }),
+  seedPaper({
+    id: 340,
+    name: '高一数学 · 三角函数综合训练卷',
+    scope: 'personal',
+    status: 'approved',
+    owner: '孙悦',
+    examType: '课后作业',
+    difficulty: '较难',
+    source: '手动组卷',
+    updatedAt: nowStr(-33),
+  }),
+  seedPaper({
+    id: 341,
+    name: '高一数学 · 函数的概念与性质限时训练（协同）',
+    scope: 'school',
+    status: 'approved',
+    owner: '王静',
+    examType: '限时训练',
+    difficulty: '容易',
+    source: '协同组卷',
+    reviewer: '沈丽华',
+    reviewedAt: nowStr(-46),
+    reviewOpinion: '协同分工完成度高，题量与时长匹配，通过',
+    updatedAt: nowStr(-46),
+  }),
+  seedPaper({
+    id: 342,
+    name: '高三数学 · 概率与统计专项卷（协同）',
+    scope: 'personal',
+    status: 'rejected',
+    owner: '赵鹏',
+    grade: '高三',
+    examType: '专题训练',
+    difficulty: '困难',
+    source: '协同组卷',
+    reviewer: '陈明远',
+    reviewedAt: nowStr(-58),
+    reviewOpinion: '第三大题超出本届考纲范围，请替换后重新送审',
+    updatedAt: nowStr(-58),
+  }),
   seedPaper({
     id: 301,
     name: '2026 级高一数学期中测试卷',
@@ -4518,6 +4760,11 @@ export function savePaper(input: Partial<OrgPaper> & { name: string; submit?: bo
     target.folderId = input.folderId
     target.source = input.source ?? target.source
     target.status = 'draft'
+    /* 归属由入口决定：编辑页新建、题库组卷、智能组卷、试卷导入产出的都是**个人卷**，
+       只有协同组卷（走 collabSubmitReview）与提交校本通过后才进校本。
+       ownerId 是个人卷可见性的判定依据 —— 不能只比名字，同名教师会互相看到。 */
+    target.scope = input.scope ?? 'personal'
+    target.ownerId = CURRENT.id
     /* 年份 / 月份是一个筛选维度：按编码池给的默认值会让新卷落到「2024 年 6 月」这种与它无关的档上，
        按保存时间填才说得通。不填的话，用户在年份里选中任一项都看不到刚建的卷。 */
     const created = new Date()
@@ -4543,16 +4790,22 @@ export function savePaper(input: Partial<OrgPaper> & { name: string; submit?: bo
     if (input.totalScore != null && input.totalScore !== total) {
       throw new Error(`总分与各题分值之和不符（应为 ${total} 分）`)
     }
-    target.status = 'pending'
     target.aiChecks = paperChecks()
     target.aiSuspects = []
-    pushMessage({
-      tab: 'review',
-      title: `试卷《${target.name}》已进入人工审核`,
-      summary: 'AI 九项检测完成：1 处自动修复，无阻断性疑点',
-      module: '试卷管理',
-      link: '/paper/review',
-    })
+    if (paperScopeOf(target) === 'personal') {
+      /* 个人卷**免审**：组完就能直接用（与个人题同一口径）。要共享给全机构，
+         由老师在试卷库点「提交校本」，走 `submitPaperToSchool` 的审批流。 */
+      target.status = 'approved'
+    } else {
+      target.status = 'pending'
+      pushMessage({
+        tab: 'review',
+        title: `试卷《${target.name}》已进入人工审核`,
+        summary: 'AI 九项检测完成：1 处自动修复，无阻断性疑点',
+        module: '试卷管理',
+        link: '/paper/review',
+      })
+    }
   }
   return target
 }
@@ -4587,7 +4840,12 @@ export function reviewPaper(id: number, pass: boolean, opinion: string): OrgPape
   if (!pass && opinion.trim().length < 5) throw new Error('驳回意见必填（5-500 字）')
   item.status = pass ? 'approved' : 'rejected'
   item.reviewOpinion = opinion
-  item.updatedAt = nowStr()
+  item.reviewer = CURRENT.name
+  item.reviewedAt = nowStr()
+  item.updatedAt = item.reviewedAt
+  /* 审核通过 = 入校本资源库（「协同组卷默认要审核，通过后进校本资源库」就靠这一句）。
+     个人卷走的是另一条路（submitPaperToSchool → reviewApproval），那条也在通过时翻 scope。 */
+  if (pass) item.scope = 'school'
   /* 协同产出的试卷审核完要把结果写回任务，否则同一张卷会在「试卷审核中心」显示已通过、
      在「协同组卷」里永远停在「已送审」。必须判 `task` 存在 —— 这是通用审核入口，
      普通试卷（不属任何协同任务）也走这里。 */
@@ -4717,7 +4975,12 @@ export function aiComposePaper(input: AiComposeParams): { paper: OrgPaper; aiPic
     name: input.name,
     subject: input.subject,
     grade: input.grade,
-    status: 'draft',
+    /* 智能组卷产出的是**个人卷**，组完即可用（免审）：要共享由老师在试卷库提交校本。
+       仍是 approved 而不是 draft —— 组卷结果不该以「草稿」身份藏进我的文件，
+       试卷库「所属对象 = 个人」要能直接看到它。 */
+    status: 'approved',
+    scope: 'personal',
+    ownerId: CURRENT.id,
     sections,
     owner: CURRENT.name,
     source: 'AI 组卷',
@@ -4886,7 +5149,11 @@ export function generateParallels(motherId: number, folderId?: number): OrgPaper
   const paper = seedPaper({
     id: ++paperSeq,
     name: `${mother.name} · B 卷`,
-    status: 'draft',
+    /* 平行卷与智能组卷同口径：产出即**个人卷**且免审（`approved` 才进得了试卷库，
+       草稿只活在「我的文件」里）。要共享给全机构，再由老师点「提交校本」。 */
+    status: 'approved',
+    scope: 'personal',
+    ownerId: CURRENT.id,
     sections: JSON.parse(JSON.stringify(mother.sections)),
     /* 平行卷与母卷共用参考资料：同样的配套素材，深拷贝一份避免两边互相改到 */
     attachments: mother.attachments ? JSON.parse(JSON.stringify(mother.attachments)) : undefined,
@@ -8558,8 +8825,11 @@ export function importRecognizedPaper(payload: ImportRecognizedPaperPayload): {
     subject: payload.subject,
     grade: payload.grade,
     duration: Number(payload.duration) > 0 ? Number(payload.duration) : 120,
-    /* 教师已在预览里逐题确认过整卷，直接进试卷库；来源记「真题导入」（与「文档识别」区分来路） */
+    /* 教师已在预览里逐题确认过整卷，直接进**个人试卷**；来源记「真题导入」（与「文档识别」区分来路）。
+       要进校本库由老师在试卷库提交校本，走审批流。 */
     status: 'approved',
+    scope: 'personal',
+    ownerId: CURRENT.id,
     sections,
     owner: CURRENT.name,
     source: '真题导入',
@@ -10386,10 +10656,21 @@ export function deletePrepTask(id: number): void {
 
 let approvalSeq = 760
 
+/**
+ * 提审单种子里回填 `resourceId`：详情弹窗要按资源类型取正文（题目正文 / 试卷信息 / 文档信息），
+ * 没有它就只剩审批单自身那几行元信息，看不出「审的是什么」。
+ *
+ * 用**按名字反查**而不是写死 id：文档 id 由 `++teachSeq` 递增生成，写死会在增删种子时错位。
+ * 反查放在 approvals 定义处（数组都已初始化完毕），取不到就是 undefined，详情按兜底展示。
+ */
+const docRefId = (name: string) => teachDocs.find((row) => row.name === name)?.id
+const paperRefId = (name: string) => papers.find((row) => row.name === name)?.id
+
 export const approvals: ResourceApproval[] = [
   {
     id: ++approvalSeq,
     kind: '教案',
+    resourceId: docRefId('函数的单调性 · 教学设计（1 课时）'),
     name: '函数的单调性 · 教学设计（1 课时）',
     subject: '数学',
     grade: '高一',
@@ -10400,6 +10681,7 @@ export const approvals: ResourceApproval[] = [
     reviewer: '沈丽华',
     reviewedAt: nowStr(-25),
     opinion: '环节完整，建议补充分层作业',
+    note: '申请进入校本资源库',
     logs: [
       { at: nowStr(-26), by: '陈明远', action: '提交审批', note: '申请进入校本资源库' },
       { at: nowStr(-25), by: '沈丽华', action: '审批通过', note: '环节完整，建议补充分层作业' },
@@ -10407,7 +10689,22 @@ export const approvals: ResourceApproval[] = [
   },
   {
     id: ++approvalSeq,
+    kind: '题目',
+    resourceId: 9393,
+    name: '已知 sinα+cosα=1/2，求 sinα·cosα 的值（个人题提审校本）',
+    subject: '数学',
+    grade: '高一',
+    scope: 'school',
+    applicant: '陈明远',
+    submittedAt: nowStr(-6),
+    status: 'pending',
+    note: '教研组打磨过的三角求值题，申请进校本库',
+    logs: [{ at: nowStr(-6), by: '陈明远', action: '提交审批', note: '教研组打磨过的三角求值题，申请进校本库' }],
+  },
+  {
+    id: ++approvalSeq,
     kind: '课件',
+    resourceId: docRefId('函数的奇偶性 · 授课课件'),
     name: '函数的奇偶性 · 授课课件',
     subject: '数学',
     grade: '高一',
@@ -10415,11 +10712,13 @@ export const approvals: ResourceApproval[] = [
     applicant: '陈明远',
     submittedAt: nowStr(-14),
     status: 'pending',
+    note: '申请公开到知识广场',
     logs: [{ at: nowStr(-14), by: '陈明远', action: '提交审批', note: '申请公开到知识广场' }],
   },
   {
     id: ++approvalSeq,
     kind: '试卷',
+    resourceId: paperRefId('2026 级高一数学期中测试卷'),
     name: '2026 级高一数学期中测试卷',
     subject: '数学',
     grade: '高一',
@@ -10427,11 +10726,27 @@ export const approvals: ResourceApproval[] = [
     applicant: '李文博',
     submittedAt: nowStr(-9),
     status: 'pending',
+    note: '组内已校对，申请校本入库',
     logs: [{ at: nowStr(-9), by: '李文博', action: '提交审批', note: '组内已校对，申请校本入库' }],
   },
   {
     id: ++approvalSeq,
+    kind: '试卷',
+    resourceId: 334,
+    name: '高一数学 · 数列基础练习（李文博个人卷）',
+    subject: '数学',
+    grade: '高一',
+    scope: 'school',
+    applicant: '李文博',
+    submittedAt: nowStr(-4),
+    status: 'pending',
+    note: '数列基础题组，申请进校本资源库共享',
+    logs: [{ at: nowStr(-4), by: '李文博', action: '提交审批', note: '数列基础题组，申请进校本资源库共享' }],
+  },
+  {
+    id: ++approvalSeq,
     kind: '讲义',
+    resourceId: docRefId('三角函数图像变换 · 基础讲义'),
     name: '三角函数图像变换 · 基础讲义',
     subject: '数学',
     grade: '高一',
@@ -10442,9 +10757,81 @@ export const approvals: ResourceApproval[] = [
     reviewer: '沈丽华',
     reviewedAt: nowStr(-39),
     opinion: '例题解析过简，请补充分步解析后再提交',
+    note: '申请校本入库',
     logs: [
       { at: nowStr(-40), by: '孙悦', action: '提交审批' },
       { at: nowStr(-39), by: '沈丽华', action: '审批驳回', note: '例题解析过简，请补充分步解析后再提交' },
+    ],
+  },
+  /* ===== 试卷提审单（与 papers 335 / 336 / 339 / 340 配对） =====
+     两张 pending 是「试卷审核中心」与「审批管理」共同的待办；两张已处理让
+     审核中心底部的「已审核试卷」有「已入校本」和「已驳回」两种结论可看。 */
+  {
+    id: ++approvalSeq,
+    kind: '试卷',
+    resourceId: 335,
+    name: '高二数学 · 空间向量与立体几何单元卷',
+    subject: '数学',
+    grade: '高二',
+    scope: 'school',
+    applicant: '沈丽华',
+    submittedAt: nowStr(-2),
+    status: 'pending',
+    note: '单元卷已通过备课组互审，申请进校本资源库',
+    logs: [{ at: nowStr(-2), by: '沈丽华', action: '提交审批', note: '单元卷已通过备课组互审，申请进校本资源库' }],
+  },
+  {
+    id: ++approvalSeq,
+    kind: '试卷',
+    resourceId: 336,
+    name: '八年级物理 · 压强与浮力专题卷',
+    subject: '物理',
+    grade: '八年级',
+    scope: 'school',
+    applicant: '孙悦',
+    submittedAt: nowStr(-3),
+    status: 'pending',
+    note: '实验班专题练习，申请共享到校本库',
+    logs: [{ at: nowStr(-3), by: '孙悦', action: '提交审批', note: '实验班专题练习，申请共享到校本库' }],
+  },
+  {
+    id: ++approvalSeq,
+    kind: '试卷',
+    resourceId: 339,
+    name: '高一数学 · 指数函数与对数函数单元卷',
+    subject: '数学',
+    grade: '高一',
+    scope: 'school',
+    applicant: '沈丽华',
+    submittedAt: nowStr(-21),
+    status: 'approved',
+    reviewer: '陈明远',
+    reviewedAt: nowStr(-20),
+    opinion: '题目梯度合理，卷面规范，同意入校本资源库',
+    note: '申请校本入库',
+    logs: [
+      { at: nowStr(-21), by: '沈丽华', action: '提交审批', note: '申请校本入库' },
+      { at: nowStr(-20), by: '陈明远', action: '审批通过', note: '题目梯度合理，卷面规范，同意入校本资源库' },
+    ],
+  },
+  {
+    id: ++approvalSeq,
+    kind: '试卷',
+    resourceId: 340,
+    name: '高一数学 · 三角函数综合训练卷',
+    subject: '数学',
+    grade: '高一',
+    scope: 'school',
+    applicant: '孙悦',
+    submittedAt: nowStr(-34),
+    status: 'rejected',
+    reviewer: '陈明远',
+    reviewedAt: nowStr(-33),
+    opinion: '第 7 题与第 15 题重复，且缺少卷首注意事项，请修订后重新提交',
+    note: '申请校本入库',
+    logs: [
+      { at: nowStr(-34), by: '孙悦', action: '提交审批', note: '申请校本入库' },
+      { at: nowStr(-33), by: '陈明远', action: '审批驳回', note: '第 7 题与第 15 题重复，且缺少卷首注意事项，请修订后重新提交' },
     ],
   },
 ]
@@ -10464,6 +10851,8 @@ export function approvalSummary(): { pending: number; approved: number; rejected
 
 export function submitApproval(input: {
   kind: ApprovalKind
+  /** 被提审资源的 id（题目 / 试卷 / 文档编号），详情弹窗按它取正文 */
+  resourceId?: number
   name: string
   subject: string
   grade: string
@@ -10474,6 +10863,7 @@ export function submitApproval(input: {
   const item: ResourceApproval = {
     id: ++approvalSeq,
     kind: input.kind,
+    resourceId: input.resourceId,
     name: input.name.trim(),
     subject: input.subject,
     grade: input.grade,
@@ -10481,10 +10871,79 @@ export function submitApproval(input: {
     applicant: CURRENT.name,
     submittedAt: nowStr(),
     status: 'pending',
+    note: input.note,
     logs: [{ at: nowStr(), by: CURRENT.name, action: '提交审批', note: input.note }],
   }
   approvals.unshift(item)
   return item
+}
+
+/**
+ * 个人题提交校本：生成一条 `kind = '题目'` 的审批单。
+ *
+ * 题本身**不动状态**（仍是已入库的个人题、仍可组卷），只是多了一条待审单 ——
+ * 与「送审就把题从个人题库扣走」相比，这样老师在审批期间照样能用这道题。
+ * 审批通过后由 `reviewApproval` 把 `scope` 翻成 `school`、`library` 翻成机构库。
+ */
+export function submitQuestionToSchool(id: number, note?: string): ResourceApproval {
+  const question = questions.find((row) => row.id === id)
+  if (!question) throw new Error('题目不存在')
+  if (questionScopeOf(question) !== 'personal') throw new Error('只有个人题需要提交校本')
+  const duplicated = approvals.some(
+    (row) => row.status === 'pending' && row.kind === '题目' && row.resourceId === id,
+  )
+  if (duplicated) throw new Error('该题已有待审批的校本申请，请等待审核结果')
+  const approval = submitApproval({
+    kind: '题目',
+    resourceId: question.id,
+    name: truncateRich(question.stem, 40),
+    subject: question.subject,
+    grade: question.grade,
+    scope: 'school',
+    note: note?.trim() || '申请进入校本题库',
+  })
+  pushMessage({
+    tab: 'review',
+    title: `题目《${truncateRich(question.stem, 16)}…》已提交校本审核`,
+    summary: '审核通过后进入校本题库',
+    module: '校本资源',
+    link: '/resource/approval',
+  })
+  return approval
+}
+
+/**
+ * 个人试卷提交校本：生成一条 `kind = '试卷'` 的审批单。
+ *
+ * 与个人题同一套口径：卷本身**不动状态**（仍是可用的个人卷），只是多一条待审单；
+ * 审批单同时出现在「试卷审核中心」与「校本资源 → 审批管理」两处（同一张单，任一处审都算数）。
+ * 通过后由 `reviewApproval` 把 `scope` 翻成 `school`。
+ */
+export function submitPaperToSchool(id: number, note?: string): ResourceApproval {
+  const paper = papers.find((row) => row.id === id)
+  if (!paper) throw new Error('试卷不存在')
+  if (paperScopeOf(paper) !== 'personal') throw new Error('只有个人试卷需要提交校本')
+  const duplicated = approvals.some(
+    (row) => row.status === 'pending' && row.kind === '试卷' && row.resourceId === id,
+  )
+  if (duplicated) throw new Error('该试卷已有待审批的校本申请，请等待审核结果')
+  const approval = submitApproval({
+    kind: '试卷',
+    resourceId: paper.id,
+    name: paper.name,
+    subject: paper.subject,
+    grade: paper.grade,
+    scope: 'school',
+    note: note?.trim() || '申请进入校本资源库',
+  })
+  pushMessage({
+    tab: 'review',
+    title: `试卷《${paper.name}》已提交校本审核`,
+    summary: '审核通过后进入校本资源库',
+    module: '校本资源',
+    link: '/paper/review',
+  })
+  return approval
 }
 
 export function reviewApproval(id: number, pass: boolean, opinion: string): ResourceApproval {
@@ -10497,6 +10956,37 @@ export function reviewApproval(id: number, pass: boolean, opinion: string): Reso
   item.reviewedAt = nowStr()
   item.opinion = opinion.trim()
   item.logs.push({ at: nowStr(), by: CURRENT.name, action: pass ? '审批通过' : '审批驳回', note: opinion.trim() })
+
+  /* 审批结果要落到资源上：
+     - 题目：通过 → 所属对象翻成校本、进机构库；驳回 → 仍是个人题，只多一条意见；
+     - 试卷：通过 → 所属对象翻成校本（进校本资源库）；驳回 → 仍是个人卷，只写意见。 */
+  if (item.kind === '题目' && item.resourceId != null) {
+    const question = questions.find((row) => row.id === item.resourceId)
+    if (question) {
+      if (pass) {
+        question.scope = 'school'
+        question.library = 'org'
+        /* 原来落在个人分类里的，顺手挪到机构库的「高一同步」（与旧终审升库口径一致） */
+        if (!categories.some((row) => row.id === question.categoryId && row.library === 'org')) question.categoryId = 11
+        question.reviewer = item.reviewer
+        question.reviewedAt = item.reviewedAt
+        question.reviewOpinion = item.opinion
+      } else {
+        question.reviewOpinion = item.opinion
+      }
+      question.updatedAt = nowStr()
+    }
+  }
+  if (item.kind === '试卷' && item.resourceId != null) {
+    const paper = papers.find((row) => row.id === item.resourceId)
+    if (paper) {
+      if (pass) paper.scope = 'school'
+      paper.reviewer = item.reviewer
+      paper.reviewedAt = item.reviewedAt
+      paper.reviewOpinion = item.opinion
+      paper.updatedAt = nowStr()
+    }
+  }
   return item
 }
 
@@ -10812,8 +11302,13 @@ export function deleteHomework(id: number): void {
  * v3：新增 `teachTemplates`（教案 / 学案 / 讲义模板）集合与 `teachTemplateSeq` 序列；
  * `teachDocs` 的元素新增 `content` 字段（Word 式文档流 HTML，与旧的 `blocks` / `plan` 并存）。
  * 集合与字段都是新增，不 +1 的话本机快照里 `teachTemplates` 缺失会让模板页空白。
+ *
+ * v4：试卷所属对象（`scope` / `ownerId` / `reviewer` / `reviewedAt`）落地，`papers` 补了
+ * 331—342 这批样本（平台卷、个人卷，以及试卷审核中心「待审 / 已审 × 两种来源」的演示队列），
+ * `approvals` 相应补了 335 / 336 / 339 / 340 四张试卷提审单。同样是纯增种子 ——
+ * 不 +1 的话旧快照会盖住，审核中心仍然是空列表。
  */
-export const ORG_STATE_VERSION = 3
+export const ORG_STATE_VERSION = 4
 
 /**
  * 会被写操作改动的集合 —— 只有它们会在两个标签页之间分叉，纯只读的种子数据不必搬运

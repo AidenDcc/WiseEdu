@@ -1,11 +1,30 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AppIcon, AppPageHeader, showToast, ApiError, AppModal, appConfirm, AppSwitch } from '@aiteach/shared'
+import { AppIcon, AppPageHeader, AppHelpTip, showToast, ApiError, AppModal, appConfirm, AppSwitch } from '@aiteach/shared'
 import type { AgentConfig, AiModel } from '@aiteach/shared'
 
 import { fetchAgentConfig, fetchAiModels, rollbackAgentConfig, saveAgentConfig } from '@/api/platform'
 
 const AUTO_FIX_TYPES = ['格式错误', '语法错误', '数值笔误']
+
+/**
+ * 权重列说明：这一列是整张表里最容易被误读的字段（当成置信度 / 百分比），
+ * 而它实际只决定「多项结论汇总时谁说话更算数」，故把口径写进列头提示。
+ */
+const WEIGHT_TIP = [
+  '权重是这一项在综合判定里的话语权（0-100），不是置信度、也不是命中概率。',
+  '多项检测同时给出结论时，平台按权重加权汇总：权重越高，该项判为不通过时对综合得分的影响越大；权重 0 = 只留痕、不参与判定。',
+  '权重不改变单项检测本身的通过与否，只影响综合得分与人工终审的触发优先级。',
+  '建议：合规 / 安全类（敏感词、隐私）80-100；准确性类（答案、知识点）50-70；格式类 20-40。',
+].join('\n')
+
+/** 自动纠错规则说明：配置口径 + 对业务的实际影响（阈值调高调低各自换来什么） */
+const AUTO_FIX_TIP = [
+  '配置说明：勾选可自动修复的错误类型，并设定置信度阈值。AI 判定置信度 ≥ 阈值时直接改稿并保留 diff；低于阈值一律不自动执行，转人工处理。',
+  '业务影响：阈值调低 → 自动改得多、出稿快，但误改风险上升（老师需回看 diff）；调高 → 更保守，人工工单随之变多。',
+  '数值笔误属高风险类型（一个小数点就是另一道题），建议阈值 ≥ 85，并让学生端可见内容强制走复核。',
+  '规则只作用于 AI 生成 / 批改的产物，不会修改教师手工编辑过的内容。',
+].join('\n')
 
 const config = ref<AgentConfig | null>(null)
 const models = ref<AiModel[]>([])
@@ -91,7 +110,9 @@ onMounted(load)
               <th>检测项</th>
               <th>启用</th>
               <th style="width: 220px">绑定模型</th>
-              <th>权重（0-100）</th>
+              <th>
+                <span class="th-tip">权重（0-100）<AppHelpTip title="检测项权重怎么用" :text="WEIGHT_TIP" /></span>
+              </th>
               <th>超时（秒）</th>
             </tr>
           </thead>
@@ -133,47 +154,67 @@ onMounted(load)
     <!-- 自动纠错 + 人工终审（FR-PT-021 / 022） -->
     <div class="dual">
       <div class="panel rule-panel">
-        <h4 class="section-title">自动纠错规则</h4>
-        <label class="f-label" style="margin-bottom: 10px">可自动修复的错误类型</label>
-        <div class="fix-types">
-          <label v-for="type in AUTO_FIX_TYPES" :key="type" class="fix-chip">
+        <h4 class="section-title">
+          自动纠错规则
+          <AppHelpTip title="自动纠错规则与业务影响" :text="AUTO_FIX_TIP" />
+        </h4>
+        <div class="rule-body">
+          <div class="rule-block">
+            <label class="f-label">可自动修复的错误类型</label>
+            <div class="fix-types">
+              <label
+                v-for="type in AUTO_FIX_TYPES"
+                :key="type"
+                class="fix-chip"
+                :class="{ on: config.autoFix.types.includes(type) }"
+              >
+                <input
+                  type="checkbox"
+                  :checked="config.autoFix.types.includes(type)"
+                  @change="toggleAutoFixType(type)"
+                />
+                {{ type }}
+              </label>
+            </div>
+            <p class="f-hint">仅所选类型会被自动改写，其余类型原样保留并进入人工队列。</p>
+          </div>
+
+          <div class="rule-block">
+            <div class="threshold-head">
+              <label class="f-label">自动修复置信度阈值</label>
+              <b class="threshold">{{ config.autoFix.threshold }}%</b>
+            </div>
             <input
-              type="checkbox"
-              :checked="config.autoFix.types.includes(type)"
-              @change="toggleAutoFixType(type)"
+              v-model.number="config.autoFix.threshold"
+              class="range-slider"
+              type="range"
+              min="0"
+              max="100"
+              step="5"
             />
-            {{ type }}
-          </label>
+            <div class="range-scale"><span>0%（激进）</span><span>100%（保守）</span></div>
+            <p class="f-hint">低于阈值的修复不自动执行，转人工处理。</p>
+          </div>
         </div>
-        <label class="f-label" style="margin: 16px 0 8px">
-          自动修复置信度阈值：<b class="threshold">{{ config.autoFix.threshold }}%</b>
-        </label>
-        <input
-          v-model.number="config.autoFix.threshold"
-          class="range-slider"
-          type="range"
-          min="0"
-          max="100"
-          step="5"
-        />
-        <p class="f-hint">低于阈值的修复不自动执行，转人工处理。</p>
       </div>
 
       <div class="panel rule-panel">
         <h4 class="section-title">人工终审触发条件</h4>
-        <div class="review-rule locked">
-          <AppIcon name="check" :size="14" />
-          任一检测项不通过即触发（锁定，不可修改）
-        </div>
-        <div class="review-rule">
-          <span>追加：置信度 <</span>
-          <input v-model.number="config.manualReview.minConfidence" class="f-input cond-input" type="number" min="0" max="100" placeholder="关闭" />
-          <span>% 时触发</span>
-        </div>
-        <div class="review-rule">
-          <span>追加：查重相似度 ></span>
-          <input v-model.number="config.manualReview.maxSimilarity" class="f-input cond-input" type="number" min="0" max="100" placeholder="关闭" />
-          <span>% 时触发（0-100 整数）</span>
+        <div class="rule-body">
+          <div class="review-rule locked">
+            <AppIcon name="check" :size="14" />
+            任一检测项不通过即触发（锁定，不可修改）
+          </div>
+          <div class="review-rule">
+            <span>追加：置信度 <</span>
+            <input v-model.number="config.manualReview.minConfidence" class="f-input cond-input" type="number" min="0" max="100" placeholder="关闭" />
+            <span>% 时触发</span>
+          </div>
+          <div class="review-rule">
+            <span>追加：查重相似度 ></span>
+            <input v-model.number="config.manualReview.maxSimilarity" class="f-input cond-input" type="number" min="0" max="100" placeholder="关闭" />
+            <span>% 时触发（0-100 整数）</span>
+          </div>
         </div>
         <p class="f-hint">留空表示关闭该追加条件。</p>
       </div>
@@ -223,22 +264,40 @@ onMounted(load)
 .err-text { font-size: 12px; color: var(--danger); margin-top: 4px; }
 .table-input { height: 34px; width: 110px; }
 
-.dual { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
-.rule-panel { padding: 18px 20px; }
+/* 列头里的「文字 + 提示」：inline-flex 让问号跟着文字走，不会被 th 的居中排版甩开 */
+.th-tip { display: inline-flex; align-items: center; gap: 4px; }
 
-.fix-types { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 18px; }
+/* 两块规则面板等高：grid 默认 stretch，面板内部用 flex 列撑满，
+   右栏文字少时把提示语压到底部，两块卡片的底边就对齐了 */
+.dual { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: stretch; }
+.rule-panel { padding: 18px 20px; display: flex; flex-direction: column; }
+.rule-body { display: flex; flex-direction: column; gap: 20px; flex: 1; }
+.rule-block { display: flex; flex-direction: column; gap: 10px; }
+.rule-panel > .f-hint { margin-top: auto; padding-top: 14px; }
+
+.fix-types { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+/* 类型 chip 做成可点的方框：勾选态用品牌色边框 + 浅底，比裸 checkbox 更容易看出「已启用」 */
 .fix-chip {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   font-size: 13.5px;
   color: var(--ink-2);
   cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 7px 12px;
+  background: #fff;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
 }
+.fix-chip:hover { border-color: var(--brand); }
+.fix-chip.on { border-color: var(--brand); background: var(--brand-soft); color: var(--brand-deep); font-weight: 600; }
 .fix-chip input { accent-color: var(--brand); width: 15px; height: 15px; }
 
-.threshold { color: var(--brand); font-size: 15px; }
-.range-slider { width: 100%; accent-color: var(--brand); }
+.threshold-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.threshold { color: var(--brand); font-size: 16px; font-variant-numeric: tabular-nums; }
+.range-slider { width: 100%; accent-color: var(--brand); margin: 4px 0 0; }
+.range-scale { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--sub); }
 
 .review-rule {
   display: flex;
@@ -249,7 +308,6 @@ onMounted(load)
   background: #f8fafd;
   border-radius: 10px;
   padding: 11px 14px;
-  margin-bottom: 10px;
 }
 .review-rule.locked { color: var(--success); font-weight: 600; }
 .cond-input { height: 32px; width: 84px; text-align: center; }

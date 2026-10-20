@@ -38,7 +38,8 @@ export const menus: MenuItem[] = [
     module: 'question',
     children: [
       { path: '/question/bank', title: '题库管理', module: 'question' },
-      { path: '/question/personal', title: '个人题库', module: 'question' },
+      /* 个人题库并入「题库管理」：原先的独立页只是「所属对象 = 个人」这一档，
+         并进来之后录题 / AI 出题 / 图片识题存的题都在题库管理里按所属对象筛。 */
       { path: '/question/create', title: '录题中心', module: 'question' },
       { path: '/question/photo', title: '图片识题', module: 'question' },
       // 审核中心比同组其它页多要一个「审核」权限：组长有题目管理但不管审核

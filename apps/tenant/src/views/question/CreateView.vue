@@ -172,7 +172,7 @@ async function load() {
 
 async function save(submit: boolean) {
   /* 校验口径与红字都在编辑组件里（含「解析为空」的那次确认）；失败时它已把基本信息面板展开，
-     这里只补一句提示。full 由 submit 决定：存草稿只看必填属性，提交审核全量校验（FR-TM-012） */
+     这里只补一句提示。full 由 submit 决定：存草稿只看必填属性，入库全量校验（FR-TM-012） */
   if (!(await editorRef.value?.validate(submit))) {
     showToast('请按红字提示修正后重试', 'error')
     return
@@ -188,8 +188,10 @@ async function save(submit: boolean) {
         submit,
       }),
     )
+    /* 个人题库不再有审核环节：入库存完即可用。要进校本库是另一条路（题库管理 → 提交校本），
+       提示里点一句，免得用户以为「入库」就等于全机构可见了 */
     showToast(
-      submit ? '已提交：多智能体校验中，完成后推送终审待办' : '草稿已保存',
+      submit ? '已保存到个人题库，可直接组卷；如需共享可在题库管理提交校本' : '草稿已保存，可在题库管理「所属对象 · 个人」下查看',
       'success',
     )
     router.push('/question/bank')
@@ -738,7 +740,7 @@ async function run() {
   }
 }
 
-/** 采纳入题库（进入待终审，FR-TM-014） */
+/** 采纳入题库（直接进个人题库，无需审核） */
 async function adopt(item: GeneratedQuestion) {
   /* 已编辑入库的不能再采纳：题已经在题库里了，再采纳一次会多出一条重复题 */
   if (adoptedIds.value.has(item.id) || savedIds.value.has(item.id)) return
@@ -754,7 +756,7 @@ async function adopt(item: GeneratedQuestion) {
     type: item.options.length > 0 ? (item.answer.length > 1 ? '多选' : '单选') : form.type === '多选' ? '单选' : form.type,
   })
   adoptedIds.value.add(item.id)
-  showToast('已入题库（待人工终审），可在题库中查看', 'success')
+  showToast('已存入个人题库，可直接组卷', 'success')
 }
 
 async function adoptAll() {
@@ -827,7 +829,7 @@ async function saveEdit(submit: boolean, validate: (full: boolean) => Promise<bo
     savedIds.value.add(editingGen.value.id)
     savedById.value[editingGen.value.id] = saved
     editOpen.value = false
-    showToast(submit ? '已提交：多智能体校验中，完成后推送终审待办' : '已保存到题库', 'success')
+    showToast(submit ? '已保存到个人题库，可直接组卷' : '已存为个人题库草稿', 'success')
   } catch (error) {
     /* ApiError 之外还有 mock 层直接抛的 Error（题干为空 / 未设答案），别把消息吞成「保存失败」 */
     showToast(error instanceof Error ? error.message : '保存失败', 'error')
@@ -970,8 +972,9 @@ onMounted(load)
           <button class="btn btn-ghost" :disabled="saving" @click="save(false)">
             {{ saving ? '保存中…' : '保存草稿' }}
           </button>
+          <!-- 手动录入不再走审核：直接入个人题库可用。要进校本题库在题库管理里「提交校本」 -->
           <button class="btn btn-primary" :disabled="saving" @click="save(true)">
-            保存并提交审核
+            保存入库（个人题库）
           </button>
         </div>
       </div>
@@ -982,7 +985,7 @@ onMounted(load)
       <div class="panel ai-panel">
         <div class="ai-head">
           <span class="ai-title">AI 智能出题</span>
-          <span class="f-hint" style="margin: 0">多智能体协作：出题 → 查重 → 纠错 → 校标，产出即达「待人工终审」</span>
+          <span class="f-hint" style="margin: 0">多智能体协作：出题 → 查重 → 纠错 → 校标，采纳后直接进入个人题库</span>
           <span class="tag" :class="engine === 'deepseek' ? 'tag-green' : 'tag-gray'" style="margin-left: auto">
             {{ engine === 'deepseek' ? 'AI 真实生成' : '本地演示数据（未配置 Key）' }}
           </span>
@@ -1115,7 +1118,7 @@ onMounted(load)
         <button class="btn btn-ghost" type="button" @click="editOpen = false">取消</button>
         <button class="btn btn-ghost" type="button" :disabled="editSaving" @click="saveEdit(false, validate)">存草稿</button>
         <button class="btn btn-primary" type="button" :disabled="editSaving" @click="saveEdit(true, validate)">
-          {{ editSaving ? '保存中…' : '提交审核' }}
+          {{ editSaving ? '保存中…' : '保存入库' }}
         </button>
       </template>
     </QuestionEditorModal>

@@ -731,6 +731,41 @@ export const QUESTION_SOURCE_OPTIONS: QuestionSource[] = [
 ]
 export type QuestionLibrary = 'personal' | 'org' | 'wrong'
 
+/**
+ * 题目**所属对象**：这道题属于谁。
+ *
+ * 与 `library`（放哪个库）不是一回事，别看混：
+ * - `library` 是「存放位置」的旧口径（个人 / 机构 / 错题），只在分类树与预览的「来源 / 库」里用；
+ * - `scope` 是**业务归属**，决定它在题库管理里怎么被筛出来、谁能改、要不要走校本审批：
+ *   - `platform` 平台公共题库下发，全机构可看可组卷，机构侧只读；
+ *   - `school` 校本库，机构内共享；
+ *   - `personal` 个人题库，**只有创建人可见**，直到提交校本并通过审批才转成 `school`。
+ *
+ * 存量题（以及任何没写 scope 的数据）用 `questionScopeOf()` 兜底推导，读侧不要直接读字段。
+ */
+export type QuestionScope = 'platform' | 'school' | 'personal'
+
+export const QUESTION_SCOPE_TEXT: Record<QuestionScope, string> = {
+  platform: '平台',
+  school: '校本',
+  personal: '个人',
+}
+
+/** 筛选面板「所属对象」的候选项（顺序即产品指定顺序：平台 / 校本 / 个人） */
+export const QUESTION_SCOPE_OPTIONS: QuestionScope[] = ['platform', 'school', 'personal']
+
+/**
+ * 取题目的所属对象。
+ *
+ * 兜底规则只有一条：旧数据没有 `scope` 时，个人库的算个人，其余算校本 ——
+ * 这与改造前的可见性完全一致（个人库只有本人能看，机构库全员可见），
+ * 所以升级后不会突然多出或消失一批题。
+ */
+export function questionScopeOf(row: { scope?: QuestionScope; library?: string }): QuestionScope {
+  if (row.scope) return row.scope
+  return row.library === 'personal' ? 'personal' : 'school'
+}
+
 export interface AiCheckResult {
   name: string
   pass: boolean
@@ -817,6 +852,11 @@ export interface OrgQuestion {
   source: QuestionSource
   status: QuestionStatus
   library: QuestionLibrary
+  /**
+   * 所属对象（平台 / 校本 / 个人）。存量题可能没有该字段 —— 读侧一律走 `questionScopeOf()`。
+   * 个人题提交校本并通过审批后，该字段由 `personal` 改为 `school`。
+   */
+  scope?: QuestionScope
   categoryId: number
   ownerId: UserId
   owner: string
@@ -1005,6 +1045,29 @@ export function isEarlierYear(year: string | undefined): boolean {
   return Number(year) < new Date().getFullYear() - RECENT_YEAR_COUNT + 1
 }
 
+/**
+ * 试卷**所属对象**：这份卷属于谁（口径与题目的 `QuestionScope` 完全一致）。
+ *
+ * - `platform` 平台下发的公共试卷，机构侧只读可组卷 / 预览 / 导出；
+ * - `school` 校本资源库，机构内共享；
+ * - `personal` 个人试卷，**只有创建人可见**，直到提交校本并通过审批才转成 `school`。
+ *
+ * 归属由**入口**决定，不由用户选：试卷导入 / 题库组卷 / 智能组卷产出的都是个人卷，
+ * 协同组卷要过审核、通过后直接进校本。存量卷没有 `scope`，用 `paperScopeOf()` 兜底（一律校本）——
+ * 改造前试卷库里放的就是机构共享的卷，这样升级后不会突然多出或消失一批。
+ */
+export type PaperScope = QuestionScope
+
+export const PAPER_SCOPE_TEXT: Record<PaperScope, string> = QUESTION_SCOPE_TEXT
+
+/** 筛选面板「所属对象」的候选项（顺序即产品指定顺序：平台 / 校本 / 个人） */
+export const PAPER_SCOPE_OPTIONS: PaperScope[] = QUESTION_SCOPE_OPTIONS
+
+/** 取试卷的所属对象（存量卷一律按校本算） */
+export function paperScopeOf(row: { scope?: PaperScope }): PaperScope {
+  return row.scope ?? 'school'
+}
+
 export interface OrgPaper {
   id: number
   name: string
@@ -1014,6 +1077,13 @@ export interface OrgPaper {
   status: PaperStatus
   sections: PaperSection[]
   owner: string
+  /** 创建人 id（个人卷的可见性判定用它；存量卷没有，退回比 `owner` 名字） */
+  ownerId?: number
+  /**
+   * 所属对象（平台 / 校本 / 个人）。读侧**一律走 `paperScopeOf`**，不要直接读这个字段 ——
+   * 存量卷没有它。
+   */
+  scope?: PaperScope
   updatedAt: string
   /* ===== 筛选维度（口径同 OrgQuestion：难度 / 考试类型 / 杯赛 / 地区取字典表值） ===== */
   difficulty?: string
@@ -1060,6 +1130,9 @@ export interface OrgPaper {
   aiChecks?: AiCheckResult[]
   aiSuspects?: string[]
   reviewOpinion?: string
+  /** 审核人 / 审核时间（审核中心与审批通过时写入；未审核的卷没有） */
+  reviewer?: string
+  reviewedAt?: string
   collaborators?: Array<{ name: string; perms: string[]; online: boolean }>
   dynamics?: Array<{ time: string; actor: string; action: string }>
 }
@@ -2022,6 +2095,12 @@ export type ApprovalKind = '题目' | '试卷' | '讲义' | '课件' | '教案' 
 export interface ResourceApproval {
   id: number
   kind: ApprovalKind
+  /**
+   * 被提审资源的 id（题目 / 试卷 / 备课文档 / 视频各自的编号）。
+   * 「查看详情」按资源类型去对应数据表取正文靠它；历史提审单可能没有该字段 ——
+   * 此时详情只展示审批单自身的信息，不报错。
+   */
+  resourceId?: number
   name: string
   subject: string
   grade: string
@@ -2032,6 +2111,8 @@ export interface ResourceApproval {
   reviewer?: string
   reviewedAt?: string
   opinion?: string
+  /** 申请人提交时填的备注（提交理由 / 说明） */
+  note?: string
   logs: Array<{ at: string; by: string; action: string; note?: string }>
 }
 
@@ -2851,10 +2932,26 @@ export interface AiTraceRecord {
   inputDigest: string
   /** 内容安全结论 */
   safety: 'pass' | 'masked' | 'blocked'
+  /**
+   * 触发条件：命中哪条策略、命中什么内容、执行了什么动作。
+   *
+   * 只有 masked / blocked 需要给（列表里点「已脱敏」「已拦截」后面的问号能看到），
+   * 平台做合规追溯时，光有结论没有命中依据等于没有留痕。
+   */
+  safetyReason?: string
   createdAt: string
 }
 
-/** AI 计费规则（P-05-13） */
+/**
+ * AI 计费规则（P-05-13）。
+ *
+ * 两级口径：
+ * - 全局默认规则（`tenantId` 缺省）：所有未单独签约的租户都按它计费；
+ * - 租户专属规则（带 `tenantId`）：只覆盖同一个场景的全局价，其余场景继续继承全局。
+ *
+ * 拆成「默认 + 覆盖」而不是「每个租户一份完整价目表」：场景会随能力上线不断增加，
+ * 逐租户复制全量规则后，加一个新场景就要给 N 个租户各补一条，漏一个就出现「按 0 计费」。
+ */
 export interface AiBillingRule {
   id: number
   scene: string
@@ -2864,6 +2961,24 @@ export interface AiBillingRule {
   /** 单价（元） */
   price: number
   enabled: boolean
+  /** 归属租户；缺省 = 全局默认规则 */
+  tenantId?: number
+}
+
+/** 租户计费视图：一行 = 一个场景在该租户下的生效价，并带上全局默认价用于对比 */
+export interface AiTenantBillingRow {
+  /** 生效规则的 id（覆盖时为租户规则 id，继承时为全局规则 id） */
+  id: number
+  scene: string
+  model: string
+  unit: AiBillingRule['unit']
+  price: number
+  enabled: boolean
+  tenantId: number
+  /** 是否已设置租户专属价（false = 继承全局默认） */
+  overridden: boolean
+  globalUnit: AiBillingRule['unit']
+  globalPrice: number
 }
 
 /** 租户 AI 能力开关（P-05-14） */

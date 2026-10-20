@@ -19,8 +19,8 @@
  * —— 点「删除」不该先弹一次预览。
  */
 import { computed } from 'vue'
-import { AppListToolbar, AppSegmented, paperQuestionCount } from '@aiteach/shared'
-import type { OrgPaper } from '@aiteach/shared'
+import { AppListToolbar, AppSegmented, paperQuestionCount, PAPER_SCOPE_TEXT, paperScopeOf } from '@aiteach/shared'
+import type { OrgPaper, PaperScope } from '@aiteach/shared'
 import { AppPagination } from '@aiteach/shared'
 import { difficultyClass } from '../../utils/question-card'
 import { useViewMode } from '../../composables/useViewMode'
@@ -49,6 +49,14 @@ const props = withDefaults(
      * 只给一种时固定用它、且**不渲染切换器**（只有一个选项的开关是纯噪声）。
      */
     views?: Array<'table' | 'detail'>
+    /**
+     * 是否在卷名旁显示「所属对象」标签（平台 / 校本 / 个人）。
+     *
+     * 只有**机构端试卷库**需要：那边同一个列表里混着三种归属，不标就分不清谁能改、
+     * 谁能提交校本。平台端「公共试卷库」里全是平台卷，标一个恒为「平台」的牌子是纯噪声，
+     * 所以默认关闭、由机构端显式开启 —— 差异走 props，不在组件里判端。
+     */
+    showScope?: boolean
   }>(),
   {
     keyword: '',
@@ -57,6 +65,7 @@ const props = withDefaults(
     viewKey: 'paper-list',
     emptyText: '暂无已审核试卷',
     views: () => ['table', 'detail'],
+    showScope: false,
   },
 )
 
@@ -86,6 +95,16 @@ function setViewMode(value: string) {
 /** 地区 + 杯赛合并展示（斜杠分隔）：非竞赛卷只显示地区，两者皆无给「—」（列内超长省略，悬浮看全） */
 function scopeOf(row: OrgPaper): string {
   return [row.region, row.competition].filter(Boolean).join(' / ') || '—'
+}
+
+/** 所属对象（平台 / 校本 / 个人）：配色与题库管理一致 —— 平台蓝、校本绿、个人橙 */
+const SCOPE_TAG_CLASS: Record<PaperScope, string> = {
+  platform: 'tag-blue',
+  school: 'tag-green',
+  personal: 'tag-orange',
+}
+function scopeTextOf(row: OrgPaper): string {
+  return PAPER_SCOPE_TEXT[paperScopeOf(row)]
 }
 </script>
 
@@ -152,6 +171,8 @@ function scopeOf(row: OrgPaper): string {
             <tr v-for="row in rows" :key="row.id">
               <td class="cell-strong col-name">
                 <span class="cell-clip" :title="row.name" @click="emit('preview', row)">{{ row.name }}</span>
+                <!-- 所属对象紧跟卷名：它是「这份卷归谁」的第一属性，与题库管理的编号标签同一口径 -->
+                <span v-if="showScope" class="tag" :class="SCOPE_TAG_CLASS[paperScopeOf(row)]">{{ scopeTextOf(row) }}</span>
                 <span v-if="row.parallelOf" class="tag tag-blue">平行卷</span>
               </td>
               <td>{{ row.grade }} / {{ row.subject }}</td>
@@ -181,6 +202,7 @@ function scopeOf(row: OrgPaper): string {
       <article v-for="row in rows" :key="row.id" class="p-card" @click="emit('preview', row)">
         <div class="pc-meta">
           <span class="pc-id">#{{ row.id }}</span>
+          <span v-if="showScope" class="tag" :class="SCOPE_TAG_CLASS[paperScopeOf(row)]">{{ scopeTextOf(row) }}</span>
           <span class="tag tag-blue">{{ row.grade }} / {{ row.subject }}</span>
           <span class="tag" :class="difficultyClass(row.difficulty ?? '')">{{ row.difficulty ?? '难度未定' }}</span>
           <!-- 考试类型 / 地区·杯赛 / 来源都并入标签行：它们是「这份卷是什么」的一部分，和难度同级；

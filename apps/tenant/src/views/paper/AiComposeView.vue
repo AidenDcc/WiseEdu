@@ -252,8 +252,8 @@ async function confirmCompose(folderId: number) {
     const count = paper.sections.reduce((sum, section) => sum + section.questions.length, 0)
     showToast(
       aiPicked > 0
-        ? `组卷完成：${count} 题入卷，${aiPicked} 题因题库不足由 AI 新生成补足，已存入「我的文件」`
-        : `组卷完成：${count} 题，已存入「我的文件」`,
+        ? `组卷完成：${count} 题入卷，${aiPicked} 题因题库不足由 AI 新生成补足，已存入个人试卷`
+        : `组卷完成：${count} 题，已存入个人试卷`,
       'success',
     )
     /* 编辑页开新标签页，本页留在原地可以接着组下一份；万一被拦了退回同页签，不能让老师点了没反应 */

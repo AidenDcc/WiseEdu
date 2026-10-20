@@ -106,6 +106,36 @@ function rowNo(index: number): number {
 function subsOf(row: OrgQuestion) {
   return subQuestionsOf(row)
 }
+
+/* ===== 题干悬浮提示（只对表格视图） =====
+   表格里题干限高 3 行（.qb-stem-clip），完整内容靠悬浮看。原生 `title` 放不了富文本
+   （上下标 / 公式 / 图片），所以自持一个小浮层：fixed 定位跟随光标、贴边翻转、
+   **限宽限高且浮层自身滚动** —— 长题干不会顶出视口，也不会把一个单元格撑成半屏。
+
+   浮层的宽高（TIP_W / TIP_H）在落点计算里要用到，故如实写成常量；样式里的
+   max-width / max-height 与它们同值，改尺寸时两处一起改。 */
+const TIP_W = 480
+const TIP_H = 300
+const stemTip = ref<{ x: number; y: number; row: OrgQuestion } | null>(null)
+
+function onStemEnter(event: MouseEvent, row: OrgQuestion) {
+  stemTip.value = { x: event.clientX, y: event.clientY, row }
+}
+function onStemMove(event: MouseEvent) {
+  if (stemTip.value) stemTip.value = { ...stemTip.value, x: event.clientX, y: event.clientY }
+}
+function onStemLeave() {
+  stemTip.value = null
+}
+/** 浮层落点：默认光标右下 14/18px；右侧或下方放不下就贴边 / 翻到上方，永不越出视口 */
+function stemTipStyle() {
+  const tip = stemTip.value
+  if (!tip) return {}
+  const left = Math.min(Math.max(tip.x + 14, 8), Math.max(window.innerWidth - TIP_W - 8, 8))
+  const flipUp = tip.y + 18 + TIP_H > window.innerHeight
+  const top = flipUp ? Math.max(tip.y - TIP_H - 12, 8) : tip.y + 18
+  return { left: `${left}px`, top: `${top}px` }
+}
 </script>
 
 <template>
@@ -142,7 +172,7 @@ function subsOf(row: OrgQuestion) {
             <!-- 题干列是唯一的「不定宽」列：table-layout: fixed 下它吃掉剩余空间，
                  于是窗口越宽题干越舒展、窄了就换行 -->
             <th>题干</th>
-            <th style="width: 76px">题型</th>
+            <th style="width: 92px">题型</th>
             <th style="width: 66px">难度</th>
             <th style="width: 150px">知识点</th>
             <th style="width: 76px">使用次数</th>
@@ -168,14 +198,25 @@ function subsOf(row: OrgQuestion) {
                 </div>
               </td>
               <td class="qb-stem-cell" @click="emit('preview', row)">
-                <!-- 组合题的题干格子里先标一个类别徽标：光看材料文字认不出它是组合题，
-                     更看不出里面还有几道小题（徽标自带小问数） -->
-                <CompositeTag v-if="isCompositeQuestion(row)" inline :count="subQuestionCount(row)" />
-                <slot name="renderStem" :row="row">
-                  <RichTextViewer :content="row.stem" tag="span" />
-                </slot>
+                <!-- 题干最多 3 行，超出省略；完整内容走悬浮浮层（见 stemTip）与预览抽屉。
+                     组合题的类别徽标已挪到「题型」列下方，题干这一格只放题干本身 -->
+                <div
+                  class="qb-stem-clip"
+                  @mouseenter="onStemEnter($event, row)"
+                  @mousemove="onStemMove"
+                  @mouseleave="onStemLeave"
+                >
+                  <slot name="renderStem" :row="row">
+                    <RichTextViewer :content="row.stem" tag="span" />
+                  </slot>
+                </div>
               </td>
-              <td>{{ row.type }}</td>
+              <td class="qb-type-cell">
+                <span>{{ row.type }}</span>
+                <!-- 材料组合题的类别徽标挂在题型下面：它回答的是「这是什么形态的题」，
+                     与题型是同一类信息，放在题干前面会打断「先看题再认类型」的阅读顺序 -->
+                <CompositeTag v-if="isCompositeQuestion(row)" inline short :count="subQuestionCount(row)" />
+              </td>
               <td>{{ row.difficulty }}</td>
               <td class="qb-knowledge-cell" :title="row.knowledge.join('、')">{{ row.knowledge.join('、') }}</td>
               <td>{{ row.useCount }} 次</td>
@@ -252,6 +293,12 @@ function subsOf(row: OrgQuestion) {
     </div>
 
     <AppPagination :total="total" :page="page" :page-size="pageSize" @update:page="emit('update:page', $event)" />
+
+    <!-- 题干悬浮浮层：fixed 定位（不受表格滚动容器裁剪），限宽限高、超出自身滚动，
+         pointer-events: none 让它永不挡住 hover 目标 -->
+    <div v-if="stemTip" class="qb-stem-tip" :style="stemTipStyle()">
+      <RichTextViewer :content="stemTip.row.stem" />
+    </div>
   </div>
 </template>
 
@@ -266,8 +313,8 @@ function subsOf(row: OrgQuestion) {
 
 /* 列宽：题干列不给宽度，在 table-layout: fixed 下自动吃掉剩余空间 —— 于是题干是「按列宽
    换行」而不是被截断（换行本身由 RichTextViewer 的 word-break 负责）。
-   固定列合计 870px，min-width 让窗口再窄就横向滚动，题干列始终有地儿放字。 */
-.qb-table { table-layout: fixed; min-width: 1100px; }
+   固定列合计 886px，min-width 让窗口再窄就横向滚动，题干列始终有地儿放字。 */
+.qb-table { table-layout: fixed; min-width: 1120px; }
 /* 编号列：编号 + 附加标识竖排（横排要 100px 以上，会把题干挤窄） */
 .qb-no-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
 .qb-stem-cell {
@@ -279,6 +326,39 @@ function subsOf(row: OrgQuestion) {
   vertical-align: middle;
 }
 .qb-stem-cell:hover { color: var(--brand-deep); }
+/* 题干最多 3 行：行高 1.6 × 13px ≈ 21px，max-height 取 63px 兜住第三种浏览器
+   （-webkit-line-clamp 尚未全兼容时仍能靠 max-height + overflow 截断） */
+.qb-stem-clip {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  max-height: 63px;
+  overflow: hidden;
+}
+/* 题型列：题型在上、组合题徽标在下（竖排，徽标不挤掉题型文字） */
+.qb-type-cell { vertical-align: middle; }
+.qb-type-cell > * { display: block; }
+.qb-type-cell .ct-inline { margin: 4px 0 0; }
+
+/* 题干悬浮浮层：宽高上限与脚本里的 TIP_W / TIP_H 同值 */
+.qb-stem-tip {
+  position: fixed;
+  z-index: 60;
+  max-width: 480px;
+  max-height: 300px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(28, 36, 52, 0.14);
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.7;
+  pointer-events: none;
+  /* 长英文 / 长公式不换行会把浮层撑宽到 max-width 之外 */
+  word-break: break-word;
+}
 /* 组合题卡片里的子题列表（徽标与子题的样式都在 CompositeTag / CompositeSubList 里，
    这里只负责与上方材料的间距） */
 .qb-subs { margin-top: 10px; }

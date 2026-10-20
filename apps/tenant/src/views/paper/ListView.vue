@@ -21,7 +21,8 @@ import {
   groupByPaperCategory,
   AppModal,
 } from '@aiteach/shared'
-import type { OrgPaper, OrgQuestion } from '@aiteach/shared'
+import type { OrgPaper, OrgQuestion, ResourceApproval } from '@aiteach/shared'
+import { paperScopeOf } from '@aiteach/shared'
 import {
   BankFilterBar,
   PAPER_EXAM_TYPE_ROW,
@@ -43,10 +44,19 @@ import {
   type PaperFilterRow,
   type PaperTypeGroup,
 } from '@aiteach/business-common'
-import { browsePaper, deletePaper, downloadPaper, fetchPapers, fetchQuestions, fetchTenantDict } from '@/api/org'
+import { browsePaper, deletePaper, downloadPaper, fetchApprovals, fetchPapers, fetchQuestions, fetchTenantDict, submitPaperToSchool } from '@/api/org'
+import { paperEditHref } from '@/utils/paper-edit'
+import { useAuthStore } from '@/stores/auth'
 
 const papers = ref<OrgPaper[]>([])
 const questions = ref<OrgQuestion[]>([])
+/** 审批单：只为「这卷是否正在走校本审核」服务（按钮据此变成禁用的「审核中」） */
+const approvals = ref<ResourceApproval[]>([])
+
+const auth = useAuthStore()
+/** 当前登录人 id：个人卷只对创建人可见，靠它判定（存量卷没有 ownerId 时退回比名字） */
+const currentUserId = computed(() => auth.user?.id ?? 101)
+const currentUserName = computed(() => auth.user?.name ?? '')
 
 /** 考试类型取自全局单例：左树要拿到 `paperCategory` 才能分组，光有名字不够，也免了本页再查一遍字典 */
 const { examTypeItems, stageOf, ensure: ensureBase } = useBaseData()
@@ -161,10 +171,47 @@ watch([() => JSON.stringify(filters), keyword], () => {
 })
 
 async function load() {
-  /* 试卷库只放审核通过的卷；草稿 / 待审在「我的文件」与审核中心里 */
-  const [all, qs] = await Promise.all([fetchPapers(), fetchQuestions()])
-  papers.value = all.filter((row) => row.status === 'approved')
+  /* 试卷库放「已入库」的卷：校本 / 平台卷全员可见，**个人卷只有创建人可见**
+     （提交校本并通过审批后 scope 转 school，才出现在别人眼里）。
+     草稿 / 待审仍在「我的文件」与审核中心。 */
+  const [all, qs, tickets] = await Promise.all([fetchPapers(), fetchQuestions(), fetchApprovals()])
+  papers.value = all.filter((row) => {
+    if (row.status !== 'approved') return false
+    if (paperScopeOf(row) !== 'personal') return true
+    return row.ownerId != null ? row.ownerId === currentUserId.value : row.owner === currentUserName.value
+  })
   questions.value = qs
+  approvals.value = tickets
+}
+
+/** 正在走校本审批的个人卷 id（按钮据此显示「审核中」并禁用，避免重复提交） */
+const schoolPendingIds = computed(
+  () =>
+    new Set(
+      approvals.value
+        .filter((row) => row.status === 'pending' && row.kind === '试卷' && row.resourceId != null)
+        .map((row) => row.resourceId as number),
+    ),
+)
+
+/**
+ * 个人卷提交校本：生成一条 `kind='试卷'` 的审批单，同时出现在
+ * 「试卷审核中心」与「校本资源 → 审批管理」，通过后进入校本资源库。
+ */
+async function onSubmitSchool(row: OrgPaper) {
+  const ok = await appConfirm(`将《${row.name}》提交校本审核？通过后该卷进入校本资源库，全机构可见。`, {
+    title: '提交校本',
+    type: 'info',
+    confirmText: '提交审核',
+  })
+  if (!ok) return
+  try {
+    await submitPaperToSchool(row.id)
+    showToast('已提交校本审核，可在「试卷审核中心」或「审批管理」跟进', 'success')
+    await load()
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : '提交失败', 'error')
+  }
 }
 
 async function loadDicts() {
@@ -284,6 +331,7 @@ onMounted(() => {
            class 会透传到面板根节点上（Vue 的 attribute 透传），所以布局能在这里排 -->
       <PaperListPanel
         class="list-panel"
+        show-scope
         :rows="rows"
         :total="filtered.length"
         v-model:page="page"
@@ -292,12 +340,35 @@ onMounted(() => {
         view-key="paper-list"
         @preview="onPreview"
       >
-        <!-- 操作列：机构端试卷库是只读的，故只有 预览 / 平行卷 / 导出 / 删除 -->
+        <!-- 操作列：按**所属对象**分
+             - 平台卷：只读 —— 预览 / 平行卷 / 导出；
+             - 个人卷：可改、可提交校本（审核中禁用）/ 可删；
+             - 校本卷：预览 / 平行卷 / 导出 / 删除（机构共享，改卷走「我的文件」里那份）。
+             「编辑」用锚点开新标签页：编辑页是全屏工作台，同页签跳走会把这张列表的筛选与页码弄丢，
+             与全站其它「编辑卷面」入口同一口径（见 utils/paper-edit.ts）。 -->
         <template #renderOperation="{ row }">
           <button class="mini-btn" @click="onPreview(row)">预览</button>
+          <a
+            v-if="paperScopeOf(row) === 'personal'"
+            class="mini-btn"
+            :href="paperEditHref(row.id)"
+            target="_blank"
+            rel="noopener"
+          >编辑</a>
           <button class="mini-btn" @click="parallelTarget = row">平行卷</button>
           <button class="mini-btn" @click="openExport(row)">导出</button>
-          <button class="mini-btn danger" @click="onDelete(row)">删除</button>
+          <template v-if="paperScopeOf(row) === 'personal'">
+            <button
+              v-if="schoolPendingIds.has(row.id)"
+              class="mini-btn"
+              disabled
+              title="已提交校本审核，通过后自动进入校本资源库"
+            >
+              审核中
+            </button>
+            <button v-else class="mini-btn success" @click="onSubmitSchool(row)">提交校本</button>
+          </template>
+          <button v-if="paperScopeOf(row) !== 'platform'" class="mini-btn danger" @click="onDelete(row)">删除</button>
         </template>
       </PaperListPanel>
     </div>

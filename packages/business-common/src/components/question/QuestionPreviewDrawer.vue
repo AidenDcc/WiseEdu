@@ -10,7 +10,8 @@
  * 一个对象，缺省项（编号 / 使用次数 / 变体来源 / 审核意见）都标了 `?`，草稿不传即不显示。
  * 纠错记录另走一个可选入参，理由见下方 `corrections`。
  */
-import { AppDrawer } from '@aiteach/shared'
+import { computed } from 'vue'
+import { AppDrawer, QUESTION_SCOPE_TEXT, questionScopeOf } from '@aiteach/shared'
 import type { QuestionCorrection } from '@aiteach/shared'
 import QuestionPreviewBody from './QuestionPreviewBody.vue'
 import type { PreviewQuestion } from './QuestionPreviewBody.vue'
@@ -20,7 +21,7 @@ import type { PreviewQuestion } from './QuestionPreviewBody.vue'
  * 不并进 `question` 里：纠错是**别的老师提交的反馈流**，不是这道题自身的字段，
  * 录题页拿草稿来预览时天然没有这一段。
  */
-withDefaults(
+const props = withDefaults(
   defineProps<{
     question: PreviewQuestion
     corrections?: QuestionCorrection[]
@@ -32,6 +33,20 @@ withDefaults(
   },
 )
 const emit = defineEmits<{ close: [] }>()
+
+/**
+ * 编号后面那枚「所属对象」标签（平台 / 校本 / 个人）。
+ *
+ * 用抽屉标题的扩展插槽而不是塞进正文：它和「题目 #123」是同一层信息（这道题归谁），
+ * 放进元信息栅格会被当成可筛选属性，读到正文时反而要回头找。草稿没有库归属，
+ * 按 `questionScopeOf` 只认 `library`，没有就不显示。
+ */
+const scopeTag = computed(() => {
+  if (props.question.id == null) return null
+  const scope = questionScopeOf({ scope: props.question.scope, library: props.question.library })
+  const cls = scope === 'platform' ? 'tag-blue' : scope === 'school' ? 'tag-green' : 'tag-orange'
+  return { text: QUESTION_SCOPE_TEXT[scope], cls }
+})
 </script>
 
 <template>
@@ -41,6 +56,9 @@ const emit = defineEmits<{ close: [] }>()
     :z-index="zIndex"
     @close="emit('close')"
   >
+    <template v-if="scopeTag" #title-extra>
+      <span class="tag" :class="scopeTag.cls">{{ scopeTag.text }}</span>
+    </template>
     <QuestionPreviewBody :question="question" :corrections="corrections" />
   </AppDrawer>
 </template>

@@ -46,6 +46,8 @@ function seedQuestion(base: PaperBase, row: Seed): OrgQuestion {
     source: '手动录入',
     status: 'approved',
     library: 'org',
+    /* 整卷题都是机构自有的校本资源（所属对象口径见 models 的 questionScopeOf） */
+    scope: 'school',
     categoryId: base.categoryId,
     ownerId: base.ownerId,
     owner: base.owner,

@@ -14,15 +14,24 @@
  * 页面要用哪几行都是显式传的（`BankFilterBar` 的 `rows` / `moreRows` / `extraRows`），
  * 所以「平台端想多筛一个维度」不需要动公共层，加一行进 `extraRows` 就行。
  */
-import { QUESTION_SOURCE_OPTIONS, type FilterRowDef, type OrgQuestion } from '@aiteach/shared'
+import {
+  QUESTION_SCOPE_TEXT,
+  QUESTION_SOURCE_OPTIONS,
+  questionScopeOf,
+  type FilterRowDef,
+  type OrgQuestion,
+} from '@aiteach/shared'
 import type { TenantDictItem } from '../types'
 import { examTypesFor, scopedQuestionTypes } from '../composables/useBaseData'
 
 /**
- * 列表只呈现这两种状态，中文标签同时就是筛选面板里的取值（见 `bankFilterFields().status`）。
- * 草稿 / 校验中 / 待终审 / 已驳回属于审核流，去题目审核页看。
+ * 列表只呈现这几种状态，中文标签同时就是筛选面板里的取值（见 `bankFilterFields().status`）。
+ *
+ * 「草稿」是**个人题**的专属状态：个人题库并入题库管理后，老师在录题中心「保存草稿」
+ * 的题只能在这里看到（不再有独立的个人题库页）。机构 / 平台题不会出现草稿 ——
+ * 那两侧的草稿属于审核流，见题目审核中心。
  */
-export const BANK_STATUS_LABEL: Record<string, string> = { approved: '已入库', offline: '已下架' }
+export const BANK_STATUS_LABEL: Record<string, string> = { approved: '已入库', offline: '已下架', draft: '草稿' }
 
 /** 列表的硬性可见性：只有这两个状态才进列表，其余状态无论怎么筛都不出现 */
 export const BANK_VISIBLE_STATUS = Object.keys(BANK_STATUS_LABEL)
@@ -55,7 +64,9 @@ export interface BankFilterRow {
 export const BANK_FILTER_ROWS: BankFilterRow[] = [
   { key: 'type', label: '题型', dict: 'questionType' },
   { key: 'difficulty', label: '难度', dict: 'difficulty' },
-  { key: 'examType', label: '考试类型', dict: 'examType' },
+  /* 考试类型按学段收窄后仍有十来个取值，一行放不下 —— 与「地区」同一套折叠逻辑：
+     收起态只留一行，需要时展开全部 */
+  { key: 'examType', label: '考试类型', dict: 'examType', collapsible: true },
   { key: 'competition', label: '杯赛', dict: 'competition' },
 ]
 
@@ -125,6 +136,9 @@ export function bankDictTypes(rows: BankFilterRow[]): string[] {
  * 杯赛 / 地区是可选字段，缺省给空串 —— 空串永远不落在任何候选项里，等价于「这题没有这个属性」。
  * 状态用中文标签（面板里显示的也是标签），使用次数用桶名（精确值做不了筛选项）。
  * 纠错取自**纠错记录**而不是题目自身的字段：有记录 = 已提交纠错，故由页面把 id 集合传进来。
+ *
+ * `scope`（所属对象）放在这里而不是各端页面：平台端将来也要按来源库看题，
+ * 取值口径（存量题按 library 兜底）只有 `questionScopeOf` 一份。
  */
 export function bankFilterFields(ctx: {
   correctedIds: ReadonlySet<number>
@@ -134,6 +148,7 @@ export function bankFilterFields(ctx: {
     difficulty: (row) => row.difficulty,
     examType: (row) => row.examType ?? '',
     competition: (row) => row.competition ?? '',
+    scope: (row) => QUESTION_SCOPE_TEXT[questionScopeOf(row)],
     status: (row) => BANK_STATUS_LABEL[row.status] ?? '',
     correction: (row) => (ctx.correctedIds.has(row.id) ? '已提交纠错' : '未提交纠错'),
     useCount: (row) => useCountBucketOf(row.useCount),

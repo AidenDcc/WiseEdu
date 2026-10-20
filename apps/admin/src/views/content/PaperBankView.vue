@@ -33,12 +33,12 @@ import {
   AppModal,
 } from '@aiteach/shared'
 import type { OrgPaper, OrgQuestion } from '@aiteach/shared'
+import { PAPER_SCOPE_TEXT, paperScopeOf } from '@aiteach/shared'
 import {
   BankFilterBar,
   PAPER_EXAM_TYPE_ROW,
   PAPER_FILTER_ROWS,
   PAPER_MORE_ROWS,
-  PAPER_PANEL_ROWS,
   PaperListPanel,
   PaperPreviewModal,
   PaperTypeTree,
@@ -67,11 +67,17 @@ const { examTypeItems, stageOf, ensure: ensureBase } = useBaseData()
  * 平台专属条件加在 EXTRA_ROWS 里即可 —— 与共有行同权：进折叠汇总、也进「清空」。 */
 const EXTRA_ROWS: PaperFilterRow[] = []
 
-/** 面板里渲染的行：共有行（主条件 + 更多查询）+ 本端专属 */
-const PANEL_ROWS = [...PAPER_PANEL_ROWS, ...EXTRA_ROWS]
+/** 公共试卷库不收个人卷（见 `load`），「所属对象」里那个「个人」选项点进去必然为空 —— 直接去掉，
+ *  与「资源类型只在数据里真出现过的值上出选项」同一条口径。 */
+const MORE_ROWS: PaperFilterRow[] = PAPER_MORE_ROWS.map((row) =>
+  row.key === 'scope' ? { ...row, options: (row.options ?? []).filter((name) => name !== PAPER_SCOPE_TEXT.personal) } : row,
+)
+
+/** 面板里渲染的行：主条件 + 更多查询（本端裁过）+ 本端专属 */
+const PANEL_ROWS = [...PAPER_FILTER_ROWS, ...MORE_ROWS, ...EXTRA_ROWS]
 
 /** 参与过滤的全部维度 —— 比面板多一个考试类型（那份值由左树写，不在面板里出入） */
-const ALL_ROWS = [...PAPER_PANEL_ROWS, PAPER_EXAM_TYPE_ROW, ...EXTRA_ROWS]
+const ALL_ROWS = [...PANEL_ROWS, PAPER_EXAM_TYPE_ROW]
 
 const filters = reactive<Record<string, string[]>>(defaultPaperFilterSelection(EXTRA_ROWS))
 const filterOptions = reactive<Record<string, string[]>>({})
@@ -80,7 +86,7 @@ const filterOptions = reactive<Record<string, string[]>>({})
 const FIELD_OF = paperFilterFields()
 
 const filterRowDefs = computed(() => toPaperFilterRowDefs(PAPER_FILTER_ROWS, filterOptions))
-const moreRowDefs = computed(() => toPaperFilterRowDefs(PAPER_MORE_ROWS, filterOptions))
+const moreRowDefs = computed(() => toPaperFilterRowDefs(MORE_ROWS, filterOptions))
 const extraRowDefs = computed(() => toPaperFilterRowDefs(EXTRA_ROWS, filterOptions))
 
 /** 面板回传整份筛选值（覆盖式回写） */
@@ -174,7 +180,10 @@ watch([() => JSON.stringify(filters), keyword], () => {
 async function load() {
   /* 试卷库只放审核通过的卷；草稿 / 待审在「我的文件」与审核中心里 */
   const [all, qs] = await Promise.all([fetchPapers(), fetchQuestions()])
-  papers.value = all.filter((row) => row.status === 'approved')
+  /* 平台端「公共试卷库」不收**个人卷**：老师在自己机构里组的卷要共享给全平台，得先由机构
+     提交审核（`scope` 转成校本 / 平台）才有资格出现在这里。个人卷免审即 `approved`，
+     只按状态筛会把它们一并捞上来，等于把某位老师的私人卷摆进公共库。 */
+  papers.value = all.filter((row) => row.status === 'approved' && paperScopeOf(row) !== 'personal')
   questions.value = qs
 }
 

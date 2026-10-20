@@ -1,14 +1,28 @@
 <script setup lang="ts">
 /**
- * 教材知识点过滤面板（题库 BankView 与标准公式库 StandardView 共用）。
+ * 教材知识点过滤面板（题库 BankView、标准公式库 StandardView、组卷选题共用）。
  *
- * 左侧：教材级联（年级 → 学科 → 版本）+ 知识点搜索 + 知识点树；
- * 选中节点时 emit 该子树的全部叶子 tag（null = 全部知识点），由父组件自行过滤列表；
- * 已应用的年级 / 学科随 `scopeChange` 一并抛出，供父组件替代单独的年级 / 学科筛选行。
+ * 左侧：教材级联（年级 → 学科 → 版本）+ 搜索 + 树；选中节点时 emit 该子树的全部叶子 tag
+ * （null = 全部），已应用的年级 / 学科随 `scopeChange` 一并抛出，供父组件替代单独的年级 / 学科筛选行。
  * 节点计数通过 `rows`（含 knowledge 标签的列表数据）计算。
  *
+ * ## 两个页签（`withChapter`）
+ *
+ * 题库管理左侧是「知识点 / 章节」双页签，两处**共用同一份数据**（同一棵教材知识树）：
+ * - 知识点页签：原有的分类树，可选任意层级；
+ * - 章节页签：按教材章 → 节两层铺开，先选年级 / 学科 / 教材版本，再按关键字定位某一章。
+ *
+ * 为什么章节不另开一套接口：章节结构与知识点树同源（一级节点本就是「集合与常用逻辑用语」
+ * 「函数的概念与性质」这类教材章），另造一份数据只会出现「知识点能筛、章节筛不到」的错位。
+ * 选中章节 → 收集该章子树的全部标签 → 与知识点选中走同一条 `change` 通道。
+ *
+ * ## 教材版本
+ *
+ * `withVersion=false` 时知识点页签只选年级 / 学科 —— 查题时「用哪套教材」并不影响题目本身的
+ * 知识点标签，多一个维度只是多一次点击。章节页签仍然保留版本（教材章是按版本编排的）。
+ *
  * 年级 / 学科单向跟随顶部栏全局作用域（useScope）：顶部栏变了面板跟着变，
- * 面板内自己改则不回写——只换本面板的知识点树，不动顶部栏与题库筛选。
+ * 面板内自己改则不回写。
  */
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ArrowRight } from '@element-plus/icons-vue'
@@ -18,11 +32,21 @@ import { useBusinessApi } from '../../api/business-api'
 import { nodeKnowledgeLabel } from '../../composables/useKnowledgePool'
 import { useScope } from '../../composables/useScope'
 
-const props = defineProps<{ rows: Array<{ knowledge: string[] }> }>()
+const props = withDefaults(
+  defineProps<{
+    rows: Array<{ knowledge: string[] }>
+    /** 是否提供「知识点 / 章节」双页签（仅题库管理打开；公式库与组卷选题保持单页签） */
+    withChapter?: boolean
+    /** 知识点页签是否选择教材版本（题库管理为 false：只选年级 / 学科） */
+    withVersion?: boolean
+  }>(),
+  { withChapter: false, withVersion: true },
+)
+
 const emit = defineEmits<{
   /** 选中节点的子树叶子 tag（null = 全部知识点） */
   change: [tags: string[] | null]
-  /** 已应用的年级 / 学科。题库管理用它替代「年级 / 学科」两个筛选行 —— 教材级联就是这两个维度 */
+  /** 已应用的年级 / 学科。题库管理用它替代「年级 / 学科」两个筛选行 */
   scopeChange: [scope: { grade: string; subject: string }]
 }>()
 
@@ -34,8 +58,21 @@ const rootEl = ref<HTMLElement | null>(null)
 /** 顶部栏全局作用域：本面板的年级 / 学科始终与它一致 */
 const { grade: scopeGrade, subject: scopeSubject, ensureScope } = useScope()
 
-/** 教材矩阵查不到作用域时的兜底教材（与 useScope 的首次默认作用域一致） */
-const DEFAULT_TEXTBOOK = { grade: '高一', subject: '数学', version: '人教A版' }
+/** 教材矩阵查不到作用域时的兜底年级 / 学科（与 useScope 的首次默认作用域一致）；
+ *  教材版本一律取该学科的第一套（见 locate），不在这里钉死某个版本 */
+const DEFAULT_TEXTBOOK = { grade: '高一', subject: '数学' }
+
+/* ===== 页签 ===== */
+type Tab = 'knowledge' | 'chapter'
+const tab = ref<Tab>('knowledge')
+/** 章节页签的教材版本是否已由用户确认（未确认时沿用默认值，不影响开关页签） */
+function setTab(next: Tab) {
+  if (tab.value === next) return
+  tab.value = next
+  /* 换页签等于换了一套「选什么在筛」的语义：清掉已选节点，免得带着上一页签的选中项看着像没生效 */
+  activeNode.value = null
+  kpQuery.value = ''
+}
 
 /* ===== 教材级联（年级 → 学科（动态）→ 教材版本） ===== */
 const tbMatrix = ref<TextbookOption[]>([])
@@ -45,9 +82,13 @@ const sel = reactive({ grade: '', subject: '', version: '' })
 const pick = reactive({ grade: '', subject: '', version: '' })
 const tbOpen = ref(false)
 
-const tbLabel = computed(() =>
-  sel.grade ? `${sel.grade} / ${sel.subject} / ${sel.version}` : '请选择教材',
-)
+/** 当前页签是否需要「教材版本」这一维 */
+const needVersion = computed(() => (props.withChapter ? tab.value === 'chapter' : props.withVersion))
+
+const tbLabel = computed(() => {
+  if (!sel.grade) return needVersion.value ? '请选择教材' : '请选择年级 / 学科'
+  return needVersion.value ? `${sel.grade} / ${sel.subject} / ${sel.version}` : `${sel.grade} / ${sel.subject}`
+})
 
 const tbGradeRow = computed(() => tbMatrix.value.find((row) => row.grade === pick.grade))
 const tbSubjectRow = computed(() => tbGradeRow.value?.subjects.find((row) => row.name === pick.subject))
@@ -74,7 +115,8 @@ function pickGrade(grade: string) {
 function pickSubject(subject: string) {
   pick.subject = subject
   const versions = tbGradeRow.value?.subjects.find((row) => row.name === subject)?.versions ?? []
-  if (!versions.includes(pick.version)) pick.version = ''
+  /* 教材版本默认取第一项：章节页签要求「教材默认为第一个，没有教材则显示为空」 */
+  pick.version = versions.includes(pick.version) ? pick.version : (versions[0] ?? '')
 }
 
 function pickVersion(version: string) {
@@ -83,7 +125,7 @@ function pickVersion(version: string) {
 
 /* 共享 chip 组件是 v-model 语义（回传整个数组），而这三个 pick 函数带**级联副作用**
    （换年级会清掉失效的学科 / 版本），所以这里不用 v-model，改用 :model-value + 自己的 handler：
-   选中即调 pick，取消（回传空数组，单选组件里表示点已选项）保持原行为——本面板的三级选择
+   选中即调 pick，取消（回传空数组，单选组件里表示点已选项）保持原行为 —— 这几级选择
    必须始终有值，不允许被取消。 */
 function onPickGrade(value: string[]) {
   if (value[0]) pickGrade(value[0])
@@ -97,14 +139,15 @@ function onPickVersion(value: string[]) {
   if (value[0]) pickVersion(value[0])
 }
 
-/** 确认教材选择：回写「年级 / 学科 / 教材名称」并加载对应知识点树 */
+/** 确认教材选择：回写「年级 / 学科 / 教材版本」并加载对应树 */
 function applyTextbook() {
+  if (!pick.grade || !pick.subject) return
   Object.assign(sel, { grade: pick.grade, subject: pick.subject, version: pick.version })
   tbOpen.value = false
   activeNode.value = null
   kpQuery.value = ''
   // 单向跟随：面板改年级 / 学科不反向写全局作用域（顶部栏、题库筛选项不受影响），
-  // 只影响本面板的知识点树
+  // 只影响本面板的树
   void loadTree()
 }
 
@@ -112,7 +155,7 @@ function onDocClick(event: MouseEvent) {
   if (tbOpen.value && rootEl.value && !rootEl.value.contains(event.target as Node)) tbOpen.value = false
 }
 
-/* ===== 知识点树 ===== */
+/* ===== 树（知识点 / 章节共用同一份数据） ===== */
 const tree = ref<OrgKnowledgeNode[]>([])
 const expanded = ref<Set<string>>(new Set())
 const activeNode = ref<OrgKnowledgeNode | null>(null)
@@ -135,8 +178,7 @@ const childrenMap = computed(() => {
  *
  * 必须把分类节点自己也算上：录题页的知识点弹窗允许选任意层级，题目的 `knowledge` 里因此
  * 可能出现「函数的概念与性质」这类分类节点名。只收叶子 tag 的话，这种题点父节点筛不出来。
- * 与 `useKnowledgePool.collectTags` 同一套规则（同一个 `nodeKnowledgeLabel`），
- * 否则同一棵树在「录题能选什么」与「题库能筛什么」两处会算出两套集合。
+ * 与 `useKnowledgePool.collectTags` 同一套规则（同一个 `nodeKnowledgeLabel`）。
  */
 function subtreeTags(id: string): string[] {
   const root = byId.value.get(id)
@@ -159,7 +201,7 @@ function countOf(id: string): number {
 }
 
 async function loadTree() {
-  if (!sel.grade) return
+  if (!sel.grade || !sel.subject) return
   tree.value = await api.fetchKnowledgeTree(sel.grade, sel.subject, sel.version)
   expanded.value = new Set(tree.value.filter((node) => node.parentId == null).map((node) => node.id))
 }
@@ -175,6 +217,8 @@ const hitIds = computed(() => {
       .map((node) => node.id),
   )
 })
+
+/* ===== 知识点页签：原有分类树 ===== */
 /** 搜索时仅保留命中节点及其祖先链 */
 const visibleIds = computed(() => {
   if (!searchMode.value) return null
@@ -233,6 +277,44 @@ function selectNode(node: OrgKnowledgeNode) {
   activeNode.value = activeNode.value?.id === node.id ? null : node
 }
 
+/* ===== 章节页签：章 → 节两层 =====
+   一级节点即教材章，二级节点即节（更深的层级归到所属节里，靠子树标签覆盖）。
+   深度超过 2 层的知识点（如「函数的概念与表示」下的细分）不再单独成行 ——
+   章节视角要的是「翻到哪一章」，再细就该回知识点页签。 */
+interface ChapterRow {
+  node: OrgKnowledgeNode
+  /** 0 = 章，1 = 节 */
+  depth: number
+  /** 章的序号（只对 depth=0 有意义，按教材顺序从 1 起） */
+  no?: number
+  hit: boolean
+}
+
+const chapterRows = computed<ChapterRow[]>(() => {
+  const keyword = kpQuery.value.trim()
+  const rows: ChapterRow[] = []
+  let no = 0
+  tree.value
+    .filter((node) => node.parentId == null)
+    .forEach((chapter) => {
+      const sections = childrenMap.value.get(chapter.id) ?? []
+      const chapterHit = searchMode.value && chapter.name.includes(keyword)
+      /* 章命中 → 整章展开（要能直接点这一章）；否则只留命中的节，全没命中就整章隐藏 */
+      const shownSections = chapterHit || !searchMode.value ? sections : sections.filter((row) => row.name.includes(keyword))
+      if (searchMode.value && !chapterHit && shownSections.length === 0) return
+      rows.push({ node: chapter, depth: 0, no: ++no, hit: chapterHit })
+      shownSections.forEach((section) => {
+        rows.push({ node: section, depth: 1, hit: searchMode.value && section.name.includes(keyword) })
+      })
+    })
+  return rows
+})
+
+/** 章节页签里命中的章节数（提示用） */
+const chapterHitCount = computed(
+  () => chapterRows.value.filter((row) => row.depth === 0 && row.hit).length,
+)
+
 /* 选中节点变化 → 通知父组件 */
 watch(activeTags, (tags) => emit('change', tags))
 
@@ -244,7 +326,8 @@ watch([() => sel.grade, () => sel.subject], () => {
 })
 
 /* ===== 顶部栏作用域 → 教材级联 ===== */
-/** 在教材矩阵里定位一组「年级 / 学科」，教材版本沿用现值，失效则回退人教A版 / 首项 */
+/** 在教材矩阵里定位一组「年级 / 学科」，教材版本沿用现值，失效则回退该学科的第一套教材
+ *  （章节页签要求「教材默认为第一个，没有教材则为空」） */
 function locate(grade: string, subject: string): boolean {
   const gradeRow = tbMatrix.value.find((row) => row.grade === grade)
   const subjectRow = gradeRow?.subjects.find((row) => row.name === subject)
@@ -252,7 +335,7 @@ function locate(grade: string, subject: string): boolean {
   sel.grade = gradeRow.grade
   sel.subject = subjectRow.name
   if (!subjectRow.versions.includes(sel.version)) {
-    sel.version = subjectRow.versions.find((v) => v === DEFAULT_TEXTBOOK.version) ?? subjectRow.versions[0] ?? ''
+    sel.version = subjectRow.versions[0] ?? ''
   }
   return true
 }
@@ -265,7 +348,7 @@ function locateByScope(): boolean {
   return first ? locate(first.grade, first.subjects[0]?.name ?? '') : false
 }
 
-/** 顶部栏切年级 / 学科 → 面板跟随并重载知识点树（切换作用域后旧选中节点已无意义） */
+/** 顶部栏切年级 / 学科 → 面板跟随并重载树（切换作用域后旧选中节点已无意义） */
 watch([scopeGrade, scopeSubject], () => {
   if (!locateByScope()) return
   activeNode.value = null
@@ -288,7 +371,16 @@ onBeforeUnmount(() => {
 
 <template>
   <aside ref="rootEl" class="panel tree-panel">
-    <div class="tp-head">知识点</div>
+    <!-- 页签：知识点（分类树）/ 章节（教材章 → 节）。单页签场景（公式库 / 组卷选题）沿用原标题 -->
+    <div v-if="withChapter" class="tp-tabs">
+      <button class="tp-tab" :class="{ on: tab === 'knowledge' }" type="button" @click="setTab('knowledge')">
+        知识点
+      </button>
+      <button class="tp-tab" :class="{ on: tab === 'chapter' }" type="button" @click="setTab('chapter')">
+        章节
+      </button>
+    </div>
+    <div v-else class="tp-head">知识点</div>
 
     <!-- 教材级联下拉（年级 → 学科（动态）→ 教材版本） -->
     <div class="tb-selector">
@@ -325,39 +417,43 @@ onBeforeUnmount(() => {
           <div class="tb-opts"><span class="tb-empty">请先选择年级</span></div>
         </div>
 
-        <AppFilterChips
-          v-if="tbSubjectRow?.versions.length"
-          label="教材版本"
-          :options="tbSubjectRow.versions"
-          :model-value="pick.version ? [pick.version] : []"
-          :multiple="false"
-          @update:model-value="onPickVersion"
-        />
-        <div v-else class="tb-row">
-          <span class="tb-row-label">教材版本</span>
-          <div class="tb-opts"><span class="tb-empty">请先选择学科</span></div>
-        </div>
+        <!-- 教材版本：仅在当前页签需要它时出现。没有版本时给空态，不静默用别的版本顶上 -->
+        <template v-if="needVersion">
+          <AppFilterChips
+            v-if="tbSubjectRow?.versions.length"
+            label="教材版本"
+            :options="tbSubjectRow.versions"
+            :model-value="pick.version ? [pick.version] : []"
+            :multiple="false"
+            @update:model-value="onPickVersion"
+          />
+          <div v-else class="tb-row">
+            <span class="tb-row-label">教材版本</span>
+            <div class="tb-opts"><span class="tb-empty">{{ pick.subject ? '该学科暂无教材' : '请先选择学科' }}</span></div>
+          </div>
+        </template>
 
         <div class="tb-foot">
-          <button class="tb-apply" type="button" :disabled="!pick.version" @click="applyTextbook">
+          <button class="tb-apply" type="button" :disabled="!pick.grade || !pick.subject" @click="applyTextbook">
             确定
           </button>
         </div>
       </div>
     </div>
 
-    <!-- 知识点搜索定位 -->
+    <!-- 搜索定位（知识点 / 章节共用同一个输入框，文案随页签变） -->
     <div class="kp-search">
       <AppIcon name="search" :size="14" />
-      <input v-model="kpQuery" placeholder="搜索知识点定位" />
+      <input v-model="kpQuery" :placeholder="tab === 'chapter' ? '搜索章节定位' : '搜索知识点定位'" />
       <button v-if="kpQuery" class="kp-clear" type="button" @click="kpQuery = ''">
         <AppIcon name="close" :size="12" />
       </button>
     </div>
-    <p v-if="searchMode" class="kp-hint">命中 {{ hitIds.size }} 个知识点</p>
+    <p v-if="searchMode && tab === 'knowledge'" class="kp-hint">命中 {{ hitIds.size }} 个知识点</p>
+    <p v-if="searchMode && tab === 'chapter'" class="kp-hint">命中 {{ chapterHitCount }} 个章节</p>
 
     <!-- 知识点树（未选中任何节点 = 全部知识点，靠再次点击已选节点取消选中） -->
-    <div class="kp-tree">
+    <div v-if="tab === 'knowledge'" class="kp-tree">
       <div
         v-for="row in treeRows"
         :key="row.node.id"
@@ -383,6 +479,24 @@ onBeforeUnmount(() => {
       <p v-if="treeRows.length === 0 && !searchMode" class="kp-empty">请先选择教材</p>
       <p v-if="searchMode && hitIds.size === 0" class="kp-empty">未找到匹配的知识点</p>
     </div>
+
+    <!-- 章节树：章（可点 = 按整章筛）/ 节（可点 = 按节筛） -->
+    <div v-else class="kp-tree">
+      <div
+        v-for="row in chapterRows"
+        :key="row.node.id"
+        class="kp-item"
+        :class="{ active: activeNode?.id === row.node.id, chapter: row.depth === 0, section: row.depth > 0 }"
+        @click="selectNode(row.node)"
+      >
+        <span v-if="row.depth === 0" class="ch-index">{{ row.no }}</span>
+        <span v-else class="kp-dot" />
+        <span class="kp-name" :class="{ hit: row.hit }">{{ row.node.name }}</span>
+        <span class="kp-count">{{ countOf(row.node.id) }}</span>
+      </div>
+      <p v-if="chapterRows.length === 0 && !searchMode" class="kp-empty">请先选择年级 / 学科 / 教材</p>
+      <p v-if="searchMode && chapterRows.length === 0" class="kp-empty">未找到匹配的章节</p>
+    </div>
   </aside>
 </template>
 
@@ -398,6 +512,33 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 .tp-head { font-size: 13px; font-weight: 700; color: var(--ink); padding: 2px 4px 10px; flex-shrink: 0; }
+
+/* 页签：与分段控件同款观感，但只有两个等宽项，直接画在面板标题行里 */
+.tp-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 2px 2px 10px;
+  flex-shrink: 0;
+}
+.tp-tab {
+  flex: 1;
+  height: 30px;
+  border: 1.5px solid var(--border);
+  border-radius: 9px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sub);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tp-tab:hover { border-color: var(--brand); color: var(--brand-deep); }
+.tp-tab.on {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  color: var(--brand-deep);
+}
 
 /* 教材级联下拉 */
 .tb-selector { position: relative; flex-shrink: 0; }
@@ -477,7 +618,7 @@ onBeforeUnmount(() => {
 .tb-apply:hover:not(:disabled) { background: var(--brand-deep); }
 .tb-apply:disabled { opacity: 0.5; cursor: not-allowed; }
 
-/* 知识点搜索 */
+/* 搜索 */
 .kp-search {
   position: relative;
   display: flex;
@@ -511,7 +652,7 @@ onBeforeUnmount(() => {
 .kp-clear:hover { background: var(--brand-soft); color: var(--brand-deep); }
 .kp-hint { font-size: 11.5px; color: var(--sub); padding: 6px 4px 0; flex-shrink: 0; }
 
-/* 知识点树：占满面板剩余高度，仅树自身滚动 */
+/* 树：占满面板剩余高度，仅树自身滚动 */
 .kp-tree {
   flex: 1;
   min-height: 0;
@@ -536,6 +677,9 @@ onBeforeUnmount(() => {
 .kp-item:hover { background: var(--bg); }
 /* 仅选中项着色，其余文字保持黑色、无背景 */
 .kp-item.active { background: var(--brand-soft); color: var(--brand-deep); font-weight: 600; }
+/* 章节页签：章这一层整体加粗，节缩进后保持常规字重（视觉上分两层，不靠缩进符号） */
+.kp-item.chapter { font-weight: 700; padding-left: 6px; }
+.kp-item.section { padding-left: 26px; }
 /* 原生 button 带 UA 默认边框 / 灰底（Chrome 有边框、Safari 只给背景），这里清掉，
    只留图标本身 */
 .kp-caret {
@@ -558,6 +702,20 @@ onBeforeUnmount(() => {
 }
 .kp-caret.open .kp-caret-icon { transform: rotate(90deg); }
 .kp-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--border); flex-shrink: 0; margin: 0 4px; }
+/* 章节序号：章这一层的小圆角方块，宽度固定，节那一层用圆点对齐 */
+.ch-index {
+  flex-shrink: 0;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--sub);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+}
+.kp-item.active .ch-index { background: #fff; color: var(--brand-deep); }
 .kp-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 搜索命中：仅加粗，不加背景、不变色 */
 .kp-name.hit { font-weight: 700; }

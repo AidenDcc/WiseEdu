@@ -63,6 +63,12 @@ const orgRoutes: MockRoute[] = [
   },
   { method: 'POST', path: '/tenant/questions/save', handler: ({ body }) => guard(() => org.saveQuestion(body as never)) },
   { method: 'POST', path: '/tenant/questions/submit', handler: ({ body }) => guard(() => ({ count: org.submitQuestions(body.ids as number[]) })) },
+  /* 个人题提交校本：生成一条 kind='题目' 的审批单，通过后题目的所属对象翻成「校本」 */
+  {
+    method: 'POST',
+    path: '/tenant/questions/submit-school',
+    handler: ({ body }) => guard(() => org.submitQuestionToSchool(Number(body.id), String(body.note ?? ''))),
+  },
   { method: 'POST', path: '/tenant/questions/delete', handler: ({ body }) => guard(() => ({ count: org.deleteQuestions(body.ids as number[]) })) },
   { method: 'POST', path: '/tenant/questions/move', handler: ({ body }) => guard(() => ({ count: org.moveQuestions(body.ids as number[], Number(body.categoryId)) })) },
   { method: 'POST', path: '/tenant/questions/review', handler: ({ body }) => guard(() => org.reviewQuestion(Number(body.id), Boolean(body.pass), String(body.opinion ?? ''))) },
@@ -102,6 +108,8 @@ const orgRoutes: MockRoute[] = [
   { method: 'POST', path: '/tenant/papers/import-recognized', handler: ({ body }) => guard(() => org.importRecognizedPaper(body as never)) },
   { method: 'POST', path: '/tenant/papers/delete', handler: ({ body }) => guard(() => { org.deletePaper(Number(body.id)); return null }) },
   { method: 'POST', path: '/tenant/papers/review', handler: ({ body }) => guard(() => org.reviewPaper(Number(body.id), Boolean(body.pass), String(body.opinion ?? ''))) },
+  /* 个人卷提交校本：生成一条 kind='试卷' 的审批单，进入「试卷审核中心」与「审批管理」 */
+  { method: 'POST', path: '/tenant/papers/submit-school', handler: ({ body }) => guard(() => org.submitPaperToSchool(Number(body.id), String(body.note ?? ''))) },
   { method: 'POST', path: '/tenant/papers/ai-compose', handler: ({ body }) => guard(() => org.aiComposePaper(body as never)) },
   // 我的模板：只返回当前用户自己的（组卷成功时由 aiComposePaper 自动落一条）
   { method: 'GET', path: '/tenant/papers/ai-templates', handler: () => guard(() => org.listAiComposeTemplates()) },
@@ -1012,6 +1020,10 @@ export const mockRoutes: MockRoute[] = [
   { method: 'GET', path: '/admin/ai-governance/traces', handler: ({ query }) => guard(() => content.listTraceRecords(String(query.scene ?? ''), String(query.safety ?? ''))) },
   { method: 'GET', path: '/admin/ai-billing/rules', handler: () => guard(() => content.listBillingRules()) },
   { method: 'POST', path: '/admin/ai-billing/rules/save', handler: ({ body }) => guard(() => content.saveBillingRule(Number(body.id), body as never)) },
+  /* 租户专属计费：读 = 全局骨架 + 该租户覆盖；写 = upsert 覆盖项；reset = 恢复到继承全局 */
+  { method: 'GET', path: '/admin/ai-billing/tenant-rules', handler: ({ query }) => guard(() => content.listTenantBillingRows(Number(query.tenantId))) },
+  { method: 'POST', path: '/admin/ai-billing/tenant-rules/save', handler: ({ body }) => guard(() => content.saveTenantBillingRule(Number(body.tenantId), String(body.scene), body as never)) },
+  { method: 'POST', path: '/admin/ai-billing/tenant-rules/reset', handler: ({ body }) => guard(() => content.resetTenantBillingRule(Number(body.tenantId), String(body.scene))) },
   { method: 'GET', path: '/admin/ai-billing/tenant-switches', handler: () => guard(() => content.listTenantAiSwitches()) },
   { method: 'POST', path: '/admin/ai-billing/tenant-switches/toggle', handler: ({ body }) => guard(() => content.toggleTenantAiCapability(Number(body.tenantId), String(body.capKey))) },
 

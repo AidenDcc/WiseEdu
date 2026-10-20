@@ -6,6 +6,7 @@ import { request } from '@aiteach/shared'
 import type {
   AiBillingRule,
   AiQualityEval,
+  AiTenantBillingRow,
   AiTraceRecord,
   BackupRecord,
   ComplianceSpotCheck,
@@ -113,6 +114,22 @@ export function fetchBillingRules() {
 }
 export function saveBillingRule(id: number, data: Partial<AiBillingRule>) {
   return request<AiBillingRule>('/admin/ai-billing/rules/save', { method: 'POST', data: { id, ...data } })
+}
+/* 租户专属计费：一个场景一条覆盖，未覆盖的场景沿用全局默认价 */
+export function fetchTenantBillingRules(tenantId: number) {
+  return request<AiTenantBillingRow[]>(withQuery('/admin/ai-billing/tenant-rules', { tenantId }))
+}
+export function saveTenantBillingRule(tenantId: number, scene: string, data: { unit: AiBillingRule['unit']; price: number }) {
+  return request<AiTenantBillingRow[]>('/admin/ai-billing/tenant-rules/save', {
+    method: 'POST',
+    data: { tenantId, scene, ...data },
+  })
+}
+export function resetTenantBillingRule(tenantId: number, scene: string) {
+  return request<AiTenantBillingRow[]>('/admin/ai-billing/tenant-rules/reset', {
+    method: 'POST',
+    data: { tenantId, scene },
+  })
 }
 export function fetchTenantAiSwitches() {
   return request<TenantAiSwitch[]>('/admin/ai-billing/tenant-switches')

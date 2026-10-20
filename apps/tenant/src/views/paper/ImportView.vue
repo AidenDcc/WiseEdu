@@ -598,7 +598,7 @@ async function confirmImport() {
     const saved = await importRecognizedPaper(payload)
     result.value = saved
     stage.value = 'done'
-    showToast(`入库完成：试卷已进试卷库，${saved.questionCount} 题已进题目库`, 'success')
+    showToast(`入库完成：试卷已进个人试卷，${saved.questionCount} 题已进题目库`, 'success')
   } catch (error) {
     showToast(error instanceof Error ? error.message : '入库失败，请重试', 'error')
   } finally {
