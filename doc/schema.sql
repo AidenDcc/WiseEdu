@@ -1,6 +1,8 @@
--- 教学云AI 平台数据库 DDL
+-- 进阶教育云平台数据库 DDL
 -- 由 build_db.py 从 schema_part*.py 同源生成，禁止手工修改
--- 表数量：145；全表含 7 个公共字段（id/tenant_id/create_by/create_time/update_by/update_time/deleted）
+-- 表数量：140；全表含 7 个公共字段（id/tenant_id/create_by/create_time/update_by/update_time/deleted）
+-- 注：edu_user_profile（个人中心扩展表）由 Flyway V3.9.6_6 创建，不在本文件内
+-- 注：edu_oss_file 同时存在于本文件与 Flyway V3.9.6_7（两处保持一致），用于描述对象存储元数据
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
@@ -36,7 +38,7 @@ CREATE TABLE `sys_tenant` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_tenant_code (tenant_code),
   KEY idx_status (status, expire_time),
@@ -70,7 +72,7 @@ CREATE TABLE `sys_tenant_apply` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_apply_no (apply_no),
   KEY idx_status_time (apply_status, submitted_at)
@@ -93,7 +95,7 @@ CREATE TABLE `sys_tenant_cert` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_apply (apply_id),
   KEY idx_tenant_ref (tenant_id_ref)
@@ -120,7 +122,7 @@ CREATE TABLE `sys_tenant_package` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_package_code (package_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='套餐定义';
@@ -137,7 +139,7 @@ CREATE TABLE `sys_tenant_package_feature` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_pkg_feature (package_id, feature_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='套餐功能权益';
@@ -155,7 +157,7 @@ CREATE TABLE `sys_tenant_quota` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_tenant_quota (tenant_id, quota_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='租户配额';
@@ -164,7 +166,6 @@ DROP TABLE IF EXISTS `sys_tenant_subscription`;
 CREATE TABLE `sys_tenant_subscription` (
   `id` BIGINT NOT NULL COMMENT '主键（雪花ID）',
   `tenant_id` BIGINT NOT NULL DEFAULT 0 COMMENT '租户ID，平台级为0',
-  `tenant_id` BIGINT NOT NULL COMMENT '租户 ID',
   `package_id` BIGINT NOT NULL COMMENT '套餐 ID',
   `start_time` DATETIME NOT NULL COMMENT '生效开始',
   `end_time` DATETIME NOT NULL COMMENT '生效结束',
@@ -178,7 +179,7 @@ CREATE TABLE `sys_tenant_subscription` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_tenant_status (tenant_id, sub_status),
   KEY idx_end_time (end_time)
@@ -188,7 +189,6 @@ DROP TABLE IF EXISTS `sys_tenant_config`;
 CREATE TABLE `sys_tenant_config` (
   `id` BIGINT NOT NULL COMMENT '主键（雪花ID）',
   `tenant_id` BIGINT NOT NULL DEFAULT 0 COMMENT '租户ID，平台级为0',
-  `tenant_id` BIGINT NOT NULL COMMENT '租户 ID',
   `org_name` VARCHAR(128) NOT NULL COMMENT '机构名称（展示名）',
   `short_name` VARCHAR(64) NULL COMMENT '简称',
   `contact_name` VARCHAR(64) NULL COMMENT '联系人',
@@ -206,7 +206,7 @@ CREATE TABLE `sys_tenant_config` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_tenant_cfg (tenant_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='租户业务配置';
@@ -227,7 +227,7 @@ CREATE TABLE `sys_review_flow` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_flow (tenant_id, flow_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='审核流程配置';
@@ -258,7 +258,7 @@ CREATE TABLE `sys_user` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_tenant_account (tenant_id, account),
   KEY idx_phone (phone),
@@ -281,7 +281,7 @@ CREATE TABLE `sys_role` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_role_code (tenant_id, role_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='角色';
@@ -296,7 +296,7 @@ CREATE TABLE `sys_user_role` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_user_role (user_id, role_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户角色关联';
@@ -312,7 +312,7 @@ CREATE TABLE `sys_role_permission` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_role_module_op (role_id, module_key, op_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='角色权限';
@@ -337,7 +337,7 @@ CREATE TABLE `sys_menu` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_scope_parent (menu_scope, parent_id),
   UNIQUE KEY uk_scope_path (menu_scope, menu_path)
@@ -347,7 +347,6 @@ DROP TABLE IF EXISTS `sys_tenant_menu`;
 CREATE TABLE `sys_tenant_menu` (
   `id` BIGINT NOT NULL COMMENT '主键（雪花ID）',
   `tenant_id` BIGINT NOT NULL DEFAULT 0 COMMENT '租户ID，平台级为0',
-  `tenant_id` BIGINT NOT NULL COMMENT '租户 ID',
   `menu_id` BIGINT NOT NULL COMMENT '菜单 ID',
   `menu_key` VARCHAR(128) NOT NULL COMMENT '菜单路径键（与前端菜单 key 一致）',
   `enabled` TINYINT NOT NULL COMMENT '是否开放',
@@ -356,7 +355,7 @@ CREATE TABLE `sys_tenant_menu` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_tenant_menu (tenant_id, menu_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='机构菜单开关';
@@ -374,7 +373,7 @@ CREATE TABLE `sys_dict_type` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_dict_type (dict_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='字典类型';
@@ -407,7 +406,7 @@ CREATE TABLE `sys_dict_item` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_type_sort (dict_type, sort_no),
   UNIQUE KEY uk_type_code (dict_type, item_code)
@@ -429,7 +428,7 @@ CREATE TABLE `sys_param` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_param_key (param_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='系统参数';
@@ -449,7 +448,7 @@ CREATE TABLE `sys_message_template` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_tpl_code (tpl_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='消息模板';
@@ -469,7 +468,7 @@ CREATE TABLE `sys_notify_rule` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_biz_key (tenant_id, biz_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='通知规则';
@@ -493,7 +492,7 @@ CREATE TABLE `sys_notification` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_receiver (receiver_id, read_flag),
   KEY idx_type_time (msg_type, create_time)
@@ -520,7 +519,7 @@ CREATE TABLE `sys_operation_log` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_module_time (biz_module, create_time),
   KEY idx_operator (create_by, create_time)
@@ -543,7 +542,7 @@ CREATE TABLE `sys_login_log` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_account_time (account, create_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='登录日志';
@@ -562,7 +561,7 @@ CREATE TABLE `sys_error_log` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_level_time (level, occur_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='异常日志';
@@ -584,7 +583,7 @@ CREATE TABLE `sys_audit_log` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_object (object_type, object_id),
   KEY idx_time (create_time)
@@ -609,7 +608,7 @@ CREATE TABLE `sys_storage_policy` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_policy_key (policy_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='存储策略';
@@ -631,7 +630,7 @@ CREATE TABLE `sys_backup_record` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_time (started_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='数据备份记录';
@@ -654,7 +653,7 @@ CREATE TABLE `sys_service_health` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_service_time (service_key, collect_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='服务健康快照';
@@ -679,7 +678,7 @@ CREATE TABLE `sys_export_task` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_type_status (task_type, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='导入导出任务';
@@ -700,7 +699,7 @@ CREATE TABLE `sys_campus` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_campus_code (tenant_id, campus_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='校区';
@@ -718,12 +717,12 @@ CREATE TABLE `sys_recycle_bin` (
   `deleted_by_name` VARCHAR(64) NULL COMMENT '删除人姓名',
   `deleted_at` DATETIME NOT NULL COMMENT '删除时间',
   `expire_at` DATETIME NULL COMMENT '自动清理时间',
-  `restored_flag` TINYINT NOT NULL COMMENT '是否已恢复',
+  `bin_status` TINYINT NOT NULL COMMENT '回收站状态：0 已恢复（原对象回到未删除）/ 1 在回收站（业务表 deleted=1）/ 2 已彻底删除（业务表 deleted=2）。与业务表三态同构，禁止跨级跳转',
   `create_by` BIGINT NULL COMMENT '创建人',
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_kind_owner (biz_kind, owner_id),
   KEY idx_expire (expire_at)
@@ -746,7 +745,7 @@ CREATE TABLE `dc_textbook_version` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_stage_subject (stage, subject)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='教材版本';
@@ -769,7 +768,7 @@ CREATE TABLE `dc_textbook_volume` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_textbook (textbook_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='教材分册';
@@ -789,7 +788,7 @@ CREATE TABLE `dc_textbook_catalog` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_volume_parent (volume_id, parent_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='教材目录';
@@ -805,7 +804,7 @@ CREATE TABLE `dc_textbook_catalog_knowledge` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_catalog_kp (catalog_id, knowledge_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='目录知识点关联';
@@ -829,7 +828,7 @@ CREATE TABLE `dc_knowledge_node` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_node_code (node_code),
   KEY idx_parent (parent_id),
@@ -854,7 +853,7 @@ CREATE TABLE `dc_exam_type_node` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_exam_code (node_code),
   KEY idx_parent (parent_id)
@@ -905,7 +904,7 @@ CREATE TABLE `q_question` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_lib_status (library, status),
   KEY idx_scope_status (scope, status),
@@ -935,7 +934,7 @@ CREATE TABLE `q_question_sub` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_question (question_id, sort_no)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='材料组合题子题';
@@ -952,7 +951,7 @@ CREATE TABLE `q_question_knowledge` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_q_kp (question_id, knowledge_name),
   KEY idx_kp (knowledge_name)
@@ -972,7 +971,7 @@ CREATE TABLE `q_question_category` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_lib_parent (library, parent_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='题库分类目录';
@@ -991,7 +990,7 @@ CREATE TABLE `q_question_favorite` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_owner (owner_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='题目收藏夹';
@@ -1008,7 +1007,7 @@ CREATE TABLE `q_question_favorite_item` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_fav_q (favorite_id, question_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='收藏夹条目';
@@ -1030,7 +1029,7 @@ CREATE TABLE `q_question_correction` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_question (question_id),
   KEY idx_status (handle_status)
@@ -1051,7 +1050,7 @@ CREATE TABLE `q_question_version` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_q_version (question_id, version_no)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='题目版本';
@@ -1072,7 +1071,7 @@ CREATE TABLE `q_question_check` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_question (question_id, check_round)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='题目 AI 质检结果';
@@ -1090,7 +1089,7 @@ CREATE TABLE `q_basket_item` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_user_q (user_id, question_id),
   KEY idx_user (user_id)
@@ -1124,7 +1123,6 @@ CREATE TABLE `p_paper` (
   `notices_json` JSON NULL COMMENT '卷首注意事项条目',
   `extras_json` JSON NULL COMMENT '卷面附加区块（表格/四线格/横线）',
   `attachments_json` JSON NULL COMMENT '随卷参考资料（媒体）',
-  `shared_square` TINYINT NOT NULL COMMENT '是否分享到知识广场',
   `ai_flag` TINYINT NOT NULL COMMENT '是否 AI 生成',
   `ai_checks_json` JSON NULL COMMENT '整卷质检结果',
   `ai_suspects_json` JSON NULL COMMENT '疑点列表',
@@ -1139,7 +1137,7 @@ CREATE TABLE `p_paper` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_owner (owner_id),
   KEY idx_status (status),
@@ -1164,7 +1162,7 @@ CREATE TABLE `p_paper_section` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_paper (paper_id, sort_no)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='试卷大题';
@@ -1183,7 +1181,7 @@ CREATE TABLE `p_paper_section_question` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_section (section_id, sort_no),
   KEY idx_paper (paper_id)
@@ -1207,7 +1205,7 @@ CREATE TABLE `p_paper_version` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_paper_version (paper_id, version_no)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='试卷版本';
@@ -1228,7 +1226,7 @@ CREATE TABLE `p_paper_comment` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_paper_target (paper_id, target)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='卷面评论';
@@ -1255,7 +1253,7 @@ CREATE TABLE `p_paper_collab_task` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_status (task_status),
   KEY idx_paper (paper_id)
@@ -1278,7 +1276,7 @@ CREATE TABLE `p_paper_collab_member` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_task_member (task_id, member_name),
   KEY idx_task (task_id)
@@ -1301,7 +1299,7 @@ CREATE TABLE `p_paper_blueprint` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_subject (subject, grade)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='双向细目表';
@@ -1322,7 +1320,7 @@ CREATE TABLE `p_paper_blueprint_cell` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_bp_cell (blueprint_id, row_key, col_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='细目表单元格';
@@ -1343,7 +1341,7 @@ CREATE TABLE `p_paper_template` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_subject (subject, grade)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='模板试卷';
@@ -1368,7 +1366,7 @@ CREATE TABLE `p_ai_compose_template` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_owner (owner_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='智能组卷参数模板';
@@ -1386,7 +1384,7 @@ CREATE TABLE `p_paper_ref` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_paper (paper_id),
   KEY idx_ref (ref_type, ref_id)
@@ -1405,11 +1403,13 @@ CREATE TABLE `t_teach_doc` (
   `knowledge_json` JSON NULL COMMENT '知识点范围',
   `doc_source` VARCHAR(16) NOT NULL COMMENT 'personal 个人/school 校本/platform 平台（决定编辑权限）',
   `doc_status` VARCHAR(16) NOT NULL COMMENT 'draft 草稿/published 已发布',
-  `content` LONGTEXT NULL COMMENT '正文（文档流富文本 HTML，标题层级 h1-h4）',
+  `content` LONGTEXT NOT NULL COMMENT '正文，唯一内容载体：富文本 HTML。教案要素、学案/讲义块、课件分页均以带 data 属性的标签内嵌其中，不再拆列',
+  `content_mode` VARCHAR(16) NOT NULL COMMENT '编辑形态：flow 文档流（教案/学案/讲义）/ slide 分页（课件）。只决定编辑器打开方式，不影响存储格式',
+  `periods` INT NULL COMMENT '课时数（教案用）。唯一保留的结构化要素，排课与工作量统计按此列过滤',
+  `page_count` INT NULL COMMENT '页数（课件用）。保存时由服务端统计 slide 段数回写，列表页无需解析正文',
+  `cover_url` VARCHAR(512) NULL COMMENT '封面图（课件列表用，无图时按主题色生成占位）',
   `page_json` JSON NULL COMMENT '页面设置档位（纸张/页边距/字体/页眉页脚/页码）',
-  `plan_json` JSON NULL COMMENT '教案结构化扩展（兼容旧数据）',
   `view_count` INT NOT NULL COMMENT '浏览次数',
-  `shared_square` TINYINT NOT NULL COMMENT '是否分享到知识广场',
   `word_count` INT NULL COMMENT '字数',
   `owner_id` BIGINT NOT NULL COMMENT '创建人',
   `owner_name` VARCHAR(64) NOT NULL COMMENT '创建人姓名',
@@ -1417,101 +1417,11 @@ CREATE TABLE `t_teach_doc` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_kind_owner (doc_kind, owner_id),
   KEY idx_subject (subject, grade)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='备课文档';
-
-DROP TABLE IF EXISTS `t_teach_plan`;
-CREATE TABLE `t_teach_plan` (
-  `id` BIGINT NOT NULL COMMENT '主键（雪花ID）',
-  `tenant_id` BIGINT NOT NULL DEFAULT 0 COMMENT '租户ID，平台级为0',
-  `doc_id` BIGINT NOT NULL COMMENT '备课文档 ID',
-  `objective_knowledge` LONGTEXT NULL COMMENT '知识与技能目标',
-  `objective_process` LONGTEXT NULL COMMENT '过程与方法目标',
-  `objective_emotion` LONGTEXT NULL COMMENT '情感态度价值观目标',
-  `key_points` LONGTEXT NULL COMMENT '教学重点',
-  `hard_points` LONGTEXT NULL COMMENT '教学难点',
-  `methods` JSON NULL COMMENT '教学方法',
-  `aids` JSON NULL COMMENT '教具与媒体',
-  `periods` INT NULL COMMENT '课时数',
-  `blackboard` LONGTEXT NULL COMMENT '板书设计',
-  `reflection` LONGTEXT NULL COMMENT '教学反思',
-  `create_by` BIGINT NULL COMMENT '创建人',
-  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `update_by` BIGINT NULL COMMENT '修改人',
-  `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
-  PRIMARY KEY (`id`),
-  UNIQUE KEY uk_plan_doc (doc_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='教案教学设计';
-
-DROP TABLE IF EXISTS `t_teach_plan_step`;
-CREATE TABLE `t_teach_plan_step` (
-  `id` BIGINT NOT NULL COMMENT '主键（雪花ID）',
-  `tenant_id` BIGINT NOT NULL DEFAULT 0 COMMENT '租户ID，平台级为0',
-  `doc_id` BIGINT NOT NULL COMMENT '备课文档 ID',
-  `sort_no` INT NOT NULL COMMENT '环节顺序',
-  `step_kind` VARCHAR(16) NOT NULL COMMENT 'lead 导入/teach 新授/consolidate 巩固/summary 小结/homework 作业/free 自定义',
-  `step_title` VARCHAR(255) NOT NULL COMMENT '环节名称',
-  `teacher_act` LONGTEXT NULL COMMENT '教师活动',
-  `student_act` LONGTEXT NULL COMMENT '学生活动',
-  `design_intent` LONGTEXT NULL COMMENT '设计意图',
-  `minutes` INT NULL COMMENT '时间分配（分钟）',
-  `question_ids` JSON NULL COMMENT '本环节引用题目',
-  `create_by` BIGINT NULL COMMENT '创建人',
-  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `update_by` BIGINT NULL COMMENT '修改人',
-  `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
-  PRIMARY KEY (`id`),
-  KEY idx_doc (doc_id, sort_no)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='教案教学过程环节';
-
-DROP TABLE IF EXISTS `t_teach_doc_block`;
-CREATE TABLE `t_teach_doc_block` (
-  `id` BIGINT NOT NULL COMMENT '主键（雪花ID）',
-  `tenant_id` BIGINT NOT NULL DEFAULT 0 COMMENT '租户ID，平台级为0',
-  `doc_id` BIGINT NOT NULL COMMENT '备课文档 ID',
-  `sort_no` INT NOT NULL COMMENT '块顺序',
-  `block_kind` VARCHAR(16) NOT NULL COMMENT 'goal/explain/example/practice/summary/homework/preview/explore/check/extend/text',
-  `block_title` VARCHAR(255) NULL COMMENT '块标题',
-  `body` LONGTEXT NULL COMMENT '块正文（富文本）',
-  `question_ids` JSON NULL COMMENT '引用的题库题目',
-  `page_break` TINYINT NOT NULL COMMENT '是否强制分页',
-  `teacher_note` LONGTEXT NULL COMMENT '教师批注（仅教师版渲染）',
-  `ref_mode` VARCHAR(16) NULL COMMENT '题目引用模式：snapshot 快照 / dynamic 动态引用',
-  `create_by` BIGINT NULL COMMENT '创建人',
-  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `update_by` BIGINT NULL COMMENT '修改人',
-  `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
-  PRIMARY KEY (`id`),
-  KEY idx_doc (doc_id, sort_no)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='文档块';
-
-DROP TABLE IF EXISTS `t_teach_doc_slide`;
-CREATE TABLE `t_teach_doc_slide` (
-  `id` BIGINT NOT NULL COMMENT '主键（雪花ID）',
-  `tenant_id` BIGINT NOT NULL DEFAULT 0 COMMENT '租户ID，平台级为0',
-  `doc_id` BIGINT NOT NULL COMMENT '备课文档 ID',
-  `sort_no` INT NOT NULL COMMENT '页序',
-  `layout` VARCHAR(16) NOT NULL COMMENT 'cover/bullets/image/question/section/end',
-  `slide_title` VARCHAR(255) NULL COMMENT '页标题',
-  `subtitle` VARCHAR(255) NULL COMMENT '副标题',
-  `bullets` JSON NULL COMMENT '要点列表',
-  `note` LONGTEXT NULL COMMENT '讲稿备注（不投屏）',
-  `question_id` BIGINT NULL COMMENT '例题页引用题目',
-  `thumb_url` VARCHAR(512) NULL COMMENT '缩略图',
-  `create_by` BIGINT NULL COMMENT '创建人',
-  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `update_by` BIGINT NULL COMMENT '修改人',
-  `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
-  PRIMARY KEY (`id`),
-  KEY idx_doc (doc_id, sort_no)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='课件页面';
 
 DROP TABLE IF EXISTS `t_teach_doc_version`;
 CREATE TABLE `t_teach_doc_version` (
@@ -1527,7 +1437,7 @@ CREATE TABLE `t_teach_doc_version` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_doc_version (doc_id, version_no)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='备课文档版本';
@@ -1554,7 +1464,7 @@ CREATE TABLE `t_teach_template` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_kind_scope (template_kind, scope)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='备课模板';
@@ -1582,7 +1492,7 @@ CREATE TABLE `t_prep_task` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_status (task_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='集体备课任务';
@@ -1601,7 +1511,7 @@ CREATE TABLE `t_prep_member` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_prep_member (task_id, member_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='集体备课成员';
@@ -1619,7 +1529,7 @@ CREATE TABLE `t_prep_comment` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_task (task_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='集体备课研讨记录';
@@ -1638,7 +1548,7 @@ CREATE TABLE `t_prep_version` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_prep_version (task_id, version_no)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='集体备课版本';
@@ -1657,7 +1567,7 @@ CREATE TABLE `r_file_folder` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_owner_parent (owner_id, parent_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='我的文件目录';
@@ -1687,7 +1597,7 @@ CREATE TABLE `r_file` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_folder (folder_id),
   KEY idx_owner (owner_id),
@@ -1713,7 +1623,7 @@ CREATE TABLE `r_material` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_subject (subject, grade)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='教辅资料';
@@ -1730,7 +1640,7 @@ CREATE TABLE `r_material_chapter` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_material (material_id, sort_no)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='教辅章节';
@@ -1750,7 +1660,7 @@ CREATE TABLE `r_material_example` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_chapter (chapter_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='教辅条目';
@@ -1778,7 +1688,7 @@ CREATE TABLE `r_media` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_kind (media_kind),
   KEY idx_subject (subject)
@@ -1802,52 +1712,40 @@ CREATE TABLE `r_video_clip` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_media (media_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='微课切片';
 
-DROP TABLE IF EXISTS `r_formula_standard`;
-CREATE TABLE `r_formula_standard` (
+DROP TABLE IF EXISTS `r_formula`;
+CREATE TABLE `r_formula` (
   `id` BIGINT NOT NULL COMMENT '主键（雪花ID）',
   `tenant_id` BIGINT NOT NULL DEFAULT 0 COMMENT '租户ID，平台级为0',
   `formula_name` VARCHAR(255) NOT NULL COMMENT '公式名称',
-  `branch` VARCHAR(64) NULL COMMENT '分支（代数/几何/物理…）',
+  `formula_scope` VARCHAR(16) NOT NULL COMMENT '作用域：standard 标准（平台维护，全局只读）/ org 机构共享（本机构可用）/ personal 个人',
+  `subject` VARCHAR(32) NULL COMMENT '学科（标准公式可为空，按 branch 组织）',
+  `branch` VARCHAR(64) NULL COMMENT '分支（代数/几何/物理…），标准公式的组织维度',
   `chapter` VARCHAR(128) NULL COMMENT '章节',
+  `category` VARCHAR(64) NULL COMMENT '细分类（机构/个人自建分类）',
   `latex` LONGTEXT NOT NULL COMMENT 'LaTeX 表达式',
   `knowledge_json` JSON NULL COMMENT '知识点',
+  `formula_status` VARCHAR(16) NOT NULL COMMENT '状态：approved 已通过/pending 待审/rejected 已驳回/off 已下架。标准公式固定 approved',
+  `owner_id` BIGINT NULL COMMENT '归属人（标准公式写 0）',
+  `owner_name` VARCHAR(64) NULL COMMENT '归属人姓名',
+  `source_id` BIGINT NULL COMMENT '来源公式 ID：标准公式收藏、机构公式复用到个人时记录，用于溯源与「取消收藏」定位',
   `collect_count` INT NOT NULL COMMENT '收藏次数',
+  `use_count` INT NOT NULL COMMENT '使用次数',
   `sort_no` INT NOT NULL COMMENT '排序',
   `create_by` BIGINT NULL COMMENT '创建人',
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
+  KEY idx_scope_status (formula_scope, formula_status),
+  KEY idx_owner (owner_id),
   KEY idx_branch (branch)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='标准公式库';
-
-DROP TABLE IF EXISTS `r_formula_org`;
-CREATE TABLE `r_formula_org` (
-  `id` BIGINT NOT NULL COMMENT '主键（雪花ID）',
-  `tenant_id` BIGINT NOT NULL DEFAULT 0 COMMENT '租户ID，平台级为0',
-  `formula_name` VARCHAR(255) NOT NULL COMMENT '公式名称',
-  `subject` VARCHAR(32) NOT NULL COMMENT '学科',
-  `category` VARCHAR(64) NOT NULL COMMENT '细分类',
-  `latex` LONGTEXT NOT NULL COMMENT 'LaTeX 表达式',
-  `formula_scope` VARCHAR(16) NOT NULL COMMENT 'mine 我的 / shared 机构共享',
-  `formula_status` VARCHAR(16) NOT NULL COMMENT 'pending 待审/approved 已通过/rejected 已驳回/off 已下架',
-  `owner_id` BIGINT NOT NULL COMMENT '归属人',
-  `owner_name` VARCHAR(64) NOT NULL COMMENT '归属人姓名',
-  `use_count` INT NOT NULL COMMENT '使用次数',
-  `create_by` BIGINT NULL COMMENT '创建人',
-  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `update_by` BIGINT NULL COMMENT '修改人',
-  `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
-  PRIMARY KEY (`id`),
-  KEY idx_scope_status (formula_scope, formula_status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='机构与个人公式';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='公式库';
 
 DROP TABLE IF EXISTS `r_resource_ref`;
 CREATE TABLE `r_resource_ref` (
@@ -1855,19 +1753,19 @@ CREATE TABLE `r_resource_ref` (
   `tenant_id` BIGINT NOT NULL DEFAULT 0 COMMENT '租户ID，平台级为0',
   `resource_type` VARCHAR(16) NOT NULL COMMENT 'question/paper/media/material/formula',
   `resource_id` BIGINT NOT NULL COMMENT '资源 ID',
-  `ref_type` VARCHAR(16) NOT NULL COMMENT 'teach_doc/paper/homework/courseware/slide',
+  `ref_type` VARCHAR(16) NOT NULL COMMENT '引用方类型：teach_doc 备课文档（教案/学案/讲义/课件统一为此值）/paper 试卷/exam 考试/template 模板',
   `ref_id` BIGINT NOT NULL COMMENT '引用方 ID',
-  `ref_block_id` BIGINT NULL COMMENT '引用块 ID',
+  `ref_anchor` VARCHAR(64) NULL COMMENT '引用锚点：正文内 HTML 元素 id（如 q_10086），用于定位与跳转；无块表后以锚点代替块 ID',
   `ref_mode` VARCHAR(16) NULL COMMENT 'snapshot 快照 / dynamic 动态引用',
   `create_by` BIGINT NULL COMMENT '创建人',
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_resource (resource_type, resource_id),
   KEY idx_ref (ref_type, ref_id),
-  UNIQUE KEY uk_ref (resource_type, resource_id, ref_type, ref_id, ref_block_id)
+  UNIQUE KEY uk_ref (resource_type, resource_id, ref_type, ref_id, ref_anchor)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='资源引用关系';
 
 DROP TABLE IF EXISTS `r_resource_approval`;
@@ -1893,7 +1791,7 @@ CREATE TABLE `r_resource_approval` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_status (approval_status),
   KEY idx_kind (resource_kind),
@@ -1913,7 +1811,7 @@ CREATE TABLE `r_resource_approval_log` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_approval (approval_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='审批流转日志';
@@ -1938,7 +1836,7 @@ CREATE TABLE `r_square_resource` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_kind (resource_kind),
   KEY idx_audit (audit_status)
@@ -1955,7 +1853,7 @@ CREATE TABLE `r_square_interaction` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_user_resource_action (resource_id, user_id, action)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='广场互动';
@@ -1978,7 +1876,7 @@ CREATE TABLE `r_prompt_org` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_scene (scene)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='机构提示词模板';
@@ -2001,7 +1899,7 @@ CREATE TABLE `e_class` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_grade (grade),
   KEY idx_campus (campus_id)
@@ -2032,7 +1930,7 @@ CREATE TABLE `e_student` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_student_no (tenant_id, student_no),
   KEY idx_class (class_id)
@@ -2055,7 +1953,7 @@ CREATE TABLE `e_guardian_binding` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_student_guardian (student_id, guardian_user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='家长绑定关系';
@@ -2078,7 +1976,7 @@ CREATE TABLE `e_consent_record` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_student (student_id),
   KEY idx_status (consent_status)
@@ -2109,7 +2007,7 @@ CREATE TABLE `e_homework` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_status_deadline (homework_status, deadline),
   KEY idx_owner (owner_id)
@@ -2127,7 +2025,7 @@ CREATE TABLE `e_homework_question` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_homework (homework_id, sort_no)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='作业题目';
@@ -2152,7 +2050,7 @@ CREATE TABLE `e_homework_submission` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_hw_student (homework_id, student_id),
   KEY idx_student (student_id)
@@ -2177,7 +2075,7 @@ CREATE TABLE `e_exam_session` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_status (session_status),
   KEY idx_paper (paper_id)
@@ -2200,7 +2098,7 @@ CREATE TABLE `e_exam_answer` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_session_student (session_id, student_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='答卷';
@@ -2227,7 +2125,7 @@ CREATE TABLE `e_exam_answer_item` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_answer (answer_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='答题明细';
@@ -2248,7 +2146,7 @@ CREATE TABLE `e_grading_duty` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_session (session_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='阅卷分工';
@@ -2270,7 +2168,7 @@ CREATE TABLE `e_grading_record` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_answer_q (answer_id, question_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='评卷记录';
@@ -2300,7 +2198,7 @@ CREATE TABLE `e_paper_analysis` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_analysis_session (session_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='试卷分析快照';
@@ -2325,7 +2223,7 @@ CREATE TABLE `e_question_analysis` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_session_question (session_id, question_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='题目分析明细';
@@ -2350,7 +2248,7 @@ CREATE TABLE `e_mistake` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_scope (scope),
   KEY idx_student (student_id)
@@ -2373,7 +2271,7 @@ CREATE TABLE `e_mastery` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_student_kp (student_id, subject, knowledge_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='知识点掌握度';
@@ -2392,7 +2290,7 @@ CREATE TABLE `e_student_profile` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_profile_student (student_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='学生学情画像';
@@ -2412,7 +2310,7 @@ CREATE TABLE `e_class_profile` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_class (class_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='班级学情报告';
@@ -2433,7 +2331,7 @@ CREATE TABLE `e_practice_push` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_student (student_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='个性化练习推送';
@@ -2459,7 +2357,7 @@ CREATE TABLE `ai_model` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_model_name (model_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='模型接入';
@@ -2481,7 +2379,7 @@ CREATE TABLE `ai_agent_config` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_scene (scene)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='智能体编排配置';
@@ -2503,7 +2401,7 @@ CREATE TABLE `ai_agent_check_item` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_agent_item (agent_id, item_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='智能体检查项';
@@ -2524,7 +2422,7 @@ CREATE TABLE `ai_prompt_template` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_scene_status (scene, prompt_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='Prompt 模板';
@@ -2542,7 +2440,7 @@ CREATE TABLE `ai_prompt_version` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_prompt_version (template_id, version_no)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='Prompt 版本';
@@ -2570,7 +2468,7 @@ CREATE TABLE `ai_call_log` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_time (create_time),
   KEY idx_tenant_scene (tenant_id, scene),
@@ -2601,7 +2499,7 @@ CREATE TABLE `ai_task` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_task_no (task_no),
   KEY idx_status (task_status)
@@ -2628,7 +2526,7 @@ CREATE TABLE `ai_artifact_review` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_status (review_status),
   KEY idx_kind (artifact_kind)
@@ -2653,7 +2551,7 @@ CREATE TABLE `ai_quality_eval` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_scene_time (scene, ran_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='AI 质量评测';
@@ -2677,7 +2575,7 @@ CREATE TABLE `ai_trace` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_trace_id (trace_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='AI 生成留痕';
@@ -2697,7 +2595,7 @@ CREATE TABLE `ai_billing_rule` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_scene (scene, model_key),
   UNIQUE KEY uk_tenant_scene_model (tenant_id, scene, model_key)
@@ -2717,7 +2615,7 @@ CREATE TABLE `ai_quota_account` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_tenant (tenant_id, account_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='AI 额度账户';
@@ -2738,7 +2636,7 @@ CREATE TABLE `ai_quota_flow` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_account_time (account_id, occur_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='AI 额度流水';
@@ -2757,7 +2655,7 @@ CREATE TABLE `ai_tenant_switch` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_tenant_cap (tenant_id, capability_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='租户 AI 能力开关';
@@ -2776,7 +2674,7 @@ CREATE TABLE `ai_sensitive_policy` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_scope (scope)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='内容安全策略';
@@ -2797,7 +2695,7 @@ CREATE TABLE `ai_knowledge_doc` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_subject (subject)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='AI 知识库文档';
@@ -2823,7 +2721,7 @@ CREATE TABLE `c_public_question` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_subject_status (subject, content_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='公共题库题目';
@@ -2844,7 +2742,7 @@ CREATE TABLE `c_public_paper` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_subject_status (subject, content_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='公共试卷';
@@ -2865,7 +2763,7 @@ CREATE TABLE `c_content_distribution` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_type (content_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='内容分发授权';
@@ -2886,7 +2784,7 @@ CREATE TABLE `c_compliance_check` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_status (check_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='内容合规抽检';
@@ -2911,7 +2809,7 @@ CREATE TABLE `c_feedback_ticket` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_status_priority (ticket_status, priority)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='内容问题反馈工单';
@@ -2935,7 +2833,7 @@ CREATE TABLE `c_review_record` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_object (object_type, object_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='内容审核记录';
@@ -2962,7 +2860,7 @@ CREATE TABLE `sys_sso_client` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_name (name),
   KEY idx_type (sys_type, enabled)
@@ -2986,7 +2884,7 @@ CREATE TABLE `sys_user_ext_map` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_client_ext (client_id, ext_user_id),
   KEY idx_user (tenant_id, user_id),
@@ -3013,7 +2911,7 @@ CREATE TABLE `sys_org_sync_log` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_client_time (client_id, start_time),
   KEY idx_status (status)
@@ -3042,7 +2940,7 @@ CREATE TABLE `r_scan_device` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_owner (tenant_id, owner_type, owner_id),
   KEY idx_type (device_type, status)
@@ -3065,7 +2963,7 @@ CREATE TABLE `t_doc_layout_style` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_scope (tenant_id, scope, doc_type),
   KEY idx_default (tenant_id, doc_type, is_default)
@@ -3092,7 +2990,7 @@ CREATE TABLE `t_doc_collab_session` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_session_no (session_no),
   KEY idx_doc (tenant_id, doc_id, status)
@@ -3115,7 +3013,7 @@ CREATE TABLE `t_doc_collab_member` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_session_user (tenant_id, session_id, user_id),
   KEY idx_user (tenant_id, user_id)
@@ -3139,7 +3037,7 @@ CREATE TABLE `t_doc_collab_op` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_session_seq (tenant_id, session_id, seq_no),
   KEY idx_user_time (tenant_id, user_id, server_ts)
@@ -3171,7 +3069,7 @@ CREATE TABLE `e_answer_sheet` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_session_student (tenant_id, exam_session_id, student_id),
   KEY idx_claim (tenant_id, claim_status),
@@ -3196,7 +3094,7 @@ CREATE TABLE `e_answer_sheet_page` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_sheet_page (tenant_id, sheet_id, page_no)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='答卷页';
@@ -3226,7 +3124,7 @@ CREATE TABLE `e_score_recall` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_idem (tenant_id, idem_key),
   KEY idx_session_subject (tenant_id, exam_session_id, subject),
@@ -3250,7 +3148,7 @@ CREATE TABLE `e_score_recall_log` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_recall (tenant_id, recall_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='成绩回传日志';
@@ -3277,7 +3175,7 @@ CREATE TABLE `g_parent_account` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_phone_hash (phone_hash),
   KEY idx_wx (wx_openid)
@@ -3305,7 +3203,7 @@ CREATE TABLE `g_parent_student` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_parent_student (tenant_id, parent_id, student_id),
   KEY idx_student (tenant_id, student_id, bind_status),
@@ -3329,7 +3227,7 @@ CREATE TABLE `g_parent_login_log` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_parent_time (parent_id, create_time),
   KEY idx_result (result)
@@ -3359,7 +3257,7 @@ CREATE TABLE `g_share_link` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_token (share_token),
   KEY idx_target (tenant_id, target_type, target_id),
@@ -3383,7 +3281,7 @@ CREATE TABLE `g_share_access_log` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_share_time (tenant_id, share_id, create_time),
   KEY idx_parent_time (tenant_id, parent_id, create_time)
@@ -3403,7 +3301,7 @@ CREATE TABLE `g_notify_setting` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   UNIQUE KEY uk_parent_type (parent_id, notify_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='家长通知偏好';
@@ -3430,11 +3328,37 @@ CREATE TABLE `g_report_push` (
   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_by` BIGINT NULL COMMENT '修改人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
-  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标识：0正常 1已删除',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1回收站 2已彻底删除',
   PRIMARY KEY (`id`),
   KEY idx_student_type (tenant_id, student_id, report_type),
   KEY idx_batch (tenant_id, batch_no),
   KEY idx_status (push_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='学情报告推送';
+
+DROP TABLE IF EXISTS `edu_oss_file`;
+CREATE TABLE `edu_oss_file` (
+  `id` BIGINT NOT NULL COMMENT '主键（雪花ID）',
+  `tenant_id` BIGINT NOT NULL DEFAULT 0 COMMENT '租户ID，平台级为0',
+  `biz_type` VARCHAR(32) NOT NULL DEFAULT 'common' COMMENT '业务分类：avatar/image/document/video/audio/paper/courseware/import/export/common',
+  `origin_name` VARCHAR(255) NULL COMMENT '原始文件名',
+  `storage_key` VARCHAR(512) NOT NULL COMMENT '桶内对象 Key（业务表引用它而不是 URL）',
+  `bucket` VARCHAR(64) NULL COMMENT '桶名',
+  `size_bytes` BIGINT NULL COMMENT '字节数',
+  `mime` VARCHAR(128) NULL COMMENT 'MIME',
+  `ext` VARCHAR(32) NULL COMMENT '扩展名（不含点）',
+  `url` VARCHAR(768) NULL COMMENT '最近一次生成的访问地址（仅排查线索）',
+  `etag` VARCHAR(64) NULL COMMENT 'OSS ETag',
+  `uploader` VARCHAR(64) NULL COMMENT '上传人账号',
+  `create_by` BIGINT NULL COMMENT '创建人',
+  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` BIGINT NULL COMMENT '修改人',
+  `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除状态：0未删除 1已删除',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY uk_edu_oss_file_key (`storage_key`),
+  KEY idx_edu_oss_file_biz (biz_type, tenant_id),
+  KEY idx_edu_oss_file_uploader (uploader),
+  KEY idx_edu_oss_file_time (create_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='对象存储文件元数据';
 
 SET FOREIGN_KEY_CHECKS = 1;
