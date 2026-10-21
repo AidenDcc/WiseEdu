@@ -116,11 +116,10 @@ Demo 阶段页面主体仍使用自有组件和 Mock 数据，以便快速演示
 │   ├── jeecg-module-system/         # 系统管理：用户、角色、权限、字典、菜单
 │   ├── jeecg-boot-module/           # 业务模块：教学云 edu-platform / edu-tenant、示例与 AI/RAG
 │   ├── jeecg-server-cloud/          # 可选微服务栈（仅 -P SpringCloud 构建），含 edu 微服务启动模块
-│   ├── db/                          # 数据库初始化与增量脚本
+│   ├── db/                          # 数据库：框架基线 SQL、合并迁移/种子脚本（入口 init-jiaoyu-ai.sh）
 │   ├── docker-compose.yml           # MySQL / Redis / pgvector 本地编排
 │   └── oss.env.example              # 阿里云 OSS 凭据模板（复制为 oss.env，已忽略）
 ├── doc/                     # 需求规格说明书与功能大纲
-├── db/                      # 本地库初始化/迁移/种子脚本（入口 init-jiaoyu-ai.sh）
 ├── scripts/                 # 本地开发脚本：start-dev / stop-dev、Mock 数据导出、密码哈希
 ├── package.json             # 根级脚本与 workspace 命令
 ├── pnpm-workspace.yaml      # workspace 配置
@@ -344,6 +343,7 @@ cd Service && docker compose up -d
 
 # 2. 初始化数据库：导入基础 schema（增量变更由 Flyway 负责）
 #    Service/db/jeecgboot-mysql-5.7.sql
+#    或一键重建（含教学云合并迁移 + mock 种子）：./Service/db/init-jiaoyu-ai.sh
 
 # 3. 构建
 cd Service && mvn clean package

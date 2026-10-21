@@ -1,0 +1,8 @@
+# 镜像只 COPY 三份基线 SQL（见 Dockerfile）；
+# 教学云的迁移/种子脚本与本地回滚快照不参与构建，避免把 6MB+ 的上下文传进 daemon。
+backup/
+__pycache__/
+*.pyc
+*.py
+0*_*.sql
+init-jiaoyu-ai.sh

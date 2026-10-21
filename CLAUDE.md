@@ -16,7 +16,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ├── packages/shared/    # 前端共享层：@aiteach/shared
 ├── Service/            # 后端（JeecgBoot 3.9.5），Maven 根目录
 ├── doc/                # 需求规格说明书与功能大纲
-├── db/                 # 本地库初始化/迁移/种子脚本，入口 db/init-jiaoyu-ai.sh
 └── scripts/            # 本地开发脚本：start-dev / stop-dev、Mock 数据导出、密码哈希
 ```
 
@@ -185,7 +184,7 @@ Service/                                    # jeecg-boot-parent（根 pom）
 
 **支持：** MySQL 8.0+（默认）、PostgreSQL、Oracle 11g+、SQL Server 2017+、MariaDB、DM8（达梦）、KingBase ES。各数据库配置见 `application-{dbtype}.yml`。
 
-**初始化：** 导入 `Service/db/jeecgboot-mysql-5.7.sql` 建基础 schema；后续增量由 Flyway 负责（脚本按日期目录组织，如 `202512/`）。
+**初始化：** 导入 `Service/db/jeecgboot-mysql-5.7.sql` 建基础 schema；后续增量由 Flyway 负责（脚本按日期目录组织，如 `202512/`）。本地一键重建（含教学云合并迁移、mock 种子与演示口令）用 `./Service/db/init-jiaoyu-ai.sh`。
 
 **Flyway 注意：** dev 模式下 `spring.main.lazy-initialization=true` 用于加快启动，会干扰 Flyway 自动配置，因此 Flyway 自动配置被显式排除、单独管理。
 

@@ -6,8 +6,8 @@
 ## 为什么单独一个脚本
 
 前端 Mock 时代的登录凭据是 `sha256(salt + password)`（见 packages/shared/src/auth/accounts.ts），
-后端 jeecg 用的是 `PBEWithMD5AndDES`（见 db/jeecg_pwd.py）。切到真实后端以后，
-`sys_user.password` 里没有哈希（`db/seed_mock.py` 只写业务字段，不编口令）或仍是框架默认的
+后端 jeecg 用的是 `PBEWithMD5AndDES`（见 Service/db/jeecg_pwd.py）。切到真实后端以后，
+`sys_user.password` 里没有哈希（`Service/db/seed_mock.py` 只写业务字段，不编口令）或仍是框架默认的
 `123456`，于是「原来能登的 admin / admin0123」变成「账号或密码错误」。
 
 本脚本按 `sys_user.salt` 逐账号重算哈希，幂等：同一账号重复跑，盐不变、哈希不变。
@@ -22,10 +22,10 @@
 
 ## 用法
 
-    python3 db/07_demo_passwords.py                  # 直接改库
-    python3 db/07_demo_passwords.py --dry-run        # 只打印将要执行的 SQL
-    python3 db/07_demo_passwords.py --password xxx   # 换一个统一口令
-    DB_NAME=jiaoyu-ai-verify python3 db/07_demo_passwords.py
+    python3 Service/db/07_demo_passwords.py                  # 直接改库
+    python3 Service/db/07_demo_passwords.py --dry-run        # 只打印将要执行的 SQL
+    python3 Service/db/07_demo_passwords.py --password xxx   # 换一个统一口令
+    DB_NAME=jiaoyu-ai-verify python3 Service/db/07_demo_passwords.py
 
 连接信息走环境变量：DB_HOST / DB_PORT / DB_USER / DB_PASS / DB_NAME（与 init-jiaoyu-ai.sh 同名）。
 """

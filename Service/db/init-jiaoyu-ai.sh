@@ -10,9 +10,9 @@
 #   - 已安装 node + tsx（用于导出前端 mock 数据）
 #
 # 用法：
-#   ./db/init-jiaoyu-ai.sh              # 全量初始化（会删库重建！）
-#   ./db/init-jiaoyu-ai.sh --no-seed    # 只建库建表，不灌 mock 数据
-#   ./db/init-jiaoyu-ai.sh --keep-db    # 保留已有库，只补表与数据
+#   ./Service/db/init-jiaoyu-ai.sh              # 全量初始化（会删库重建！）
+#   ./Service/db/init-jiaoyu-ai.sh --no-seed    # 只建库建表，不灌 mock 数据
+#   ./Service/db/init-jiaoyu-ai.sh --keep-db    # 保留已有库，只补表与数据
 #
 # 步骤：
 #   1. 建库 + 执行 doc/schema.sql（140 张业务表）
@@ -29,8 +29,10 @@ set -euo pipefail
 export LC_ALL=en_US.UTF-8
 export LANG=en_US.UTF-8
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# 目标库名可覆写：DB_NAME=jiaoyu-ai-verify ./db/init-jiaoyu-ai.sh  可做无破坏性演练
+# 本脚本位于 Service/db/：SELF_DIR 取脚本自身目录，ROOT 回到仓库根
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SELF_DIR/../.." && pwd)"
+# 目标库名可覆写：DB_NAME=jiaoyu-ai-verify ./Service/db/init-jiaoyu-ai.sh  可做无破坏性演练
 DB="${DB_NAME:-jiaoyu-ai}"
 SRC_DB="${SRC_DB_NAME:-jeecg-boot}"
 MYSQL_BIN="${MYSQL_BIN:-$HOME/tools/mysql/bin}"
@@ -89,13 +91,13 @@ xargs "$MYSQLDUMP" -h"$HOST" -P"$PORT" -u"$USER" -p"$PASS" \
 
 # ---------- 3~5. 冲突表 / 触发器 / 数据 ----------
 step "3/9 重建 6 张冲突表"
-"$MYSQL" -h"$HOST" -P"$PORT" -u"$USER" -p"$PASS" "$DB" < "$ROOT/db/01_merge_conflict_tables.sql" 2>&1 | grep -v "Using a password" || true
+"$MYSQL" -h"$HOST" -P"$PORT" -u"$USER" -p"$PASS" "$DB" < "$SELF_DIR/01_merge_conflict_tables.sql" 2>&1 | grep -v "Using a password" || true
 
 step "4/9 清理历史同步触发器"
-"$MYSQL" -h"$HOST" -P"$PORT" -u"$USER" -p"$PASS" "$DB" < "$ROOT/db/02_sync_triggers.sql" 2>&1 | grep -v "Using a password" || true
+"$MYSQL" -h"$HOST" -P"$PORT" -u"$USER" -p"$PASS" "$DB" < "$SELF_DIR/02_sync_triggers.sql" 2>&1 | grep -v "Using a password" || true
 
 step "5/9 迁移冲突表数据 + 过渡表 + Flyway 历史"
-"$MYSQL" -h"$HOST" -P"$PORT" -u"$USER" -p"$PASS" "$DB" < "$ROOT/db/03_migrate_conflict_data.sql" 2>&1 | grep -v "Using a password" | tail -10 || true
+"$MYSQL" -h"$HOST" -P"$PORT" -u"$USER" -p"$PASS" "$DB" < "$SELF_DIR/03_migrate_conflict_data.sql" 2>&1 | grep -v "Using a password" | tail -10 || true
 
 EDU_TABLES=$(qe "SELECT GROUP_CONCAT(table_name SEPARATOR ' ') FROM information_schema.tables WHERE table_schema='$SRC_DB' AND table_name LIKE 'edu_%'")
 if [ -n "$EDU_TABLES" ]; then
@@ -109,12 +111,12 @@ fi
 
 # ---------- 6~7. 下线可选模块 / 收敛冲突表重复列 ----------
 step "6/9 下线框架示例数据与可选模块"
-"$MYSQL" -h"$HOST" -P"$PORT" -u"$USER" -p"$PASS" "$DB" < "$ROOT/db/04_cleanup_optional_modules.sql" 2>&1 | grep -v "Using a password" || true
+"$MYSQL" -h"$HOST" -P"$PORT" -u"$USER" -p"$PASS" "$DB" < "$SELF_DIR/04_cleanup_optional_modules.sql" 2>&1 | grep -v "Using a password" || true
 echo "清理后表数：$(qe "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DB'")"
 
 step "7/9 收敛冲突表重复列（重复字段以框架为准）"
-"$MYSQL" -h"$HOST" -P"$PORT" -u"$USER" -p"$PASS" "$DB" < "$ROOT/db/05_sys_user_unify_columns.sql" 2>&1 | grep -v "Using a password" || true
-"$MYSQL" -h"$HOST" -P"$PORT" -u"$USER" -p"$PASS" "$DB" < "$ROOT/db/06_unify_remaining_conflict_tables.sql" 2>&1 | grep -v "Using a password" || true
+"$MYSQL" -h"$HOST" -P"$PORT" -u"$USER" -p"$PASS" "$DB" < "$SELF_DIR/05_sys_user_unify_columns.sql" 2>&1 | grep -v "Using a password" || true
+"$MYSQL" -h"$HOST" -P"$PORT" -u"$USER" -p"$PASS" "$DB" < "$SELF_DIR/06_unify_remaining_conflict_tables.sql" 2>&1 | grep -v "Using a password" || true
 echo "sys_user 列数：$(qe "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='$DB' AND table_name='sys_user'")"
 
 # ---------- 8. mock 数据 ----------
@@ -146,7 +148,7 @@ for t, c, dt, nul, dflt, key, extra in rows:
 json.dump(meta, open('/tmp/table_meta.json', 'w'), ensure_ascii=False)
 print(f'表结构元数据：{len(meta)} 张表')
 PY
-    python3 db/seed_mock.py | tail -5
+    python3 "$SELF_DIR/seed_mock.py" | tail -5
     "$MYSQL" -h"$HOST" -P"$PORT" -u"$USER" -p"$PASS" "$DB" < /tmp/seed_mock.sql 2>&1 | grep -v "Using a password" || true
     echo "mock 数据已写入"
   fi
@@ -157,7 +159,7 @@ fi
 # ---------- 9. 演示账号口令 ----------
 step "9/9 统一演示账号口令（admin0123）"
 DB_NAME="$DB" DB_HOST="$HOST" DB_PORT="$PORT" DB_USER="$USER" DB_PASS="$PASS" MYSQL_BIN="$MYSQL_BIN" \
-  python3 "$ROOT/db/07_demo_passwords.py" || echo "口令重置失败：请检查 python3 是否可用，登录将退回框架默认口令"
+  python3 "$SELF_DIR/07_demo_passwords.py" || echo "口令重置失败：请检查 python3 是否可用，登录将退回框架默认口令"
 
 step "完成"
 echo "库：$DB"

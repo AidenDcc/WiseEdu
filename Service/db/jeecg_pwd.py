@@ -23,7 +23,7 @@ jeecg 密码哈希（PBEWithMD5AndDES）的纯 Python 实现。
 
 ## 用法
 
-    python3 db/jeecg_pwd.py <账号> <明文密码> [盐]
+    python3 Service/db/jeecg_pwd.py <账号> <明文密码> [盐]
     不给盐则随机生成 8 位；输出 "盐<TAB>哈希"，可直接粘进 SQL。
 """
 import hashlib

@@ -21,12 +21,12 @@ coverage/
 doc/_build/*
 # 数据库基线的一次性备份快照（本地演示数据，可随时重新导出）
 doc/schema.sql.bak
-# Python 本地脚本产物（db/ 下的迁移/种子脚本）
-db/__pycache__/
+# Python 本地脚本产物（Service/db/ 下的迁移/种子脚本）
+**/__pycache__/
 *.pyc
-# db/backup/ 是 20261021 单库合并时的一次性回滚快照（含本地演示数据），
+# Service/db/backup/ 是 20261021 单库合并时的一次性回滚快照（含本地演示数据），
 # 需要时用 mysqldump 重新导出即可，不作为工程资产入库。
-db/backup/
+Service/db/backup/
 # Office 临时锁文件
 ~$*
 .~*
