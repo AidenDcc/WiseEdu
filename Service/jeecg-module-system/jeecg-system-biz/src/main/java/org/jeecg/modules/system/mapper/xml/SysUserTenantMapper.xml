@@ -42,7 +42,7 @@
         SELECT st.id as tenantUserId,st.name,st.trade,st.house_number,st.create_by,sut.status as userTenantStatus,sut.user_id as id
         FROM sys_user_tenant sut
         LEFT JOIN sys_tenant st ON sut.tenant_id = st.id
-        WHERE st.status = 1
+        WHERE st.status in (1, 2)
         AND st.del_flag = 0
         AND sut.user_id = #{userId}
         <if test="userTenantStatus!=null">
@@ -104,8 +104,15 @@
     </select>
     
     <!-- 统计一个人创建了多少个租户 -->
+    <!--
+      教学云状态语义适配：sys_tenant.status 采用业务四值 1 试用 / 2 正式 / 3 已到期 / 4 已禁用，
+      而框架原生只有 1 正常 / 2 冻结 两值，且判定「租户可用」写死 status = 1，
+      会把全部「正式」租户（2）当成不可用 —— 表现就是登录成功但 loginTenantId=0。
+      故本文件所有租户可用性判定统一改为 status in (1, 2)：试用与正式均可用，到期/禁用不可用。
+      同源问题见 doc/05-后端架构设计说明书.md §6.0。
+    -->
     <select id="countCreateTenantNum" resultType="java.lang.Integer">
-        select count(*) count from sys_tenant where create_by = #{userId} and del_flag = 0 and status = 1
+        select count(*) count from sys_tenant where create_by = #{userId} and del_flag = 0 and status in (1, 2)
     </select>
 
     <!--判断当前用户是否已在该租户下面-->
@@ -119,7 +126,7 @@
     <!--查询未被注销的租户-->
     <select id="getTenantNoCancel" resultType="org.jeecg.modules.system.entity.SysTenant">
         SELECT st.id,st.name FROM sys_user_tenant sut
-        JOIN sys_tenant st ON sut.tenant_id = st.id AND st.del_flag = 0 AND st.status = 1
+        JOIN sys_tenant st ON sut.tenant_id = st.id AND st.del_flag = 0 AND st.status in (1, 2)
         WHERE
         user_id = #{userId}
     </select>
@@ -139,7 +146,7 @@
     <!--根据用户id获取我的租户-->
     <select id="getTenantPageListByUserId" resultType="org.jeecg.modules.system.entity.SysTenant">
         SELECT st.id,st.name,st.status,st.trade,st.company_size,st.company_address,st.company_logo,st.house_number,st.work_place,st.position,st.department,st.create_by FROM sys_user_tenant sut
-        JOIN sys_tenant st ON sut.tenant_id = st.id AND st.del_flag = 0 AND st.status = 1
+        JOIN sys_tenant st ON sut.tenant_id = st.id AND st.del_flag = 0 AND st.status in (1, 2)
         WHERE sut.user_id = #{userId}
         <if test="sysUserTenantVo.name != null and sysUserTenantVo.name != ''">
             <bind name="bindName" value="'%'+sysUserTenantVo.name+'%'"/>
@@ -193,7 +200,7 @@
             <otherwise>
                 SELECT su.id userId,su.realname,su.avatar
                 FROM sys_user_tenant sut
-                JOIN sys_tenant st ON sut.tenant_id = st.id and st.status = 1 and st.del_flag = 0
+                JOIN sys_tenant st ON sut.tenant_id = st.id and st.status in (1, 2) and st.del_flag = 0
                 JOIN sys_user su ON sut.user_id = su.id and su.status = 1 and su.del_flag = 0
                 WHERE
                 sut.status = 1

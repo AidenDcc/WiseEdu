@@ -24,6 +24,20 @@
             <artifactId>jeecg-module-demo</artifactId>
             <version>${jeecgboot.version}</version>
         </dependency>
+
+        <!-- 教学云：平台端业务模块（管理端） -->
+        <dependency>
+            <groupId>org.jeecgframework.boot3</groupId>
+            <artifactId>jeecg-module-edu-platform</artifactId>
+            <version>${jeecgboot.version}</version>
+        </dependency>
+
+        <!-- 教学云：机构端业务模块 -->
+        <dependency>
+            <groupId>org.jeecgframework.boot3</groupId>
+            <artifactId>jeecg-module-edu-tenant</artifactId>
+            <version>${jeecgboot.version}</version>
+        </dependency>
         
         <!-- flyway 数据库自动升级 -->
         <dependency>

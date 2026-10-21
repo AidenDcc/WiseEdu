@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.shiro.SecurityUtils;
 import org.jeecg.common.api.vo.ApiResult;
 import org.jeecg.common.api.vo.Result;
+import org.jeecg.common.config.TenantContext;
 import org.jeecg.common.constant.CacheConstant;
 import org.jeecg.common.constant.CommonConstant;
 import org.jeecg.common.system.util.JwtUtil;
@@ -75,6 +76,9 @@ public class EduAuthController {
     private static final int LOGIN_FAIL_LIMIT = 5;
     private static final int LOGIN_FAIL_EXPIRE_SECONDS = 600;
 
+    /** 平台租户ID：jeecg 约定 0 表示平台/公共租户，此租户下不做租户隔离 */
+    private static final String PUBLIC_TENANT = "0";
+
     @IgnoreAuth
     @Operation(summary = "教学云登录")
     @PostMapping("/login")
@@ -113,12 +117,25 @@ public class EduAuthController {
         redisUtil.set(CommonConstant.PREFIX_USER_TOKEN + token, token);
         redisUtil.expire(CommonConstant.PREFIX_USER_TOKEN + token, JwtUtil.EXPIRE_TIME * 2 / 1000);
 
-        // 6. 登录租户判定：复用框架逻辑，它会把结果写进 sysUser.loginTenantId 并同步 TenantContext
-        Result<JSONObject> tenantResult = new Result<>();
-        JSONObject tenantHolder = new JSONObject();
-        Result<JSONObject> tenantError = sysUserService.setLoginTenant(sysUser, tenantHolder, username, tenantResult);
-        if (tenantError != null) {
-            return ApiResult.fail(500, tenantError.getMessage());
+        // 6. 登录租户判定
+        //    平台侧账号（持有框架 admin / superadmin 角色）不进入租户上下文：它是跨租户的超管，
+        //    而框架会给它挑一个「关联租户」当登录租户（admin 就关联着 jeecg 演示租户 1000），
+        //    一旦被选上，平台端所有查询就被 MybatisPlusSaasConfig 按租户隔离，只能看到那一家机构的数据。
+        Set<String> roleCodes = sysUserService.getUserRolesSet(username);
+        if (isPlatformAccount(roleCodes)) {
+            sysUser.setLoginTenantId(0);
+            // 必须落库：后续每个请求的租户上下文是从 sys_user.login_tenant_id 还原的，
+            // 只改内存的话下一次请求又会被拉回 1000（admin 之前被写进去的演示租户）。
+            sysUserService.updateUserDepart(username, null, 0);
+            TenantContext.setTenant(PUBLIC_TENANT);
+        } else {
+            // 复用框架逻辑，它会把结果写进 sysUser.loginTenantId 并同步 TenantContext
+            Result<JSONObject> tenantResult = new Result<>();
+            JSONObject tenantHolder = new JSONObject();
+            Result<JSONObject> tenantError = sysUserService.setLoginTenant(sysUser, tenantHolder, username, tenantResult);
+            if (tenantError != null) {
+                return ApiResult.fail(500, tenantError.getMessage());
+            }
         }
 
         // 7. 清理失败计数、记录登录日志
@@ -187,14 +204,16 @@ public class EduAuthController {
         vo.setName(sysUser.getRealname());
         vo.setAccount(sysUser.getUsername());
         vo.setAvatarHue(avatarHue(sysUser.getUsername()));
-        vo.setTenantId(sysUser.getLoginTenantId());
 
         Set<String> roleCodes = sysUserService.getUserRolesSet(sysUser.getUsername());
-        String uiRole = resolveUiRole(roleCodes, sysUser.getLoginTenantId());
+        // 平台侧账号恒为 0：不能把框架挑出来的「关联租户」当登录租户，否则平台端被按租户隔离
+        Integer tenantId = isPlatformAccount(roleCodes) ? 0 : sysUser.getLoginTenantId();
+        vo.setTenantId(tenantId);
+
+        String uiRole = resolveUiRole(roleCodes, tenantId);
         vo.setRole(uiRole);
         vo.setRoleName(uiRoleDisplayName(uiRole));
 
-        Integer tenantId = sysUser.getLoginTenantId();
         if (tenantId != null && tenantId > 0) {
             SysTenant tenant = sysTenantService.getById(tenantId);
             vo.setOrgName(tenant == null ? "" : tenant.getName());
@@ -203,6 +222,33 @@ public class EduAuthController {
         }
         return vo;
     }
+
+    /**
+     * 平台侧账号：持有框架 `admin` / `superadmin` 角色，跨租户可见。
+     *
+     * <p>不用 `sys_user.tenant_id` 判断 —— 框架实体 {@code SysUser} 没有映射该业务列，
+     * 而角色集合本来就要取（会话角色组装也要用），零额外查询。
+     */
+    private static boolean isPlatformAccount(Set<String> roleCodes) {
+        return roleCodes != null && (roleCodes.contains("admin") || roleCodes.contains("superadmin"));
+    }
+
+    /**
+     * 机构侧角色编码 → 前端 UI 角色。
+     *
+     * <p>教学云自建的机构角色写在 `sys_role.role_code = ORG_ROLE_n`（由 db/seed_mock.py 生成，
+     * n 与前端「员工角色」一致：1 管理员 / 2 审核员 / 3 老师 / 4 出题专员 / 5 年级学科组长）。
+     * 框架自带的 zuhuadmin / leader / auditor / teacher 仍然优先识别，便于以后直接把机构角色
+     * 迁到框架标准角色上而不改这段代码。
+     */
+    private static final String[][] ORG_ROLE_MAP = {
+            // 顺序即优先级：管理员 > 组长 > 审核员 > 老师（出题专员按老师处理）
+            {"ORG_ROLE_1", "orgAdmin"},
+            {"ORG_ROLE_5", "leader"},
+            {"ORG_ROLE_2", "auditor"},
+            {"ORG_ROLE_3", "teacher"},
+            {"ORG_ROLE_4", "teacher"},
+    };
 
     private static String resolveUiRole(Set<String> roleCodes, Integer tenantId) {
         if (roleCodes != null) {
@@ -220,6 +266,11 @@ public class EduAuthController {
             }
             if (roleCodes.contains("teacher")) {
                 return "teacher";
+            }
+            for (String[] mapping : ORG_ROLE_MAP) {
+                if (roleCodes.contains(mapping[0])) {
+                    return mapping[1];
+                }
             }
         }
         // 兜底：有租户说明是机构侧用户，无租户是平台侧

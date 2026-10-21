@@ -25,8 +25,11 @@ spring:
     clean-disabled: true
   servlet:
     multipart:
-      max-file-size: 10MB
-      max-request-size: 10MB
+      # 教学云存的是教学文件：课时视频、课件包、整本教辅动辄几十上百 MB，
+      # 框架默认 10MB 会在进入 Controller 之前就被 Tomcat 拒掉（前端只看到 413）。
+      # 这里放到 200MB，与 edu.oss.max-size-mb 保持一致；再大的文件应走分片上传。
+      max-file-size: 200MB
+      max-request-size: 210MB
   mail:
     # 定时任务发送邮件
     timeJobSend: false
@@ -144,7 +147,9 @@ spring:
           slow-sql-millis: 5000
       datasource:
         master:
-          url: jdbc:mysql://127.0.0.1:3306/jeecg-boot?characterEncoding=UTF-8&useUnicode=true&useSSL=false&tinyInt1isBit=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+          # 业务库：jiaoyu-ai（schema.sql 140 张业务表 + 框架表合并，单库接管）
+          # 原框架库 jeecg-boot 保留不动，作为回退
+          url: jdbc:mysql://127.0.0.1:3306/jiaoyu-ai?characterEncoding=UTF-8&useUnicode=true&useSSL=false&tinyInt1isBit=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
           username: root
           password: root
           driver-class-name: com.mysql.cj.jdbc.Driver
@@ -279,7 +284,9 @@ jeecg:
   #签名拦截接口
   signUrls: /sys/dict/getDictItems/*,/sys/dict/loadDict/*,/sys/dict/loadDictOrderByValue/*,/sys/dict/loadDictItem/*,/sys/dict/loadTreeData,/sys/api/queryTableDictItemsByCode,/sys/api/queryFilterTableDictInfo,/sys/api/queryTableDictByKeys,/sys/api/translateDictFromTable,/sys/api/translateDictFromTableByKeys,/sys/sendChangePwdSms,/sys/user/sendChangePhoneSms,/sys/sms,/desform/api/sendVerifyCode
   # 上传类型：local（本地存储）| minio（MinIO对象存储）| alioss（阿里云OSS）
-  uploadType: local
+  # 教学云口径：所有物理文件（头像/题目配图/课件/视频/附件/导入导出）统一落 OSS，
+  # 这里必须是 alioss；否则框架原生接口 /sys/common/upload 仍会写本地磁盘。
+  uploadType: alioss
   # 前端访问地址
   domainUrl:
     pc: http://localhost:3100
@@ -294,11 +301,13 @@ jeecg:
   # 短信发送方式 aliyun阿里云短信 tencent腾讯云短信
   smsSendType: aliyun
   #阿里云oss存储和大鱼短信秘钥配置
+  # 教学云：凭据一律走环境变量（EDU_OSS_ACCESS_KEY / EDU_OSS_SECRET_KEY），配置文件不落明文。
+  # 桶 aiden-dcc 为「私有」读写权限，直链必然 403，实际访问由 /sys/edu-file/view 签名代理提供。
   oss:
-    accessKey: ??
-    secretKey: ??
-    endpoint: oss-cn-beijing.aliyuncs.com
-    bucketName: jeecgdev
+    accessKey: ${EDU_OSS_ACCESS_KEY:}
+    secretKey: ${EDU_OSS_SECRET_KEY:}
+    endpoint: ${EDU_OSS_ENDPOINT:oss-cn-guangzhou.aliyuncs.com}
+    bucketName: ${EDU_OSS_BUCKET:aiden-dcc}
     # 短信模板
     sms-template:
       # 签名
@@ -437,3 +446,38 @@ justauth:
     type: default
     prefix: 'demo::'
     timeout: 1h
+
+####################################################################
+# 教学云对象存储（阿里云 OSS）
+#
+# 系统内所有「物理文件」都落这里：头像、题目/试卷配图、课件、音视频、
+# 教辅与资源附件、导入导出临时文件。业务表只存 storage_key，不存完整 URL ——
+# 换桶 / 换域名 / 改签名策略时不用洗库。
+#
+# 桶 aiden-dcc（华南3·广州）读写权限为「私有」，因此：
+#   · 上传返回的是后端签名代理地址 /api/sys/edu-file/view?key=..&sign=..
+#   · 浏览器不直接访问 OSS，AK/SK 也不出后端
+#
+# 凭据只从环境变量注入，禁止写进本文件（本文件会进 git）：
+#   export EDU_OSS_ACCESS_KEY=LTAI...
+#   export EDU_OSS_SECRET_KEY=...
+####################################################################
+edu:
+  oss:
+    # 总开关；置 false 则退回本地磁盘存储（无凭据时也能起服务）
+    enabled: ${EDU_OSS_ENABLED:true}
+    endpoint: ${EDU_OSS_ENDPOINT:oss-cn-guangzhou.aliyuncs.com}
+    access-key: ${EDU_OSS_ACCESS_KEY:}
+    secret-key: ${EDU_OSS_SECRET_KEY:}
+    bucket-name: ${EDU_OSS_BUCKET:aiden-dcc}
+    # 桶内业务根目录，形如 edu/avatar/2026/10/21/xxx.png
+    key-prefix: ${EDU_OSS_KEY_PREFIX:edu}
+    # 私有桶必须 true
+    private-read: true
+    # 代理地址前缀：开发态前端 Vite 把 /api 转发到 9999
+    proxy-base-url: ${EDU_OSS_PROXY_BASE:/api}
+    # 代理地址签名密钥（HMAC-SHA256）；生产务必用环境变量覆盖
+    sign-secret: ${EDU_OSS_SIGN_SECRET:jiaoyu-ai-oss-2026}
+    # 0 = 长期有效；临时分享链接另由 /sys/edu-file/sign 指定秒数
+    sign-expire-seconds: 0
+    max-size-mb: ${EDU_OSS_MAX_SIZE_MB:200}

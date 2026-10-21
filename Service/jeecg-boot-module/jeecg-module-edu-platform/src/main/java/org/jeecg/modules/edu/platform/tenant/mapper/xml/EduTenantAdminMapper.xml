@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  管理端租户域聚合查询。
+
+  说明：
+    1. sys_tenant 是框架表、edu_tenant_ext 是平台侧全局表，均未进 TENANT_TABLE，
+       查询天然是全局口径（平台端要的正是全局）。
+    2. 用 INNER JOIN edu_tenant_ext：只列「教学云机构」，把框架自带的默认租户（1000/1001，
+       无 edu_tenant_ext）挡在机构列表之外。
+    3. 到期时间用 sys_tenant.end_date；业务状态用 edu_tenant_ext.biz_status（1试用/2正式/3到期/4禁用），
+       与前端 TenantStatus 对齐。
+    4. JSON 列（stages/cert_files/switches/quotas）原样字符串返回，由服务层用 FastJSON2 解析。
+    5. 数据库方言按 MySQL 写（DATE()/CONCAT/LIMIT offset,size），换库需改写。
+-->
+<mapper namespace="org.jeecg.modules.edu.platform.tenant.mapper.EduTenantAdminMapper">
+
+    <sql id="tenantFilter">
+        <if test="status != null">
+            AND COALESCE(e.biz_status, 2) = #{status}
+        </if>
+        <if test="packageId != null">
+            AND e.package_id = #{packageId}
+        </if>
+        <if test="orgType != null and orgType != ''">
+            AND e.org_type = #{orgType}
+        </if>
+        <if test="keyword != null and keyword != ''">
+            AND (t.name LIKE CONCAT('%', #{keyword}, '%')
+                 OR COALESCE(e.tenant_code, '') LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        <if test="expireFrom != null and expireFrom != ''">
+            AND DATE(t.end_date) &gt;= #{expireFrom}
+        </if>
+        <if test="expireTo != null and expireTo != ''">
+            AND DATE(t.end_date) &lt;= #{expireTo}
+        </if>
+        <if test="aiMin != null">
+            AND COALESCE(e.ai_used, 0) &gt;= #{aiMin}
+        </if>
+        <if test="aiMax != null">
+            AND COALESCE(e.ai_used, 0) &lt;= #{aiMax}
+        </if>
+    </sql>
+
+    <sql id="tenantColumns">
+        t.id                                                AS id,
+        COALESCE(e.tenant_code, CONCAT('T', t.id))          AS code,
+        t.name                                              AS name,
+        COALESCE(e.logo_hue, 0)                             AS logoHue,
+        COALESCE(e.org_type, '')                            AS orgType,
+        COALESCE(e.stages, '[]')                            AS stages,
+        COALESCE(e.package_id, 0)                           AS packageId,
+        COALESCE(e.biz_status, 2)                           AS status,
+        t.end_date                                          AS expireTime,
+        e.trial_end_time                                    AS trialEndTime,
+        COALESCE(e.ai_used, 0)                              AS aiUsed,
+        COALESCE(e.storage_used_gb, 0)                      AS storageUsedGb,
+        t.create_time                                       AS createdAt,
+        COALESCE(e.contact, '')                             AS contact,
+        COALESCE(e.phone, '')                               AS phone,
+        COALESCE(e.city, '')                                AS city,
+        COALESCE(e.address, '')                             AS address,
+        COALESCE(e.intro, '')                               AS intro,
+        COALESCE(e.cert_files, '[]')                        AS certFiles,
+        CASE WHEN e.isolation_type = 'dedicated' THEN 2 ELSE 1 END AS isolationType,
+        COALESCE(e.storage_region, '')                      AS storageRegion,
+        e.disable_reason                                    AS disableReason,
+        COALESCE(e.switches, '{}')                          AS switches,
+        COALESCE(e.quotas, '{}')                            AS quotas
+    </sql>
+
+    <select id="countTenants" resultType="long">
+        SELECT COUNT(1)
+        FROM sys_tenant t
+        INNER JOIN edu_tenant_ext e ON e.org_tenant_id = t.id AND e.del_flag = 0
+        WHERE t.del_flag = 0
+        <include refid="tenantFilter"/>
+    </select>
+
+    <select id="listTenants" resultType="map">
+        SELECT
+        <include refid="tenantColumns"/>
+        FROM sys_tenant t
+        INNER JOIN edu_tenant_ext e ON e.org_tenant_id = t.id AND e.del_flag = 0
+        WHERE t.del_flag = 0
+        <include refid="tenantFilter"/>
+        ORDER BY t.create_time DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="getTenantById" resultType="map">
+        SELECT
+        <include refid="tenantColumns"/>
+        FROM sys_tenant t
+        INNER JOIN edu_tenant_ext e ON e.org_tenant_id = t.id AND e.del_flag = 0
+        WHERE t.del_flag = 0 AND t.id = #{id}
+    </select>
+
+    <select id="countStaffOfTenant" resultType="long">
+        SELECT COUNT(1)
+        FROM sys_user_tenant
+        WHERE tenant_id = #{tenantId} AND status = '1'
+    </select>
+
+</mapper>

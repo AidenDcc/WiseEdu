@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!--
+  入驻申请列表查询。
+
+  说明：
+    1. stages 是 text 存的 JSON 数组（如 ["小学","初中"]），学段多选用 LIKE 匹配 JSON 片段实现
+       「命中任一学段」；简单直白，避开 JSON_CONTAINS 对脏数据的强校验。
+    2. status 为 DB 整数（1待审核/2已通过/3已驳回），中文串由服务层换算。
+    3. 排序：待审核(status=1)优先，其余按提交时间倒序。
+-->
+<mapper namespace="org.jeecg.modules.edu.platform.tenant.mapper.EduTenantApplyMapper">
+
+    <sql id="applyFilter">
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+        <if test="orgType != null and orgType != ''">
+            AND org_type = #{orgType}
+        </if>
+        <if test="keyword != null and keyword != ''">
+            AND (org_name LIKE CONCAT('%', #{keyword}, '%')
+                 OR apply_no LIKE CONCAT('%', #{keyword}, '%')
+                 OR code LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        <if test="stages != null and stages.size() > 0">
+            AND (
+            <foreach collection="stages" item="s" separator=" OR ">
+                stages LIKE CONCAT('%', '"', #{s}, '"', '%')
+            </foreach>
+            )
+        </if>
+        <if test="contact != null and contact != ''">
+            AND contact LIKE CONCAT('%', #{contact}, '%')
+        </if>
+    </sql>
+
+    <select id="listApplies" resultType="map">
+        SELECT
+            id                                              AS id,
+            apply_no                                        AS applyNo,
+            code                                            AS code,
+            org_name                                        AS orgName,
+            org_type                                        AS orgType,
+            COALESCE(stages, '[]')                          AS stages,
+            contact                                         AS contact,
+            phone                                           AS phone,
+            email                                           AS email,
+            city                                            AS city,
+            address                                         AS address,
+            intro                                           AS intro,
+            COALESCE(cert_files, '[]')                      AS certFiles,
+            submitted_at                                    AS submittedAt,
+            status                                          AS status,
+            reviewed_at                                     AS reviewedAt,
+            reviewed_by                                     AS reviewedBy,
+            reject_reason                                   AS rejectReason
+        FROM edu_tenant_apply
+        WHERE del_flag = 0
+        <include refid="applyFilter"/>
+        ORDER BY CASE WHEN status = 1 THEN 0 ELSE 1 END, submitted_at DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="countApplies" resultType="long">
+        SELECT COUNT(1)
+        FROM edu_tenant_apply
+        WHERE del_flag = 0
+        <include refid="applyFilter"/>
+    </select>
+
+</mapper>

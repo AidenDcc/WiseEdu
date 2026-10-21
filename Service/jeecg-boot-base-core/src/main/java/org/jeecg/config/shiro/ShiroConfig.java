@@ -119,6 +119,10 @@ public class ShiroConfig {
         filterChainDefinitionMap.put("/sys/user/passwordChange", "anon");//用户更改密码
         filterChainDefinitionMap.put("/auth/2step-code", "anon");//登录验证码
         filterChainDefinitionMap.put("/sys/common/static/**", "anon");//图片预览 &下载文件不限制token
+        // 教学云对象存储代理读：<img>/<video> 带不了 X-Access-Token 头，鉴权靠 URL 里的
+        // HMAC 签名（OssUrlSigner），未签名/签名不符一律 403。详见 EduFileController 类注释
+        filterChainDefinitionMap.put("/sys/edu-file/view", "anon");
+        filterChainDefinitionMap.put("/sys/edu-file/download", "anon");
         filterChainDefinitionMap.put("/sys/common/pdf/**", "anon");//pdf预览
 
         //filterChainDefinitionMap.put("/sys/common/view/**", "anon");//图片预览不限制token
