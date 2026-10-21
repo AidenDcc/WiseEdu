@@ -423,7 +423,7 @@ public class OssBootUtil {
         // "Access key id should not be null or empty" —— 后者用户根本不知道要去配哪个变量
         if (oConvertUtils.isEmpty(accessKeyId) || oConvertUtils.isEmpty(accessKeySecret)) {
             throw new org.jeecg.common.exception.JeecgBootException(
-                    "对象存储未启用：请先配置阿里云 OSS 凭据（环境变量 EDU_OSS_ACCESS_KEY / EDU_OSS_SECRET_KEY，见 config/oss.env.example）");
+                    "对象存储未启用：请先配置阿里云 OSS 凭据（环境变量 EDU_OSS_ACCESS_KEY / EDU_OSS_SECRET_KEY，见 Service/oss.env.example）");
         }
         if (ossClient == null) {
             ossClient = new OSSClient(endpoint,

@@ -17,9 +17,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ├── Service/            # 后端（JeecgBoot 3.9.5），Maven 根目录
 ├── doc/                # 需求规格说明书与功能大纲
 ├── db/                 # 本地库初始化/迁移/种子脚本，入口 db/init-jiaoyu-ai.sh
-├── scripts/            # 本地开发脚本：start-dev / stop-dev、Mock 数据导出、密码哈希
-└── config/             # 配置样例（oss.env.example；真实凭据 config/oss.env 不入库）
+└── scripts/            # 本地开发脚本：start-dev / stop-dev、Mock 数据导出、密码哈希
 ```
+
+阿里云 OSS 凭据模板在 `Service/oss.env.example`（复制为 `Service/oss.env`，已忽略；`start-dev.command` 会自动加载）。根目录的 `config/` 只由 JeecgBoot 启动时生成，不入库。
 
 前端当前处于 **Demo / 原型阶段**，业务数据默认由 `@aiteach/shared` 的 Mock 引擎提供。后端为 JeecgBoot 3.9.5 基础框架，已落地「教学云业务接入 Wave 1」（登录会话、平台端概览、机构端题库分类、租户隔离建表）。
 

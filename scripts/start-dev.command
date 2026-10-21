@@ -158,6 +158,15 @@ if ! command -v pnpm >/dev/null 2>&1; then
   warn "未找到 pnpm —— 后端仍会启动，但两个前端需你手动执行 pnpm dev:admin / dev:tenant"
 fi
 
+# 4) 对象存储凭据：Service/oss.env 存在且当前 shell 未提供 AK 时自动加载。
+#    已在 ~/.zshrc 等处 export 的值优先，这里不覆盖。
+if [ -z "${EDU_OSS_ACCESS_KEY:-}" ] && [ -f "$ROOT/Service/oss.env" ]; then
+  set -a
+  . "$ROOT/Service/oss.env"
+  set +a
+  ok "已加载 OSS 凭据：Service/oss.env"
+fi
+
 ok "JAVA_HOME=$JAVA_HOME"
 
 # ===== 中间件：MySQL(3306) / Redis(6379) =====
