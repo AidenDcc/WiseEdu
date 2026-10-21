@@ -7,12 +7,12 @@
 #
 # 用法：
 #   double click            启动 后端 + 超管端 + 机构端
-#   ./start-dev.command           同上（终端运行）
-#   ./start-dev.command --build   启动前重新打包后端 jar（改了 Java 代码后用）
-#   ./start-dev.command --mock    前端保持 Mock 数据（不生成 .env.local）
-#   ./start-dev.command --admin   只起后端 + 超管端
-#   ./start-dev.command --tenant  只起后端 + 机构端
-#   ./stop-dev.command            停止全部服务
+#   ./scripts/start-dev.command           同上（终端运行）
+#   ./scripts/start-dev.command --build   启动前重新打包后端 jar（改了 Java 代码后用）
+#   ./scripts/start-dev.command --mock    前端保持 Mock 数据（不生成 .env.local）
+#   ./scripts/start-dev.command --admin   只起后端 + 超管端
+#   ./scripts/start-dev.command --tenant  只起后端 + 机构端
+#   ./scripts/stop-dev.command            停止全部服务
 #
 # 端口约定：
 #   后端     9999   超管端 5173   机构端 5174
@@ -35,7 +35,8 @@ case "${LC_ALL:-${LANG:-}}" in
   *) export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 ;;
 esac
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 本脚本位于 scripts/，仓库根是它的上一级
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
 
 # ===== 端口与产物路径 =====
@@ -213,7 +214,7 @@ start_backend() {
   fi
   if [ -z "${JAR:-}" ] || [ ! -f "$JAR" ]; then
     err "未找到后端 jar：$START_DIR/target/jeecg-system-start-*.jar"
-    err "请先执行：./start-dev.command --build"
+    err "请先执行：./scripts/start-dev.command --build"
     return 1
   fi
 
@@ -314,7 +315,7 @@ printf '  后端     http://localhost:%s  (Swagger %s/doc.html)\n' "$BACKEND_POR
 printf '  登录     admin / 123456\n'
 echo
 printf '%s日志%s  %s\n' "$C_DIM" "$C_OFF" "$LOG_DIR"
-printf '%s停止%s  ./stop-dev.command\n' "$C_DIM" "$C_OFF"
+printf '%s停止%s  ./scripts/stop-dev.command\n' "$C_DIM" "$C_OFF"
 dim "--------------------------------------------------------------"
 
 # 双击运行时会开一个终端窗口；这里停一下让用户看清结果，关窗口不影响后台服务

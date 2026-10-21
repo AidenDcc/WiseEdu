@@ -15,7 +15,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 │   └── tenant/         #   机构端，Vite + Vue 3，端口 5174
 ├── packages/shared/    # 前端共享层：@aiteach/shared
 ├── Service/            # 后端（JeecgBoot 3.9.5），Maven 根目录
-└── doc/                # 需求规格说明书与功能大纲
+├── doc/                # 需求规格说明书与功能大纲
+├── db/                 # 本地库初始化/迁移/种子脚本，入口 db/init-jiaoyu-ai.sh
+├── scripts/            # 本地开发脚本：start-dev / stop-dev、Mock 数据导出、密码哈希
+└── config/             # 配置样例（oss.env.example；真实凭据 config/oss.env 不入库）
 ```
 
 前端当前处于 **Demo / 原型阶段**，业务数据默认由 `@aiteach/shared` 的 Mock 引擎提供。后端为 JeecgBoot 3.9.5 基础框架，已落地「教学云业务接入 Wave 1」（登录会话、平台端概览、机构端题库分类、租户隔离建表）。

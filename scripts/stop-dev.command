@@ -2,7 +2,7 @@
 ###############################################################################
 # 教学云 AI —— 本地开发环境一键停止
 #
-# 用法：./stop-dev.command   （或双击运行）
+# 用法：./scripts/stop-dev.command   （或双击运行）
 #
 # 停止顺序：先停前端（vite），再停后端（java）。
 # 每个服务先按 logs/*.pid 精确停止；pid 文件缺失或进程已被替换时，
@@ -20,7 +20,8 @@ case "${LC_ALL:-${LANG:-}}" in
   *) export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 ;;
 esac
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 本脚本位于 scripts/，仓库根是它的上一级
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
 
 LOG_DIR="$ROOT/logs"

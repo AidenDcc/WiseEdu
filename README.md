@@ -119,6 +119,9 @@ Demo 阶段页面主体仍使用自有组件和 Mock 数据，以便快速演示
 │   ├── db/                          # 数据库初始化与增量脚本
 │   └── docker-compose.yml           # MySQL / Redis / pgvector 本地编排
 ├── doc/                     # 需求规格说明书与功能大纲
+├── db/                      # 本地库初始化/迁移/种子脚本（入口 init-jiaoyu-ai.sh）
+├── scripts/                 # 本地开发脚本：start-dev / stop-dev、Mock 数据导出、密码哈希
+├── config/                  # 配置样例（oss.env.example；真实凭据 config/oss.env 不入库）
 ├── package.json             # 根级脚本与 workspace 命令
 ├── pnpm-workspace.yaml      # workspace 配置
 └── README.md
@@ -170,6 +173,17 @@ pnpm dev
 pnpm dev:admin    # 仅启动超级管理端
 pnpm dev:tenant   # 仅启动机构端
 ```
+
+需要**后端 + 两个前端一键启动**（含 MySQL/Redis 探活与 fat jar 打包）时用：
+
+```bash
+./scripts/start-dev.command            # 启动（macOS 也可在 Finder 里双击）
+./scripts/start-dev.command --build    # 改了 Java 代码，启动前重新打包
+./scripts/start-dev.command --mock     # 前端保持 Mock，不连真实后端
+./scripts/stop-dev.command             # 停止全部服务
+```
+
+日志写在 `logs/`（已忽略），脚本会把后端端口固定为 9999 并置空 context-path。
 
 ### 登录账号
 
