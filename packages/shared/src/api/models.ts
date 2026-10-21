@@ -1530,6 +1530,16 @@ export interface OrgFile {
   pinned?: boolean
   /** 关联的试卷 id：建卷落文件时写入，「我的文件」据此提供「打开试卷」入口 */
   paperId?: number
+  /**
+   * 对象存储 Key（对应 r_file.storage_key）。
+   * 业务落库应存它而不是 fileUrl —— 换桶 / 换域名时不用洗库。
+   */
+  storageKey?: string
+  /**
+   * 可直接访问的地址（对应 r_file.file_url）。
+   * 私有桶下是后端签名代理地址，<img>/<video> 直接可用。
+   */
+  fileUrl?: string
 }
 
 /* ================ 讲义课件（FR-JC-005 ~ 012） ================ */

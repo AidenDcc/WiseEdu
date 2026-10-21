@@ -74,3 +74,18 @@ export async function fileToSquareDataUrl(file: File, size: number = AVATAR_SIZE
     URL.revokeObjectURL(objectUrl)
   }
 }
+
+/**
+ * 图片文件 → 正方形 File（裁切 + 缩放后仍是文件，可直接上传）。
+ *
+ * <p>为什么不让服务端裁：裁切规则（居中、取最小边、小图不放大）是展示层的决定，
+ * 换 UI 就要换规则；传到桶里的应该是「已经定稿的最终字节」，而不是把原图 + 参数存起来
+ * 每次渲染再算一遍。而且头像只有 256px，压完通常 10~30KB，上传成本可以忽略。
+ */
+export async function fileToSquareFile(file: File, size: number = AVATAR_SIZE): Promise<File> {
+  const dataUrl = await fileToSquareDataUrl(file, size)
+  const blob = await (await fetch(dataUrl)).blob()
+  const ext = blob.type === 'image/jpeg' ? 'jpg' : 'png'
+  // 用固定名而不是原名：原名里常有中文、空格、括号，进 multipart 头容易出编码问题
+  return new File([blob], `avatar.${ext}`, { type: blob.type })
+}

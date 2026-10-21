@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppAvatar, AppIcon, AppPageHeader, AppTabs, fileToSquareDataUrl, showToast, appConfirm, AppSwitch } from '@aiteach/shared'
+import { AppAvatar, AppIcon, AppPageHeader, AppTabs, fileToSquareFile, showToast, appConfirm, AppSwitch, uploadAvatar, resolveFileUrl } from '@aiteach/shared'
 import type { TabDef } from '@aiteach/shared'
 
 import { useAuthStore } from '@/stores/auth'
@@ -73,7 +73,11 @@ async function onAvatarPicked(event: Event) {
 
   avatarBusy.value = true
   try {
-    setIdentityAvatar(await fileToSquareDataUrl(file))
+    /* 裁成 256px 方形 → 上传对象存储 → 本地只留一个短地址（不再是几百 KB 的 dataURL，
+       也就不会撑爆 localStorage 配额）。演示身份的头像本来只存本地，不走后端。 */
+    const square = await fileToSquareFile(file)
+    const uploaded = await uploadAvatar(square)
+    setIdentityAvatar(resolveFileUrl(uploaded.url))
     showToast('头像已更新', 'success')
   } catch (error) {
     showToast(error instanceof Error ? error.message : '头像处理失败，请换一张', 'error')

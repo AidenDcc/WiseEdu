@@ -18,7 +18,7 @@
 import { ref } from 'vue'
 import type { Editor } from '@tiptap/vue-3'
 import { Selection } from '@tiptap/pm/state'
-import { showToast } from '@aiteach/shared'
+import { showToast, uploadFile, resolveFileUrl, resolveApiMode } from '@aiteach/shared'
 import type { DrawEditorType, OrgMedia } from '@aiteach/shared'
 import { fetchMediaDetail, uploadMedia } from '@/api/org'
 
@@ -243,6 +243,22 @@ export function useRichMediaPlumbing(options: RichMediaPlumbingOptions) {
       return
     }
     try {
+      /* 真实档位：正文里的图直接引用对象存储地址。
+         走「先落 OSS、再把地址写进正文」而不是把 dataURL 塞进节点 —— 一道题的题干里
+         三五张截图就是几百 KB 的 base64，既撑大接口响应，也会让试卷导出/打印变慢。
+         私有桶返回的是签名代理地址，<img> 可以直接用。 */
+      if (resolveApiMode('/sys/edu-file/upload') === 'remote') {
+        const uploaded = await uploadFile(file, { biz: 'image' })
+        const src = resolveFileUrl(uploaded.url)
+        instance
+          .chain()
+          .focus()
+          .setImage({ src, alt: uploaded.name || imageName, title: uploaded.name || imageName })
+          .run()
+        showToast('图片已插入', 'success')
+        return
+      }
+
       const dataUrl = await readAsDataUrl(file)
       /* 落到 Mock 媒体库：正文里只引用返回的 URL，「多媒体资源」同时多出一条 image 记录 */
       const media = await uploadMedia({

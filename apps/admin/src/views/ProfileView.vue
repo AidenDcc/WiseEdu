@@ -7,7 +7,7 @@
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { AppAvatar, AppIcon, AppPageHeader, AppTabs, fileToSquareDataUrl, setAvatarOverride, showToast, appConfirm, updateSessionUser, AppSwitch } from '@aiteach/shared'
+import { AppAvatar, AppIcon, AppPageHeader, AppTabs, fileToSquareFile, setAvatarOverride, showToast, appConfirm, updateSessionUser, AppSwitch, uploadAvatar, resolveFileUrl, resolveApiMode, request } from '@aiteach/shared'
 import type { SessionUser, TabDef } from '@aiteach/shared'
 
 import { useAuthStore } from '@/stores/auth'
@@ -87,6 +87,18 @@ function applyAvatar(dataUrl: string | null) {
   updateSessionUser(next)
 }
 
+/**
+ * 头像落库。
+ *
+ * 只有「后端已接管该接口」时才发请求：Mock 档位下没有 /admin/profile/avatar 的模拟路由，
+ * 硬发会 404，反而让换头像变成一次失败操作。真实档位下把地址写进
+ * edu_user_profile.avatar —— 存的是签名代理地址而不是 dataURL，几 KB 的 base64 不再进数据库。
+ */
+async function persistAvatar(avatar: string | null) {
+  if (resolveApiMode('/admin/profile/avatar') !== 'remote') return
+  await request('/admin/profile/avatar', { method: 'POST', data: { avatar } })
+}
+
 async function onAvatarPicked(event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
@@ -96,7 +108,13 @@ async function onAvatarPicked(event: Event) {
 
   avatarBusy.value = true
   try {
-    applyAvatar(await fileToSquareDataUrl(file))
+    /* 先裁成 256px 方形再上传：桶里只放定稿字节，不再存原图 + 裁切参数。
+       上传走对象存储（私有桶 → 返回签名代理地址），本地不再保留 dataURL。 */
+    const square = await fileToSquareFile(file)
+    const uploaded = await uploadAvatar(square)
+    const url = resolveFileUrl(uploaded.url)
+    applyAvatar(url)
+    await persistAvatar(url)
     showToast('头像已更新', 'success')
   } catch (error) {
     showToast(error instanceof Error ? error.message : '头像处理失败，请换一张', 'error')
@@ -108,6 +126,11 @@ async function onAvatarPicked(event: Event) {
 async function onAvatarReset() {
   if (!(await appConfirm('恢复默认头像？', { type: 'info' }))) return
   applyAvatar(null)
+  try {
+    await persistAvatar(null)
+  } catch {
+    /* 后端没清掉也不算失败：下次进个人中心会以后端值为准，提示交给用户自己判断 */
+  }
   showToast('已恢复默认头像', 'success')
 }
 

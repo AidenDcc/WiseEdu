@@ -25,8 +25,18 @@ export const BACKEND_READY_PATHS = [
   '/auth/logout',
   /* 平台端概览（jeecg-module-edu-platform / AdminDashboardController） */
   '/admin/dashboard/overview',
+  /* 平台端租户管理（jeecg-module-edu-platform / 套餐 + 入驻审核 + 机构管理） */
+  '/admin/tenant/applies',
+  '/admin/tenants',
+  '/admin/packages',
   /* 机构端题库分类（jeecg-module-edu-tenant / EduQuestionCategoryController） */
   '/tenant/categories',
+  /* 管理端个人中心（jeecg-system-biz / EduProfileController，P-08-01） */
+  '/admin/profile',
+  '/admin/logs/login',
+  /* 文件存储（jeecg-system-biz / EduFileController）：上传 / 签名 / 删除。
+     view 与 download 是 <img>/<video> 直接请求的，不经过这里 */
+  '/sys/edu-file',
 ] as const
 
 /** 统一成不带前导斜杠的形式再比较，调用方传 '/auth/me' 或 'auth/me' 都能命中 */

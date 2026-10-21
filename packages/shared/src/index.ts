@@ -95,8 +95,15 @@ export { enterOverlay, exitOverlay, isTopOverlay } from './utils/overlay-stack'
 export { default as AppIcon } from './components/AppIcon.vue'
 /* 头像：有自定义头像显示图片，否则回落到色相 + 首字 */
 export { default as AppAvatar } from './components/ui/AppAvatar.vue'
-/* 本地图片 → 正方形头像 data URL（居中裁切 + 缩放，纯浏览器 API） */
-export { fileToSquareDataUrl } from './utils/image'
+/* 本地图片 → 正方形头像（data URL 用于预览，File 用于上传 OSS） */
+export { fileToSquareDataUrl, fileToSquareFile } from './utils/image'
+
+/* ===== 文件上传（对象存储）=====
+   全站上传的唯一入口：uploadFile(file, { biz }) → { key, url, name, size, ... }。
+   key 用于持久化，url 用于渲染；render 前可用 resolveFileUrl 适配部署前缀。
+   Mock 模式下自动退化为 dataURL，保证离线开发时预览/提交照常工作。 */
+export { uploadFile, uploadImage, uploadAvatar, resolveFileUrl, resolveFileUrls } from './upload'
+export type { UploadedFile, UploadOptions } from './upload'
 
 /* ===== 共享 UI 组件（机构端 / 超管端通用，样式自带、只取 CSS 变量） =====
    这些原本散落在单个页面的 scoped 样式里（题库管理的 `.opt-chip` / `.filter-panel` /

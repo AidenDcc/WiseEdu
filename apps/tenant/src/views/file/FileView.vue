@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { AppIcon, AppSearchInput, AppSegmented, appConfirm, copyText, FILE_KIND_COLOR, FILE_KIND_GROUPS, FILE_KIND_ICON, FILE_KIND_TEXT, UPLOAD_KIND_TEXT, hasImage, showToast, toPlainText, AppModal } from '@aiteach/shared'
-import type { FileFolder, OrgFile } from '@aiteach/shared'
+import { AppIcon, AppSearchInput, AppSegmented, appConfirm, copyText, FILE_KIND_COLOR, FILE_KIND_GROUPS, FILE_KIND_ICON, FILE_KIND_TEXT, UPLOAD_KIND_TEXT, hasImage, showToast, toPlainText, AppModal, uploadFile, resolveFileUrl, resolveApiMode } from '@aiteach/shared'
+import type { FileFolder, OrgFile, UploadedFile } from '@aiteach/shared'
 import AppDropdownMenu from '@/components/ui/AppDropdownMenu.vue'
 import RichTextEditor from '@/components/ui/RichTextEditor.vue'
 import {
@@ -806,13 +806,28 @@ async function submitUpload() {
   if (!uploadPending.value.length) return
   const pending = [...uploadPending.value]
   try {
+    /* 先把字节真正落到对象存储。
+       改造前文件只活在浏览器内存里（registerFileContent），刷新即失、换台机器就没了；
+       现在真实档位下先传 OSS，拿到 key/地址后再回填文件记录 —— 物理文件有了持久归宿。
+       Mock 档位跳过这一步（没有后端可传），保持离线可用。 */
+    let stored: UploadedFile[] = []
+    if (resolveApiMode('/sys/edu-file/upload') === 'remote') {
+      stored = await Promise.all(pending.map((file) => uploadFile(file, { biz: 'file' })))
+    }
+
     const uploaded = await uploadFiles(
       pending.map((file) => file.name),
       uploadTarget.value,
       pending.map((file) => file.size / 1048576),
     )
     /* 实体文件按返回顺序绑定，后续「识别入库」有真实内容可走 AI 引擎 */
-    uploaded.forEach((row, i) => registerFileContent(row.id, pending[i]))
+    uploaded.forEach((row, i) => {
+      if (stored[i]) {
+        row.storageKey = stored[i].key
+        row.fileUrl = resolveFileUrl(stored[i].url)
+      }
+      registerFileContent(row.id, pending[i])
+    })
     uploadOpen.value = false
     uploadPending.value = []
     showToast(`上传完成（${uploaded.length} 个文件）`, 'success')
